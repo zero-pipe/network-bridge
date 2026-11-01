@@ -101,6 +101,23 @@ install(TARGETS nb_log
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+# Standalone discovery library: depends on ntk only.
+add_library(ntk_discovery STATIC ntk_discovery/ntk_discovery.c)
+add_library(nb::ntk_discovery ALIAS ntk_discovery)
+target_include_directories(ntk_discovery
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_link_libraries(ntk_discovery PUBLIC ntk)
+set_target_properties(ntk_discovery PROPERTIES
+    C_STANDARD 99
+    C_STANDARD_REQUIRED ON
+    OUTPUT_NAME ntk_discovery)
+install(TARGETS ntk_discovery
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
 set(NB_RTPS_CORE_SOURCES
     rtps/rtps_types.c
     rtps/rtps_cdr.c
@@ -199,7 +216,7 @@ install(TARGETS nb
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # elog 只是 log.c 的实现细节：静态库最终仍需链接，但不向使用者传播头文件路径�?
-target_link_libraries(nb PUBLIC ntk nb_base microcdr rtps PRIVATE nb_log)
+target_link_libraries(nb PUBLIC ntk nb_base microcdr rtps PRIVATE nb_log ntk_discovery)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # shm_open()/sem_timedwait() live in librt on older glibc.

@@ -1,6 +1,10 @@
-/* mesh 服务发现：UDP 广播 HELLO/BYE + 对端注册表。
+/* mesh 服务发现：nb 适配层。
  *
- * 只通过 nb_node_access.h 的门面访问 node 状态，不穿透 struct nb_node。 */
+ * 协议、分帧、CRC、序号/epoch、哈希表都在 ntk_discovery 库里；这里只做三件事：
+ *   1. 把本地服务映射成 key（服务名），把 binding 映射成 peer 端点；
+ *   2. 把库的对端/键回调写进 node registry；
+ *   3. 实现 registry backend 的 start/stop/tick/announce。
+ */
 #include "discovery.h"
 
 #include <nb/node.h>
@@ -9,430 +13,254 @@
 #include "registry_backend.h"
 #include "util.h"
 
+#define NB_LOG_TAG "discovery"
+#include <nb/log.h>
+
 #include <stdio.h>
 #include <string.h>
 
-#define NB_DISCOVERY_MAGIC 0x4e424453u /* 'NBDS' */
-#define NB_DISCOVERY_VERSION 4u
-#define NB_DISCOVERY_FLAG_HELLO 0x01u
-#define NB_DISCOVERY_FLAG_BYE 0x02u
-#define NB_DISCOVERY_FRAME_MAX_BYTES 1400u
-
-/* 构建 HELLO/BYE 帧。返回长度，0 失败。 */
-static size_t nb_disc_build(nb_node_t *node, int bye, uint8_t *buf, size_t cap)
+/* 实例的前 4 字节承载 nb 的 32 位 node id；其余字节保持 0。同一 node id 的
+ * 进程重启会被库用 epoch 识别为新一次启动，不会产生重复对端。 */
+static uint32_t disc_instance_node_id(const uint8_t instance[NTK_DISC_INSTANCE_SIZE])
 {
-    size_t n = 0;
-    size_t svc_count = nb_node_service_count(node);
-    const char *name = nb_node_name(node);
-    size_t name_len = name ? strlen(name) : 0;
-    size_t binding_count = nb_node_binding_count(node);
+    return (uint32_t)instance[0] | ((uint32_t)instance[1] << 8) |
+           ((uint32_t)instance[2] << 16) | ((uint32_t)instance[3] << 24);
+}
+
+static void disc_instance_from_node(uint32_t node_id,
+                                    uint8_t instance[NTK_DISC_INSTANCE_SIZE])
+{
+    memset(instance, 0, NTK_DISC_INSTANCE_SIZE);
+    instance[0] = (uint8_t)(node_id & 0xffu);
+    instance[1] = (uint8_t)((node_id >> 8) & 0xffu);
+    instance[2] = (uint8_t)((node_id >> 16) & 0xffu);
+    instance[3] = (uint8_t)((node_id >> 24) & 0xffu);
+}
+
+/* Local bindings -> endpoints carried in every HELLO. */
+static size_t disc_local_endpoints(nb_node_t *node,
+                                   ntk_disc_endpoint_t *out,
+                                   size_t max)
+{
+    size_t count = 0;
+    size_t bindings = nb_node_binding_count(node);
     size_t i;
 
-    if (name_len > 255) {
-        name_len = 255;
-    }
-    if (svc_count > 0xffffu) {
-        svc_count = 0xffffu;
-    }
-    if (binding_count > 255u) {
-        binding_count = 255u;
-    }
-    if (cap < 12 + name_len + 1 + 2) {
-        return 0;
-    }
-    nb_put_u32(buf + n, NB_DISCOVERY_MAGIC);
-    n += 4;
-    buf[n++] = NB_DISCOVERY_VERSION;
-    buf[n++] = (uint8_t)(bye ? NB_DISCOVERY_FLAG_BYE : NB_DISCOVERY_FLAG_HELLO);
-    nb_put_u32(buf + n, nb_node_id(node));
-    n += 4;
-    buf[n++] = (uint8_t)name_len;
-    if (name_len) {
-        memcpy(buf + n, name, name_len);
-        n += name_len;
-    }
-    {
-        char uris[NB_MAX_BINDINGS][NB_ENDPOINT_URI_MAX];
-        uint8_t valid_count = 0;
-        uint8_t valid[NB_MAX_BINDINGS];
-
-        if (binding_count > NB_MAX_BINDINGS) {
-            binding_count = NB_MAX_BINDINGS;
-        }
-        memset(valid, 0, sizeof(valid));
-        for (i = 0; i < binding_count; i++) {
-            if (nb_node_binding_uri(node, i, uris[i], sizeof(uris[i])) == NB_OK &&
-                uris[i][0]) {
-                valid[i] = 1;
-                valid_count++;
-            }
-        }
-        buf[n++] = valid_count;
-        for (i = 0; i < binding_count; i++) {
-            size_t len;
-            if (!valid[i]) {
-                continue;
-            }
-            len = strlen(uris[i]);
-            if (len == 0 || len > 0xffffu || n + 2 + len > cap) {
-                return 0;
-            }
-            nb_put_u16(buf + n, (uint16_t)len);
-            n += 2;
-            memcpy(buf + n, uris[i], len);
-            n += len;
-        }
-    }
-    nb_put_u16(buf + n, (uint16_t)svc_count);
-    n += 2;
-
-    for (i = 0; i < svc_count; i++) {
-        const char *svc_name = nb_node_service_name(node, i);
-        size_t sl = svc_name ? strlen(svc_name) : 0;
-        if (sl > 255) {
-            sl = 255;
-        }
-        if (n + 1 + sl > cap) {
-            break;
-        }
-        buf[n++] = (uint8_t)sl;
-        memcpy(buf + n, svc_name, sl);
-        n += sl;
-    }
-    return n;
-}
-
-static void nb_disc_send_to(
-    nb_node_t *node, const char *ip, uint16_t port, const uint8_t *buf, size_t len)
-{
-    nb_discovery_state_t *st = nb_node_discovery(node);
-    if (st && st->sock && ip && port) {
-        (void)ntk_socket_sendto(st->sock, buf, len, ip, port);
-    }
-}
-
-void nb_discovery_send_hello(nb_node_t *node, int bye)
-{
-    uint8_t buf[NB_DISCOVERY_FRAME_MAX_BYTES];
-    nb_disc_target_t targets[NB_DISCOVERY_MAX_TARGETS];
-    nb_discovery_state_t *st;
-    const char *host;
-    size_t n;
-    size_t target_count = 0;
-    int i;
-
-    if (!node) {
-        return;
-    }
-    st = nb_node_discovery(node);
-    if (!st || !st->sock) {
-        return;
-    }
-    n = nb_disc_build(node, bye, buf, sizeof(buf));
-    if (n == 0) {
-        return;
-    }
-    host = nb_node_discovery_host(node);
-    nb_disc_send_to(
-        node, host && host[0] ? host : "255.255.255.255", nb_node_discovery_port(node), buf, n);
-    if (st->targets_lock) {
-        ntk_mutex_lock(st->targets_lock);
-        for (i = 0; i < NB_DISCOVERY_MAX_TARGETS; i++) {
-            if (st->targets[i].used) {
-                targets[target_count++] = st->targets[i];
-            }
-        }
-        ntk_mutex_unlock(st->targets_lock);
-    }
-    for (i = 0; i < (int)target_count; i++) {
-        nb_disc_send_to(node, targets[i].ip, targets[i].port, buf, n);
-    }
-}
-
-static void nb_peer_store(nb_node_t *node,
-                       const char *ip,
-                       uint32_t node_id,
-                       const char *remote_name,
-                       const uint8_t *binding_blob,
-                       size_t binding_len,
-                       const uint8_t *svc_blob,
-                       int svc_count,
-                       size_t svc_len,
-                       uint64_t now_ms)
-{
-    nb_discovery_state_t *st = nb_node_discovery(node);
-    nb_peer_t *p = NULL;
-    int i;
-    size_t off = 0;
-    size_t binding_off = 0;
-
-    if (!st) {
-        return;
-    }
-    for (i = 0; i < NB_DISCOVERY_MAX_PEERS; i++) {
-        if (st->peers[i].used && st->peers[i].node_id == node_id) {
-            p = &st->peers[i];
-            break;
-        }
-    }
-    if (!p) {
-        for (i = 0; i < NB_DISCOVERY_MAX_PEERS; i++) {
-            if (!st->peers[i].used) {
-                p = &st->peers[i];
-                memset(p, 0, sizeof(*p));
-                p->used = 1;
-                break;
-            }
-        }
-    }
-    if (!p) {
-        return;
-    }
-    p->node_id = node_id;
-    p->last_seen_ms = now_ms;
-    snprintf(p->ip_s, sizeof(p->ip_s), "%s", ip);
-
-    p->endpoint_count = 0;
-    while (binding_off + 2 <= binding_len && p->endpoint_count < NB_MAX_BINDINGS) {
+    for (i = 0; i < bindings && count < max; i++) {
         char uri[NB_ENDPOINT_URI_MAX];
-        uint16_t ul = nb_get_u16(binding_blob + binding_off);
+
+        if (nb_node_binding_uri(node, i, uri, sizeof(uri)) == NB_OK && uri[0]) {
+            memset(&out[count], 0, sizeof(out[count]));
+            out[count].kind = 0;
+            nb_copy_str(out[count].uri, sizeof(out[count].uri), uri, "");
+            count++;
+        }
+    }
+    return count;
+}
+
+/* Publish the current local state (services as keys, bindings as endpoints). */
+static void disc_sync_local(nb_node_t *node)
+{
+    nb_discovery_state_t *st = nb_node_discovery(node);
+    ntk_disc_endpoint_t eps[NTK_DISC_MAX_ENDPOINTS];
+    size_t ep_count;
+    size_t services;
+    size_t i;
+
+    if (!st || !st->disc) {
+        return;
+    }
+    (void)ntk_discovery_clear_keys(st->disc);
+    ep_count = disc_local_endpoints(node, eps, NTK_DISC_MAX_ENDPOINTS);
+    (void)ntk_discovery_set_endpoints(st->disc, eps, ep_count);
+    services = nb_node_service_count(node);
+    for (i = 0; i < services; i++) {
+        const char *name = nb_node_service_name(node, i);
+
+        if (name && name[0]) {
+            /* The RPC adapter uses the service name as the key and keeps the
+             * endpoints on the peer; the value stays empty. */
+            (void)ntk_discovery_advertise(st->disc, name, NULL, 0, 0);
+        }
+    }
+}
+
+static void disc_registry_replace(nb_node_t *node,
+                                  uint32_t node_id,
+                                  const char *instance_name,
+                                  const ntk_disc_peer_info_t *peer,
+                                  const ntk_disc_key_info_t *keys,
+                                  size_t key_count)
+{
+    const char *services[NB_DISCOVERY_MAX_SERVICES_PER_PEER];
+    nb_endpoint_t endpoints[NB_MAX_BINDINGS];
+    size_t endpoint_count = 0;
+    size_t i;
+
+    for (i = 0; i < key_count; i++) {
+        services[i] = keys[i].key;
+    }
+    for (i = 0; i < peer->endpoint_count && endpoint_count < NB_MAX_BINDINGS; i++) {
         nb_endpoint_t parsed;
 
-        binding_off += 2;
-        if (ul == 0 || binding_off + ul > binding_len || ul >= sizeof(uri)) {
-            break;
-        }
-        memcpy(uri, binding_blob + binding_off, ul);
-        uri[ul] = '\0';
-        binding_off += ul;
-        if (nb_endpoint_parse(uri, &parsed) != NB_OK) {
+        if (nb_endpoint_parse(peer->endpoints[i].uri, &parsed) != NB_OK) {
             continue;
         }
         if (nb_endpoint_is_network(&parsed)) {
-            /* Binding host is usually 0.0.0.0; the discovery source is authoritative. */
-            nb_copy_str(parsed.host, sizeof(parsed.host), ip, "0.0.0.0");
+            /* The binding host is usually 0.0.0.0 or a local address; the
+             * datagram source is authoritative for a remote node. */
+            nb_copy_str(parsed.host, sizeof(parsed.host), peer->host, "0.0.0.0");
             (void)nb_endpoint_refresh(&parsed);
         }
-        p->endpoints[p->endpoint_count++] = parsed;
+        endpoints[endpoint_count++] = parsed;
     }
-
-    p->service_count = 0;
-    while (off < svc_len && p->service_count < NB_DISCOVERY_MAX_SERVICES_PER_PEER) {
-        uint8_t sl = svc_blob[off];
-        off++;
-        if (off + sl > svc_len) {
-            break;
-        }
-        if (sl > 0 && sl < NB_SERVICE_NAME_MAX) {
-            memcpy(p->services[p->service_count], svc_blob + off, sl);
-            p->services[p->service_count][sl] = '\0';
-            p->service_count++;
-        }
-        off += sl;
+    if (endpoint_count == 0) {
+        nb_log_debug("mesh: peer %08x has no usable endpoint", (unsigned)node_id);
+        return;
     }
-    {
-        char instance_id[NB_NAME_MAX];
-        int n = snprintf(instance_id,
-                         sizeof(instance_id),
-                         "%s-%08x",
-                         remote_name && remote_name[0] ? remote_name : "node",
-                         (unsigned)node_id);
-        if (n > 0 && (size_t)n < sizeof(instance_id) && p->endpoint_count > 0) {
-            const char *services[NB_DISCOVERY_MAX_SERVICES_PER_PEER];
-            for (i = 0; i < p->service_count; i++) {
-                services[i] = p->services[i];
-            }
-            (void)nb_registry_replace_node(nb_node_registry(node),
-                                            node_id,
-                                            instance_id,
-                                            services,
-                                            (size_t)p->service_count,
-                                            p->endpoints,
-                                            p->endpoint_count,
-                                            now_ms);
-        }
-    }
-    (void)svc_count;
+    nb_log_debug("mesh: peer %08x %s services=%zu endpoints=%zu",
+                (unsigned)node_id,
+                instance_name,
+                key_count,
+                endpoint_count);
+    (void)nb_registry_replace_node(nb_node_registry(node),
+                                   node_id,
+                                   instance_name,
+                                   services,
+                                   key_count,
+                                   endpoints,
+                                   endpoint_count,
+                                   nb_now_ms());
 }
 
-static void nb_disc_handle_frame(nb_node_t *node, const char *ip, const uint8_t *buf, size_t len)
+static void disc_on_peer(void *user, const ntk_disc_peer_info_t *peer, int removed)
 {
-    nb_discovery_state_t *st = nb_node_discovery(node);
-    uint32_t magic;
+    nb_node_t *node = (nb_node_t *)user;
+    nb_discovery_state_t *st;
+    ntk_disc_key_info_t keys[NB_DISCOVERY_MAX_SERVICES_PER_PEER];
     uint32_t node_id;
-    uint8_t flags;
-    size_t off;
-    uint8_t name_len;
-    char remote_name[NB_NAME_MAX];
-    uint16_t svc_count;
-    size_t svc_len;
-    size_t binding_len;
-    size_t binding_start;
-    uint64_t now = nb_now_ms();
-    int i;
+    char instance_name[NB_NAME_MAX];
+    size_t key_count;
+    int n;
 
-    if (!st || len < 13) {
+    if (!node || !peer) {
         return;
     }
-    magic = nb_get_u32(buf);
-    if (magic != NB_DISCOVERY_MAGIC || buf[4] != NB_DISCOVERY_VERSION) {
-        return;
-    }
-    flags = buf[5];
-    node_id = nb_get_u32(buf + 6);
-    if (node_id == nb_node_id(node)) {
-        return; /* 自己 */
-    }
-    off = 10;
-    name_len = buf[off++];
-    if (off + name_len + 2 > len) {
-        return;
-    }
-    if (name_len >= sizeof(remote_name)) {
-        return;
-    }
-    memcpy(remote_name, buf + off, name_len);
-    remote_name[name_len] = '\0';
-    off += name_len;
-    if (off >= len) {
-        return;
-    }
-    {
-        uint8_t binding_count = buf[off++];
-        binding_start = off;
-        for (i = 0; i < binding_count; i++) {
-            uint16_t ul;
-            if (off + 2 > len) {
-                return;
-            }
-            ul = nb_get_u16(buf + off);
-            off += 2;
-            if (ul == 0 || off + ul > len) {
-                return;
-            }
-            off += ul;
-        }
-        binding_len = off - binding_start;
-    }
-    if (off + 2 > len) {
-        return;
-    }
-    svc_count = nb_get_u16(buf + off);
-    off += 2;
-    svc_len = len - off;
-
-    if (flags & NB_DISCOVERY_FLAG_BYE) {
-        for (i = 0; i < NB_DISCOVERY_MAX_PEERS; i++) {
-            if (st->peers[i].used && st->peers[i].node_id == node_id) {
-                st->peers[i].used = 0;
-                break;
-            }
-        }
+    st = nb_node_discovery(node);
+    node_id = disc_instance_node_id(peer->instance);
+    if (removed) {
+        nb_log_debug("mesh: peer %08x removed", (unsigned)node_id);
         nb_registry_remove_node(nb_node_registry(node), node_id);
         return;
     }
-    if (flags & NB_DISCOVERY_FLAG_HELLO) {
-        nb_peer_store(node,
-                   ip,
-                   node_id,
-                   remote_name,
-                   buf + binding_start,
-                   binding_len,
-                   buf + off,
-                   svc_count,
-                   svc_len,
-                   now);
-    }
-}
-
-static void nb_disc_recv_cb(ntk_socket *sock, void *user)
-{
-    nb_node_t *node = (nb_node_t *)user;
-    nb_discovery_state_t *st = nb_node_discovery(node);
-    uint8_t buf[NB_DISCOVERY_FRAME_MAX_BYTES];
-    (void)sock;
-    if (!st || !st->sock) {
+    key_count = st && st->disc
+                    ? ntk_discovery_peer_keys(st->disc, peer->instance, keys,
+                                              NB_DISCOVERY_MAX_SERVICES_PER_PEER)
+                    : 0;
+    n = snprintf(instance_name,
+                 sizeof(instance_name),
+                 "%s-%08x",
+                 peer->name[0] ? peer->name : "node",
+                 (unsigned)node_id);
+    if (n <= 0 || (size_t)n >= sizeof(instance_name)) {
         return;
     }
-    for (;;) {
-        char ip[NB_HOST_MAX];
-        uint16_t port = 0;
-        ntk_ssize_t n = ntk_socket_recvfrom(st->sock, buf, sizeof(buf), ip, sizeof(ip), &port);
-        if (n <= 0) {
-            break;
-        }
-        nb_disc_handle_frame(node, ip, buf, (size_t)n);
-    }
+    disc_registry_replace(node, node_id, instance_name, peer, keys, key_count);
 }
 
 int nb_discovery_init(nb_node_t *node)
 {
     nb_discovery_state_t *st = nb_node_discovery(node);
-    ntk_socket_callbacks_t cbs;
-    uint16_t actual = 0;
-#if defined(_WIN32)
-    const int reuse_port = 0;
-#else
-    const int reuse_port = 1;
-#endif
+    ntk_discovery_config_t config;
+    uint8_t instance[NTK_DISC_INSTANCE_SIZE];
+    uint16_t port;
 
     if (!st) {
         return NB_ERR_INVALID;
     }
-    st->sock = ntk_socket_create();
-    if (!st->sock) {
-        return NB_ERR_NOMEM;
+    memset(&config, 0, sizeof(config));
+    ntk_discovery_config_init(&config);
+    config.bind_host = "0.0.0.0";
+    config.port = nb_node_discovery_port(node);
+    config.broadcast = nb_node_discovery_host(node);
+    if (!config.broadcast || !config.broadcast[0]) {
+        config.broadcast = "255.255.255.255";
     }
-    if (ntk_socket_bind_udp_ex(st->sock, "0.0.0.0", nb_node_discovery_port(node), 1, reuse_port) !=
-        NTK_OK) {
+    config.ttl_ms = nb_node_ttl_ms(node);
+    config.max_peers = 256;
+    config.max_keys = 4096;
+    config.callbacks.on_peer = disc_on_peer;
+    config.user = node;
+
+    st->disc = ntk_discovery_create(nb_node_poller(node), &config);
+    if (!st->disc) {
         return NB_ERR_IO;
     }
-    (void)ntk_socket_set_broadcast(st->sock, 1);
-    if (ntk_socket_get_local(st->sock, NULL, 0, &actual) == NTK_OK) {
-        nb_node_set_discovery_port(node, actual);
+    disc_instance_from_node(nb_node_id(node), instance);
+    (void)ntk_discovery_set_identity(st->disc, instance, nb_node_name(node));
+    port = ntk_discovery_port(st->disc);
+    if (port != 0) {
+        nb_node_set_discovery_port(node, port);
     }
-    memset(&cbs, 0, sizeof(cbs));
-    cbs.on_readable = nb_disc_recv_cb;
-    if (ntk_socket_attach_poller(st->sock, nb_node_poller(node), &cbs, node) != NTK_OK) {
-        return NB_ERR_IO;
-    }
+    disc_sync_local(node);
+    nb_log_debug("mesh: init port=%u name=%s bindings=%zu",
+                (unsigned)port,
+                nb_node_name(node),
+                nb_node_binding_count(node));
     return NB_OK;
 }
 
 void nb_discovery_shutdown(nb_node_t *node)
 {
     nb_discovery_state_t *st = nb_node_discovery(node);
-    if (st && st->sock) {
-        ntk_socket_detach_poller(st->sock);
-        ntk_socket_destroy(st->sock);
-        st->sock = NULL;
+    if (st && st->disc) {
+        ntk_discovery_destroy(st->disc);
+        st->disc = NULL;
     }
 }
 
-void nb_discovery_on_readable(nb_node_t *node)
+void nb_discovery_send_hello(nb_node_t *node, int bye)
 {
     nb_discovery_state_t *st = nb_node_discovery(node);
-    if (st && st->sock) {
-        nb_disc_recv_cb(st->sock, node);
+    int i;
+
+    if (!st || !st->disc) {
+        return;
     }
+    if (st->targets_lock) {
+        ntk_mutex_lock(st->targets_lock);
+        for (i = 0; i < (int)NB_DISCOVERY_MAX_TARGETS; i++) {
+            if (st->targets[i].used) {
+                (void)ntk_discovery_add_peer(st->disc,
+                                             st->targets[i].ip,
+                                             st->targets[i].port);
+            }
+        }
+        ntk_mutex_unlock(st->targets_lock);
+    }
+    if (bye) {
+        nb_log_debug("mesh: bye");
+        (void)ntk_discovery_bye(st->disc);
+        return;
+    }
+    disc_sync_local(node);
+    nb_log_debug("mesh: announce port=%u", (unsigned)ntk_discovery_port(st->disc));
+    (void)ntk_discovery_announce(st->disc);
 }
 
 void nb_discovery_tick(nb_node_t *node, uint64_t now_ms)
 {
     nb_discovery_state_t *st = nb_node_discovery(node);
-    uint32_t ttl;
-    int i;
-    if (!st) {
-        return;
+
+    /* The node tick passes a monotonic clock; the library timestamps peers
+     * with the wall clock, so translate here and keep the registry on the
+     * node's monotonic clock. */
+    (void)now_ms;
+    if (st && st->disc) {
+        ntk_discovery_tick(st->disc, ntk_wall_ms());
     }
-    ttl = nb_node_ttl_ms(node);
-    for (i = 0; i < NB_DISCOVERY_MAX_PEERS; i++) {
-        nb_peer_t *p = &st->peers[i];
-        if (p->used && now_ms - p->last_seen_ms > ttl) {
-            p->used = 0;
-        }
-    }
-    nb_registry_expire(nb_node_registry(node), now_ms, ttl);
+    nb_registry_expire(nb_node_registry(node), nb_now_ms(), nb_node_ttl_ms(node));
 }
 
 int nb_discovery_find(nb_node_t *node,

@@ -6,6 +6,8 @@
 - [Architecture overview](architecture-overview.html): single-page Chinese
   overview - ntk runtime, discovery, UDP/TCP/SHM, RTPS and the third-party
   dependencies, with the layer and data-path diagrams.
+- [Discovery review](discovery-review.md): the broadcast key/value discovery
+  design, its review findings and the standalone `ntk_discovery` library.
 - [RTPS protocol handbook](rtps-protocol.html): plain-language walkthrough of
   the wire format, SPDP/SEDP flows, QoS matching and reliable transfer
   (single-file HTML, opens in a browser).

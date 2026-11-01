@@ -86,6 +86,10 @@ nb_add_test(test_rtps_participant e2e.rtps_participant
     INCLUDES ${NB_SRC_DIR}/rtps/internal
     TIMEOUT 60)
 
+nb_add_test(test_ntk_discovery unit.ntk_discovery
+    LABELS "unit;discovery"
+    LIBRARIES ntk_discovery)
+
 # Contract: the rtps transport provider may only use the public rtps_* API.
 add_test(NAME contract.rtps_provider_api
     COMMAND ${CMAKE_COMMAND}

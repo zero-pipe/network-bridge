@@ -55,7 +55,7 @@
 <div class="stack">
   <div class="layer l-app"><span class="tag">应用</span><span class="desc">node / service / proxy / stub / stream / publish</span></div>
   <div class="layer l-rpc"><span class="tag">RPC 与消息核心</span><span class="desc">dispatch、pending、dedup、reply、router、registry、waitset、envelope v2</span></div>
-  <div class="layer l-disc"><span class="tag">服务发现</span><span class="desc">UDP 广播 HELLO/BYE（key + value）+ 周期心跳 + 对端注册表</span></div>
+  <div class="layer l-disc"><span class="tag">服务发现</span><span class="desc">独立库 ntk_discovery：UDP 广播 HELLO/BYE（不透明 key + value）+ 周期心跳 + 对端注册表</span></div>
   <div class="layer l-xport"><span class="tag">框架传输</span><span class="desc">UDP（分片/乱序窗口/NACK/RTX/AIMD/可选 FEC）、TCP（长度前缀）、SHM（零拷贝）、Cyclone DDS 适配</span></div>
   <div class="layer l-rtps"><span class="tag">RTPS / DDS</span><span class="desc">独立协议栈：SPDP/SEDP、可靠传输、分片、QoS；公共 <code>rtps_*</code> 接口；可做框架的 <code>rtps://</code> 传输</span></div>
   <div class="layer l-ntk"><span class="tag">ntk 运行时</span><span class="desc">跨平台 poller + 线程、定时器、同步原语、MPSC 队列、线程池、poller 负载</span></div>

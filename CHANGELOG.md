@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A standalone discovery library, `libntk_discovery`, that depends only on ntk.
+  It exchanges opaque key/value pairs over UDP broadcast on one hop; the RPC
+  framework uses service names as keys and peer endpoints as the value's
+  companion data. Wire format v5 adds a CRC32, a per-process instance id, an
+  epoch and a sequence number, so stale, reordered and post-restart frames are
+  ignored; large announcements are split into frames and reassembled. Peers and
+  keys live in open-addressing hash tables sized from configuration, replacing
+  the fixed `peers[64]` arrays and the duplicate registry copy.
+- `tests/test_ntk_discovery.c` exercises the library without the framework:
+  discovery, value update, withdraw, a 40-key announcement that needs
+  fragmentation, and BYE removal.
 - A public `rtps_*` interface layer over the RTPS engine, so the wire code and
   the API can evolve independently. `include/rtps/` defines opaque
   participant/topic/writer/reader/waitset handles, plain-data GUID/locator/
