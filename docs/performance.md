@@ -76,6 +76,63 @@ Thirty-second soak (inline, pinned, 1 KB, default `TICK_INTERVAL_MS=2`):
 | round 2 | 22,438 | 44.4us | 100us | 7.78ms | 37 / 673,130 (0.0055%) |
 | `TICK_INTERVAL_MS=20` | 22,727 | 43.8us | 98us | 3.62ms | 22 / 681,814 (0.0032%) |
 
+## Transport comparison (1 KB, one call in flight)
+
+Round-robin comparison of all transports against gRPC, using the same shape:
+1 KB request and response, one synchronous call in flight, Debug build,
+unpinned, five-second rounds. Loopback: `tools/gate.py perf`; cross-host:
+`bench_server` on 192.168.54.13 and `loadgen` on 192.168.54.14 over the same
+1 GbE subnet. The gRPC baseline is the C++ sync unary API from libgrpc++ 1.16.1
+(the distribution package), one channel and one outstanding call.
+
+Loopback (server `--io-threads 6 --handler-threads 2 --worker`):
+
+| Transport | QPS | mean | p50 | p99 |
+| --- | --- | --- | --- | --- |
+| TCP | 12,491 | 79.9us | 68us | 298us |
+| UDP | 8,438 | 118.3us | 98us | 589us |
+| Cyclone DDS | 6,050 | 165.0us | 138us | 673us |
+| RTPS | 5,360 | 186.3us | 163us | 661us |
+| gRPC 1.16.1 | 10,740 | 91.0us | 72us | 314us |
+
+Cross-host (client 192.168.54.14 -> server 192.168.54.13):
+
+| Transport | QPS | mean | min / max |
+| --- | --- | --- | --- |
+| TCP | 2,673 | 374us | 185us / 3.9ms |
+| UDP | 2,662 | 375us | 241us / 4.2ms |
+| Cyclone DDS | 1,829 | 546us | 278us / 6.6ms |
+| RTPS | 1,381 | 723us | 290us / 6.7ms |
+| gRPC 1.16.1 | 2,630 | 377us | 246us / 5.2ms (p50 339us, p99 768us) |
+
+The UDP NACK/FEC path was exercised without induced loss; no retransmissions
+were recorded. RTPS and DDS pay for their discovery/keepalive machinery and for
+carrying request and response on separate topics/instances, which is expected
+at one-call-in-flight rate; on loopback our RTPS stays within ~13% of Cyclone
+DDS and ~2x of TCP. These numbers come from shared virtual machines and are
+meant for relative comparison, not as absolute hardware limits.
+
+Reproduce the RTPS row:
+
+```bash
+python3 tools/gate.py perf --transports rtps --payload-bytes 1024 --perf-duration 5
+```
+
+Cross-host, with explicit unicast SPDP peers (no multicast required):
+
+```bash
+# server (192.168.54.13)
+NB_RTPS_ADVERTISE_HOST=192.168.54.13 build/tools/bench_server \
+  --rtps 'rtps://7:47130/192.168.54.14:47131' --mode static \
+  --io-threads 6 --handler-threads 2 --worker --response-bytes 1024
+# client (192.168.54.14)
+NB_RTPS_ADVERTISE_HOST=192.168.54.14 build/tools/loadgen \
+  --rtps 'rtps://7:47131/192.168.54.13:47130' --rtps-target 'rtps://7:0' \
+  --mode static --service OrderService --method get --duration-seconds 5 \
+  --payload-bytes 1024 --expect-response-bytes 1024 --window 1 \
+  --output result.json
+```
+
 ## Spike attribution experiments
 
 | Experiment | Result | Interpretation |

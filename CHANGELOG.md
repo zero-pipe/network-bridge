@@ -93,6 +93,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The quality gate now covers RTPS as a first-class transport:
+  `tools/gate.py` accepts `--transports rtps` for e2e/perf/stability,
+  `bench_server --rtps <binding-uri>` and
+  `loadgen --rtps <binding-uri> [--rtps-target <uri>]` use explicit unicast
+  SPDP peers so no multicast is required. The proxy target reuses the RTPS
+  binding authority (the domain id) because custom transports are matched by
+  their bind host.
 - The client stub is now an internal call engine instead of a second public
   client API. `<nb/stub.h>` was removed (use `<nb/proxy.h>`); the request
   descriptor and the proxy-facing call entries moved to

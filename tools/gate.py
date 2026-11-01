@@ -12,7 +12,7 @@ Gate taxonomy (also used as CTest labels):
 Examples:
 
   python3 tools/gate.py unit
-  python3 tools/gate.py e2e --transports tcp,udp,dds
+  python3 tools/gate.py e2e --transports tcp,udp,dds,rtps
   python3 tools/gate.py perf --duration 10
   python3 tools/gate.py stability --stability-duration 60
   python3 tools/gate.py all --no-build
@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BUILD_DIR = ROOT / "build"
 ARTIFACT_ROOT = ROOT / "artifacts" / "gate"
 IS_WINDOWS = os.name == "nt"
-ALL_TRANSPORTS = ("tcp", "udp", "dds", "shm")
+ALL_TRANSPORTS = ("tcp", "udp", "dds", "shm", "rtps")
 MIB = 1024 * 1024
 BENCH_SERVICE = "OrderService"
 BENCH_METHOD = "get"
@@ -101,10 +101,16 @@ class Context:
         self.env = child_env()
         self.connect_timeout = int(args.connect_timeout)
         self.dds_domain = args.dds_domain if args.dds_domain is not None else random.randint(0, 232)
+        self.rtps_domain = (args.rtps_domain if args.rtps_domain is not None
+                            else random.randint(0, 232))
+        if "rtps" in self.transports:
+            # The gate is loopback-only; pin RTPS locators to 127.0.0.1 instead
+            # of whichever interface the host would otherwise advertise.
+            self.env["NB_RTPS_ADVERTISE_HOST"] = "127.0.0.1"
         self.shm_channel = "nb-shm-{}-{}".format(os.getpid(), random.randint(0, 1 << 30))
         if args.command == "stability" and not args.transports:
             # Soak is intentionally short by default; ask for more transports
-            # explicitly with --transports tcp,udp,dds.
+            # explicitly with --transports tcp,udp,dds,rtps.
             self.transports = [item for item in self.transports if item == "tcp"] or self.transports[:1]
         self.did_build = False
 
@@ -200,7 +206,8 @@ def select_transports(args: argparse.Namespace, dds_enabled: bool) -> List[str]:
     result: List[str] = []
     for item in requested:
         if item not in ALL_TRANSPORTS:
-            raise GateError("unknown transport '{}'; expected tcp, udp or dds".format(item))
+            raise GateError(
+                "unknown transport '{}'; expected tcp, udp, dds, shm or rtps".format(item))
         if item == "dds" and not dds_enabled:
             print("gate: skipping DDS (NB_ENABLE_DDS=OFF)")
             continue
@@ -404,6 +411,39 @@ def free_port(kind: str) -> int:
         return int(sock.getsockname()[1])
 
 
+def free_ports(kind: str, count: int) -> List[int]:
+    """Reserve `count` distinct ports; sockets stay open until all are bound."""
+    socket_type = socket.SOCK_STREAM if kind == "tcp" else socket.SOCK_DGRAM
+    sockets = []
+    ports: List[int] = []
+    try:
+        for _ in range(count):
+            sock = socket.socket(socket.AF_INET, socket_type)
+            sock.bind(("127.0.0.1", 0))
+            sockets.append(sock)
+            ports.append(int(sock.getsockname()[1]))
+    finally:
+        for sock in sockets:
+            sock.close()
+    return ports
+
+
+def rtps_bindings(ctx: Context) -> Tuple[str, str, str]:
+    """Loopback unicast RTPS bindings and proxy target.
+
+    The authority is <domain>:<own SPDP port>/<peer host>:<peer SPDP port>, so
+    both participants pin discovery to unicast and need no multicast. The proxy
+    target host must be the binding authority ("<domain>") because custom
+    transports are matched by their bind host.
+    """
+    server_spdp, client_spdp = free_ports("udp", 2)
+    domain = ctx.rtps_domain
+    server = "rtps://{}:{}/127.0.0.1:{}".format(domain, server_spdp, client_spdp)
+    client = "rtps://{}:{}/127.0.0.1:{}".format(domain, client_spdp, server_spdp)
+    target = "rtps://{}:0".format(domain)
+    return server, client, target
+
+
 def percentile_from_histogram(histogram: Dict[int, int], percentile: float) -> float:
     total = sum(histogram.values())
     if total <= 0:
@@ -475,12 +515,15 @@ def evaluate_result(data: Optional[Dict[str, Any]], min_succeeded: int,
 def server_command(binary: Path, transport: str, port: int, dds_domain: int,
                    response_bytes: Optional[int], echo: bool,
                    io_threads: int, handler_threads: int,
-                   max_msg_bytes: int = MIB, shm_channel: str = "") -> List[str]:
+                   max_msg_bytes: int = MIB, shm_channel: str = "",
+                   rtps_binding: str = "") -> List[str]:
     command = [str(binary)]
     if transport == "dds":
         command.extend(["--dds", "--dds-domain", str(dds_domain)])
     elif transport == "shm":
         command.extend(["--shm", "--shm-channel", shm_channel])
+    elif transport == "rtps":
+        command.extend(["--rtps", rtps_binding])
     else:
         command.extend([
             "--transport", transport,
@@ -506,12 +549,15 @@ def loadgen_command(binary: Path, transport: str, port: int, dds_domain: int,
                     output: Path, max_requests: int = 0, rate: float = 0.0,
                     verify: bool = False, timeout_ms: int = 5000,
                     connect_timeout: int = 20, max_msg_bytes: int = MIB,
-                    shm_channel: str = "") -> List[str]:
+                    shm_channel: str = "", rtps_binding: str = "",
+                    rtps_target: str = "rtps://0:0") -> List[str]:
     command = [str(binary)]
     if transport == "dds":
         command.extend(["--dds", "--dds-domain", str(dds_domain)])
     elif transport == "shm":
         command.extend(["--shm", "--shm-channel", shm_channel])
+    elif transport == "rtps":
+        command.extend(["--rtps", rtps_binding, "--rtps-target", rtps_target])
     else:
         command.extend([
             "--transport", transport,
@@ -543,7 +589,8 @@ def loadgen_command(binary: Path, transport: str, port: int, dds_domain: int,
 def run_client(ctx: Context, transport: str, port: int, case_dir: Path,
                duration: int, payload_bytes: int, expect_bytes: int,
                max_requests: int = 0, rate: float = 0.0, verify: bool = False,
-               timeout_ms: int = 5000) -> Optional[Dict[str, Any]]:
+               timeout_ms: int = 5000, rtps_binding: str = "",
+               rtps_target: str = "rtps://0:0") -> Optional[Dict[str, Any]]:
     case_dir.mkdir(parents=True, exist_ok=True)
     result_path = case_dir / "result.json"
     command = loadgen_command(
@@ -551,7 +598,8 @@ def run_client(ctx: Context, transport: str, port: int, case_dir: Path,
         duration, payload_bytes, expect_bytes, result_path,
         max_requests=max_requests, rate=rate, verify=verify,
         timeout_ms=timeout_ms, connect_timeout=ctx.connect_timeout,
-        shm_channel=ctx.shm_channel,
+        shm_channel=ctx.shm_channel, rtps_binding=rtps_binding,
+        rtps_target=rtps_target,
     )
     try:
         result = run_command(command, cwd=ROOT, env=ctx.env,
@@ -570,10 +618,13 @@ def run_scenario(ctx: Context, transport: str, case_dir: Path, duration: int,
                  handler_threads: int = 2) -> Tuple[Optional[Dict[str, Any]], Optional[int]]:
     case_dir.mkdir(parents=True, exist_ok=True)
     port = free_port(transport) if transport in ("tcp", "udp") else 0
+    rtps_server, rtps_client, rtps_target = (
+        rtps_bindings(ctx) if transport == "rtps" else ("", "", ""))
     command = server_command(
         ctx.binary("bench_server"), transport, port, ctx.dds_domain,
         None if echo_server else expect_bytes, echo_server,
         io_threads, handler_threads, shm_channel=ctx.shm_channel,
+        rtps_binding=rtps_server,
     )
     server = ServerProcess(command, case_dir / "server.log", ctx.env)
     server.start()
@@ -582,6 +633,7 @@ def run_scenario(ctx: Context, transport: str, case_dir: Path, duration: int,
         data = run_client(
             ctx, transport, port, case_dir, duration, payload_bytes,
             expect_bytes, max_requests=max_requests, rate=rate, verify=verify,
+            rtps_binding=rtps_client, rtps_target=rtps_target,
         )
     finally:
         server_code = server.stop()
@@ -800,9 +852,12 @@ def stability_case(ctx: Context, transport: str, case_dir: Path,
                    total_seconds: int) -> Outcome:
     case_dir.mkdir(parents=True, exist_ok=True)
     port = free_port(transport) if transport in ("tcp", "udp") else 0
+    rtps_server, rtps_client, rtps_target = (
+        rtps_bindings(ctx) if transport == "rtps" else ("", "", ""))
     command = server_command(
         ctx.binary("bench_server"), transport, port, ctx.dds_domain,
         None, True, 2, 1, shm_channel=ctx.shm_channel,
+        rtps_binding=rtps_server,
     )
     server = ServerProcess(command, case_dir / "server.log", ctx.env)
     server.start()
@@ -819,6 +874,7 @@ def stability_case(ctx: Context, transport: str, case_dir: Path,
                 ctx, transport, port, wave_dir, duration=seconds,
                 payload_bytes=payload, expect_bytes=payload,
                 rate=rate, verify=True, timeout_ms=max(8000, seconds * 1000),
+                rtps_binding=rtps_client, rtps_target=rtps_target,
             )
             ok, messages, metrics = evaluate_result(
                 data, 1, payload, "stability.{}.wave{}".format(transport, index))
@@ -946,10 +1002,12 @@ def make_parser() -> argparse.ArgumentParser:
     common.add_argument("--output-dir", default=None,
                         help="artifact directory (default: artifacts/gate/<timestamp>)")
     common.add_argument("--transports", default=None,
-                        help="comma-separated transports: tcp,udp,dds")
+                        help="comma-separated transports: tcp,udp,dds,shm,rtps")
     common.add_argument("--no-dds", action="store_true", help="skip DDS cases")
     common.add_argument("--dds-domain", type=int, default=None,
                         help="DDS domain (default: random 0..232)")
+    common.add_argument("--rtps-domain", type=int, default=None,
+                        help="RTPS domain id (default: random 0..232)")
     common.add_argument("--connect-timeout", type=int, default=20,
                         help="loadgen warm-up deadline in seconds")
 
