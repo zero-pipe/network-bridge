@@ -1,33 +1,24 @@
-# Network Bridge Documentation
+# Network Bridge 文档
 
-- [SDK API](api/sdk-api.md): object model, lifetime, threading and ownership.
-- [Architecture](architecture.md): endpoint / message / QoS / mesh / provider
-  layering.
-- [Architecture overview](architecture-overview.html): single-page Chinese
-  overview - ntk runtime, discovery, UDP/TCP/SHM, RTPS and the third-party
-  dependencies, with the layer and data-path diagrams.
-- [Discovery review](discovery-review.md): the broadcast key/value discovery
-  design, its review findings and the standalone `ntk_discovery` library.
-- [RTPS protocol handbook](rtps-protocol.html): plain-language walkthrough of
-  the wire format, SPDP/SEDP flows, QoS matching and reliable transfer
-  (single-file HTML, opens in a browser).
-- [RTPS implementation specification](rtps-spec.md): the normative reference
-  derived from `src/rtps/` - message and ParameterList formats, discovery,
-  QoS, reliability, fragmentation, limits and the Cyclone DDS interop matrix.
-- [RTPS API plan](rtps-api-todo.md): the public `rtps_*` interface layer -
-  topic/writer/reader model, QoS inheritance, phases and progress checkboxes.
-- [RTPS API reference](rtps-api.md): object model, QoS inheritance, read/take
-  semantics, threading rules and the mapping to Cyclone DDS `dds_*`.
-- [Configuration](api/config.md): JSON fields, defaults and validation.
-- [Error codes](api/error-codes.md): stable values, names, descriptions and
-  retry semantics.
-- [Examples](examples.md): runnable programs indexed by scenario.
-- [Testing](testing.md): the unified unit / e2e / perf / stability / fuzz gates.
-- [Low latency and spikes](performance.md): latency methodology, spike
-  attribution experiments, CPU pinning and inline dispatch results.
+- [SDK API](api/sdk-api.md)：对象模型、生命周期、线程模型与所有权。
+- [架构](architecture.md)：endpoint / message / QoS / mesh / provider 的分层。
+- [架构总览](architecture-overview.html)：单页中文概览——ntk 运行时、服务发现、
+  UDP/TCP/SHM、RTPS 与三方依赖，带分层和数据路径图。
+- [发现评审](discovery-review.md)：广播 key/value 发现的设计、评审结论与独立的
+  `ntk_discovery` 库。
+- [RTPS 协议手册](rtps-protocol.html)：用大白话讲报文格式、SPDP/SEDP 流程、QoS
+  匹配和可靠传输（单文件 HTML，浏览器直接打开）。
+- [RTPS 实现规范](rtps-spec.md)：从 `src/rtps/` 反推出来的规范参考——报文与
+  ParameterList 格式、发现、QoS、可靠性、分片、上限以及与 Cyclone DDS 的互通矩阵。
+- [RTPS 公共接口](rtps-api.md)：对象模型、QoS 继承、read/take 语义、线程约束，
+  以及和 Cyclone DDS `dds_*` 的对应关系。
+- [配置](api/config.md)：JSON 字段、默认值与校验规则。
+- [错误码](api/error-codes.md)：稳定数值、名称、描述与重试语义。
+- [示例](examples.md)：按场景索引的可运行程序。
+- [测试](testing.md)：统一的 unit / e2e / perf / stability / fuzz 质量门禁。
+- [低延迟与尖峰](performance.md)：延迟测量方法、尖峰归因实验、CPU 绑核与内联
+  分发的结果，以及各传输与 gRPC 的对比。
 
-Editor validation for configuration files uses
-[`config.schema.json`](config.schema.json).
+配置文件的编辑器校验使用 [`config.schema.json`](config.schema.json)。
 
-Design rationale and layering trade-offs are summarised in the repository
-[README](../README.md).
+设计取舍与分层理由汇总在仓库根目录的 [README](../README.md) 中。

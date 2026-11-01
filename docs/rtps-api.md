@@ -1,6 +1,6 @@
 # RTPS 公共接口（rtps_*）
 
-本文是 `include/rtps/` 的参考文档，说明对象模型、生命周期、QoS 继承、读写语义和线程约束，并给出与 Cyclone DDS `dds_*` API 的对应关系。协议细节见 [rtps-spec.md](rtps-spec.md)，进度见 [rtps-api-todo.md](rtps-api-todo.md)。
+本文是 `include/rtps/` 的参考文档，说明对象模型、生命周期、QoS 继承、读写语义和线程约束，并给出与 Cyclone DDS `dds_*` API 的对应关系。协议细节见 [rtps-spec.md](rtps-spec.md)。
 
 ## 1. 分层
 

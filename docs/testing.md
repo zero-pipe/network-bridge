@@ -1,53 +1,47 @@
-# Testing and Quality Gates
+# 测试与质量门禁
 
-The repository has a single gate entry point: `tools/gate.py`. CTest runs
-in-process tests; `gate.py` drives process-level e2e, performance and stability
-scenarios and writes every result under `artifacts/gate/`.
+仓库只有一个门禁入口：`tools/gate.py`。CTest 运行进程内测试；`gate.py`
+驱动进程级 e2e、性能和稳定性场景，并把所有结果写到 `artifacts/gate/` 下。
 
-## Categories
+## 分类
 
-| Gate | CTest label | Coverage | Command |
+| 门禁 | CTest 标签 | 覆盖范围 | 命令 |
 | --- | --- | --- | --- |
-| unit | `unit` | pure modules, codecs, config, framing, metrics, registry | `python3 tools/gate.py unit` |
-| e2e | `e2e` | in-process loopback/stream/api/worker/semantics, separate server/client echo, and a separate DDS publisher/Cyclone subscriber | `python3 tools/gate.py e2e` |
-| perf | none | TCP/UDP/DDS throughput and latency smoke, optional baseline regression | `python3 tools/gate.py perf` |
-| stability | none | long-running server, multiple waves with varying payload sizes, failure and resource growth checks | `python3 tools/gate.py stability` |
-| fuzz | `fuzz` | libFuzzer smoke (only with `NB_BUILD_FUZZERS=ON`) | `python3 tools/gate.py fuzz` |
+| unit | `unit` | 纯模块、codec、配置、组帧、指标、registry | `python3 tools/gate.py unit` |
+| e2e | `e2e` | 进程内 loopback/stream/api/worker/semantics、独立 server/client echo，以及独立的 DDS 发布者/Cyclone 订阅者 | `python3 tools/gate.py e2e` |
+| perf | 无 | TCP/UDP/DDS/RTPS 吞吐与延迟冒烟，可选基线回归 | `python3 tools/gate.py perf` |
+| stability | 无 | 长跑 server、多轮不同载荷大小、失败与资源增长检查 | `python3 tools/gate.py stability` |
+| fuzz | `fuzz` | libFuzzer 冒烟（仅 `NB_BUILD_FUZZERS=ON`） | `python3 tools/gate.py fuzz` |
 
-Naming rules:
+命名规则：
 
-- CTest names are `<category>.<case>`, for example `unit.framing` and
-  `e2e.loopback`.
-- CTest labels carry both category and component, for example `unit;framing`
-  and `e2e;worker`.
-- `integration` is not a top-level category; end-to-end behaviour is always
-  `e2e`.
-- C test executables keep the `test_*` prefix; load tools use `bench_*` and
-  `loadgen`.
-- `tools/gate.py` is the only gate entry point; do not add ad-hoc shell
-  scripts.
+- CTest 名称为 `<category>.<case>`，例如 `unit.framing`、`e2e.loopback`。
+- CTest 标签同时带分类和组件，例如 `unit;framing`、`e2e;worker`。
+- `integration` 不是顶层分类；端到端行为统一归为 `e2e`。
+- C 测试可执行文件保留 `test_*` 前缀；压测工具使用 `bench_*` 和
+  `loadgen`。
+- `tools/gate.py` 是唯一的门禁入口；不要另外增加临时 shell 脚本。
 
-## Quick start
+## 快速开始
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
   -DNB_BUILD_TESTS=ON -DNB_BUILD_TOOLS=ON
 python3 tools/gate.py unit
-python3 tools/gate.py e2e --transports tcp,udp,dds
+python3 tools/gate.py e2e --transports tcp,udp,dds,rtps
 python3 tools/gate.py perf --perf-duration 10
 python3 tools/gate.py stability --transports tcp --stability-duration 60
 ```
 
-`gate.py` runs `cmake --build` first by default; pass `--no-build` when the
-tree is already built. Multi-config generators on Windows need an explicit
-configuration:
+`gate.py` 默认先执行 `cmake --build`；目录已经构建过时加 `--no-build`。
+Windows 多配置生成器需要显式指定配置：
 
 ```powershell
 python tools\gate.py unit --config Debug
-python tools\gate.py e2e --config Debug --transports tcp,udp,dds
+python tools\gate.py e2e --config Debug --transports tcp,udp,dds,rtps
 ```
 
-CMake targets are also available (they build the required tests/tools first):
+也可以直接使用 CMake 目标（会先构建所需的测试/工具）：
 
 ```bash
 cmake --build build --target gate-unit
@@ -57,67 +51,64 @@ cmake --build build --target gate-stability
 cmake --build build --target gate-all
 ```
 
-Run all default gates:
+运行所有默认门禁：
 
 ```bash
 python3 tools/gate.py all
 ```
 
-`all` uses short durations: perf 5 s per transport, stability 30 s (TCP only).
-For the full stability matrix, be explicit:
+`all` 使用较短时长：perf 每种传输 5 秒，stability 30 秒（仅 TCP）。需要完整
+稳定性矩阵时请显式指定：
 
 ```bash
 python3 tools/gate.py stability --transports tcp,udp,dds --stability-duration 300
 ```
 
-## Pass criteria
+## 通过标准
 
 ### unit
 
-- The `unit` label has at least one case.
-- Every case exits with 0.
-- No case is silently skipped; `NB_BUILD_TESTS=OFF` fails the gate and asks for
-  a reconfigure.
+- `unit` 标签至少有一个用例。
+- 每个用例退出码为 0。
+- 不允许静默跳过；`NB_BUILD_TESTS=OFF` 会直接判定门禁失败，并提示重新配置。
 
 ### e2e
 
-- All `e2e` cases pass.
-- Each transport completes at least `--e2e-requests` requests (default 200).
-- `status=ok`, `failed=0`, and response bytes equal successful requests times
-  the expected response size.
-- The server does not exit before the scenario ends.
-- DDS is skipped automatically when `NB_ENABLE_DDS=OFF`; this is not a failure.
+- 所有 `e2e` 用例通过。
+- 每种传输至少完成 `--e2e-requests` 个请求（默认 200）。
+- `status=ok`、`failed=0`，响应字节数等于成功请求数乘以预期响应大小。
+- 场景结束前 server 不能退出。
+- `NB_ENABLE_DDS=OFF` 时自动跳过 DDS，不算失败。
 
 ### perf
 
-- Each transport reports `status=ok`, `failed=0`, QPS > 0.
-- By default results are recorded without hardware-dependent thresholds.
-- With `--baseline`, QPS and p99 are compared:
+- 每种传输报告 `status=ok`、`failed=0`、QPS > 0。
+- 默认只记录结果，不设置依赖硬件的阈值。
+- 指定 `--baseline` 时比较 QPS 和 p99：
 
 ```bash
-# create a baseline
+# 生成基线
 python3 tools/gate.py perf --update-baseline --baseline tests/perf/baseline.json
 
-# check against it, allowing 20% variance
+# 按基线检查，允许 20% 波动
 python3 tools/gate.py perf --baseline tests/perf/baseline.json --tolerance 0.20
 ```
 
-Baselines are machine-dependent. Commit only baselines from a fixed CI or
-benchmark host, or keep them under `artifacts/` per machine.
+基线依赖机器。只提交来自固定 CI 或基准测试机的基线，或者按机器放在
+`artifacts/` 下。
 
 ### stability
 
-- The server stays up for the whole run and is not restarted between waves.
-- Every wave reports `status=ok`, `failed=0` and a positive request count.
-- The server does not crash early.
-- On Linux the following resource growth limits apply (defaults):
-  - RSS peak growth <= 64 MiB
-  - thread count growth <= 8
-  - FD peak growth <= 32
-- Windows currently skips `/proc` checks and only verifies failures and
-  process liveness.
+- server 全程存活，轮与轮之间不重启。
+- 每一轮都报告 `status=ok`、`failed=0`，且请求数大于 0。
+- server 不能提前崩溃。
+- Linux 上默认检查以下资源增长：
+  - RSS 峰值增长 <= 64 MiB
+  - 线程数增长 <= 8
+  - FD 峰值增长 <= 32
+- Windows 目前跳过 `/proc` 检查，只验证失败数和进程存活。
 
-Override thresholds when needed:
+需要时可以覆盖阈值：
 
 ```bash
 python3 tools/gate.py stability \
@@ -126,28 +117,29 @@ python3 tools/gate.py stability \
 
 ### fuzz
 
-- `fuzz` tests exist only with `NB_BUILD_FUZZERS=ON` and a Clang toolchain.
-- All `fuzz` cases pass; the gate reports `SKIP` when no fuzz tests exist.
+- 只有 `NB_BUILD_FUZZERS=ON` 且使用 Clang 工具链时才存在 `fuzz` 测试。
+- 所有 `fuzz` 用例通过；不存在 fuzz 测试时门禁报告 `SKIP`。
 
-## Artifacts
+## 产物
 
-Each run writes a timestamped directory:
+每次运行都会生成一个带时间戳的目录：
 
 ```text
 artifacts/gate/<UTC timestamp>/
-  summary.json              overall status plus per-gate status/detail/metrics
+  summary.json              总体状态以及各门禁的 status/detail/metrics
   unit/
-    list.log                output of ctest -N -L unit
-    ctest.log               full output of ctest -L unit
+    list.log                ctest -N -L unit 的输出
+    ctest.log               ctest -L unit 的完整输出
   e2e/
     summary.json
     ctest/ctest.log
     tcp/{server.log,client.log,result.json,server.exit}
     udp/...
     dds/...
+    rtps/...
   perf/
     summary.json
-    metrics.json            QPS / p50 / p90 / p99 per transport
+    metrics.json            每种传输的 QPS / p50 / p90 / p99
     tcp/{server.log,client.log,result.json}
   stability/
     tcp/summary.json
@@ -155,23 +147,23 @@ artifacts/gate/<UTC timestamp>/
     tcp/wave_1_1384b/...
 ```
 
-Top-level `status` is `pass` or `fail`; a `SKIP` in a sub-gate does not fail the
-run. On failure the script exits with 1, which is what CI consumes.
+顶层 `status` 为 `pass` 或 `fail`；子门禁的 `SKIP` 不会导致整体失败。失败时
+脚本退出码为 1，供 CI 消费。
 
-## Using CTest directly
+## 直接使用 CTest
 
 ```bash
 cd build
-ctest -N -L unit          # list unit cases
-ctest -L unit             # run unit only
-ctest -L e2e              # run in-process e2e only
-ctest -R unit.framing     # run a single case
+ctest -N -L unit          # 列出 unit 用例
+ctest -L unit             # 只跑 unit
+ctest -L e2e              # 只跑进程内 e2e
+ctest -R unit.framing     # 跑单个用例
 ```
 
-### Sanitizer builds
+### Sanitizer 构建
 
-ASAN / UBSAN / TSAN are enabled with `NB_SANITIZE` and require GCC or Clang
-(MSVC fails fast):
+通过 `NB_SANITIZE` 启用 ASAN / UBSAN / TSAN，需要 GCC 或 Clang（MSVC 会
+快速失败）：
 
 ```bash
 cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
@@ -187,11 +179,10 @@ cmake --build build-tsan --parallel 8
 ctest -L unit --output-on-failure
 ```
 
-`unit.buf_concurrency` covers concurrent ref/release of shared buffers, batched
-`nb_buf_ref_n` and pooled recycling; run it under TSAN to check refcount data
-races.
+`unit.buf_concurrency` 覆盖共享缓冲区的并发 ref/release、批量 `nb_buf_ref_n`
+和池化回收；建议在 TSAN 下运行以检查引用计数数据竞争。
 
-Multi-config on Windows:
+Windows 多配置：
 
 ```powershell
 cd build
@@ -199,37 +190,34 @@ ctest -C Debug -L unit
 ctest -C Debug -L e2e
 ```
 
-## Adding tests
+## 新增测试
 
-Unit tests:
+单元测试：
 
-1. Add `tests/test_foo.c`, following the existing `main()` + exit-code style.
-2. Register it in `tests/CMakeLists.txt` with the shared helper:
-   `nb_add_test(test_foo unit.foo LABELS "unit;foo" TIMEOUT 120)`.
-3. Add include directories only when the test reaches into `src/`.
+1. 新增 `tests/test_foo.c`，沿用现有的 `main()` + 退出码风格。
+2. 在 `tests/CMakeLists.txt` 中用公共 helper 注册：
+   `nb_add_test(test_foo unit.foo LABELS "unit;foo" TIMEOUT 120)`。
+3. 只有测试需要访问 `src/` 时才添加 include 目录。
 
-In-process e2e:
+进程内 e2e：
 
-1. Add `tests/test_foo_e2e.c`.
-2. Use the `e2e.foo` test name and `e2e;foo` labels.
-3. When a real socket is needed, bind `127.0.0.1` on a dedicated port and
-   destroy every node before returning.
+1. 新增 `tests/test_foo_e2e.c`。
+2. 使用 `e2e.foo` 测试名和 `e2e;foo` 标签。
+3. 需要真实 socket 时，在专用端口上绑定 `127.0.0.1`，返回前销毁所有 node。
 
-Process-level e2e / perf / stability:
+进程级 e2e / perf / stability：
 
-- Add a case function in `tools/gate.py` and reuse `server_command`,
-  `loadgen_command`, `run_scenario` and `evaluate_result`.
-- Do not add separate shell scripts; that would scatter artifact paths and
-  failure criteria again.
+- 在 `tools/gate.py` 中增加 case 函数，复用 `server_command`、
+  `loadgen_command`、`run_scenario` 和 `evaluate_result`。
+- 不要再新增独立 shell 脚本，否则产物路径和失败标准又会分散。
 
 ## CI
 
-`.github/workflows/ci.yml` runs three jobs:
+`.github/workflows/ci.yml` 运行三个 job：
 
-- `linux`: GCC, Release, build plus `ctest -L unit` and `ctest -L e2e`.
-- `windows`: MSVC, Debug, build plus `ctest -L unit`.
-- `sanitizers`: GCC with `NB_SANITIZE=address,undefined`, DDS disabled, unit
-  and e2e tests.
+- `linux`：GCC、Release，构建后运行 `ctest -L unit` 和 `ctest -L e2e`。
+- `windows`：MSVC、Debug，构建后运行 `ctest -L unit`。
+- `sanitizers`：GCC 加 `NB_SANITIZE=address,undefined`，关闭 DDS，运行 unit
+  和 e2e。
 
-CI performance numbers are not cross-machine hard thresholds; CI only verifies
-that the pipelines run without failures or crashes.
+CI 的性能数字不是跨机器的硬阈值；CI 只验证流水线能正常跑完、不失败、不崩溃。

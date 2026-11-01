@@ -93,6 +93,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The project README and all documentation under `docs/` are now written in
+  Chinese: the SDK API, architecture, configuration reference, error codes,
+  examples index, testing and performance guides, plus the JSON Schema
+  descriptions. Code blocks, identifiers and generated artifacts are unchanged;
+  relative links were verified and the obsolete `rtps-api-todo.md` link was
+  removed.
 - The quality gate now covers RTPS as a first-class transport:
   `tools/gate.py` accepts `--transports rtps` for e2e/perf/stability,
   `bench_server --rtps <binding-uri>` and

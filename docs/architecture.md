@@ -1,145 +1,129 @@
-# Architecture and Abstractions
+# 架构与抽象
 
-Network Bridge separates *call semantics* from *link implementations*. Upper
-layers describe only `service.method + payload + metadata`; lower layers move a
-single normalized message. Addressing, QoS, fragmentation and reply tokens are
-all carried by shared framework abstractions.
+Network Bridge 把**调用语义**和**链路实现**分开。上层只描述
+`service.method + payload + metadata`；下层只搬运一条归一化的消息。寻址、QoS、
+分片和回复令牌都由共享的框架抽象承载。
 
-## Layers
+## 分层
 
 ```text
-application
-  service / proxy / stream              call forms and lifetime
-  codec / message_view                  payload encoding and views
-core
-  node / dispatch / pending / dedup     correlation, timeouts, retries, scheduling
-  router / registry / discovery         service resolution and mesh control plane
-transport SPI
-  endpoint + message + QoS              transport-neutral contract
-providers
-  udp / tcp / shm / dds / rtps / custom link implementations
+应用
+  service / proxy / stream              调用形态与生命周期
+  codec / message_view                  载荷编解码与视图
+核心
+  node / dispatch / pending / dedup     关联、超时、重试、调度
+  router / registry / discovery         服务解析与 mesh 控制面
+传输 SPI
+  endpoint + message + QoS              与传输无关的契约
+provider
+  udp / tcp / shm / dds / rtps / 自定义  具体链路实现
 ```
 
-Dependencies point downward only. A transport provider never sees
-service/proxy concepts and never parses payloads; core never depends on a
-scheme-specific private address format.
+依赖只能向下。传输 provider 看不到 service/proxy 概念，也不解析业务载荷；
+核心层从不依赖某个 scheme 私有的地址格式。
 
-## Endpoint
+## Endpoint（端点）
 
-`nb_endpoint_t` is the only address representation, with fixed fields:
+`nb_endpoint_t` 是唯一的地址表示，字段固定：
 
-| Field | Meaning |
+| 字段 | 含义 |
 | --- | --- |
-| `scheme` | provider selector, e.g. `udp` / `tcp` / `shm` / `dds` / `rtps` |
-| `host` | provider authority: IP, DDS/RTPS domain or SHM channel |
-| `port` | provider service id: UDP/TCP port, SHM node id, RTPS SPDP port, DDS placeholder |
-| `path` | optional provider sub-path |
-| `transport` | built-in transport kind; custom providers use `NB_TRANSPORT_KIND_CUSTOM` |
-| `uri` | normalized URI used by routing, discovery, logs and cross-process transport |
+| `scheme` | provider 选择器，例如 `udp` / `tcp` / `shm` / `dds` / `rtps` |
+| `host` | provider authority：IP、DDS/RTPS domain 或 SHM channel |
+| `port` | provider 内的服务标识：UDP/TCP 端口、SHM node id、RTPS SPDP 端口、DDS 占位 |
+| `path` | 可选的 provider 子路径 |
+| `transport` | 内建传输类型；自定义 provider 使用 `NB_TRANSPORT_KIND_CUSTOM` |
+| `uri` | 归一化 URI，供路由、发现、日志和跨进程传输使用 |
 
-Invariants:
+不变量：
 
-- The route table, registry, discovery frames, proxy target overrides and
-  provider send targets all use `nb_endpoint_t` instead of storing separate
-  `ip/scheme/port` triples.
-- `nb_endpoint_parse` normalizes; `nb_endpoint_refresh` rebuilds the URI after
-  fields are modified.
-- Only UDP/TCP authorities are network addresses. When discovery receives a
-  HELLO, it rewrites the host from the packet source IP only for endpoints where
-  `nb_endpoint_is_network()` is true. SHM channels and DDS domains must be
-  preserved verbatim.
+- 路由表、registry、发现帧、proxy 目标覆盖和 provider 发送目标都使用
+  `nb_endpoint_t`，不再各自保存 `ip/scheme/port` 三元组。
+- `nb_endpoint_parse` 负责归一化；字段修改后由 `nb_endpoint_refresh`
+  重建 URI。
+- 只有 UDP/TCP 的 authority 是网络地址。发现收到 HELLO 时，只对
+  `nb_endpoint_is_network()` 为真的 endpoint 用报文源 IP 改写 host；
+  SHM channel 和 DDS domain 必须原样保留。
 
-## Message
+## Message（消息）
 
-`nb_message_t` is both the internal core message and the public provider SPI
-message (`include/nb/message.h`). Providers used to have a second struct that
-`transport_factory.c` copied field by field, which made it easy to drop newly
-added fields. There is now a single definition:
+`nb_message_t` 既是核心内部消息，也是公共 provider SPI 消息
+（`include/nb/message.h`）。过去 provider 还有一份独立结构，
+`transport_factory.c` 逐字段拷贝，新增字段很容易漏掉；现在只有一份定义：
 
-- Inbound: the provider fills `peer`, route, payload, metadata and stream;
-  `frame_owner` can extend a zero-copy buffer's lifetime.
-- `sample` carries DDS sample metadata: the sample state, the instance handle
-  and the writer source timestamp. The RTPS provider fills it; other providers
-  leave it zeroed, which reads as ordinary data because `NB_SAMPLE_STATE_VALID`
-  is zero.
-- Outbound: core fills `target`, route and payload; UDP/TCP use the derived
-  `peer_host/peer_port` fast path.
-- `reply_token` is a provider-private return path used only for replies.
+- 入站：provider 填 `peer`、route、payload、metadata 和 stream；
+  `frame_owner` 可以延长零拷贝缓冲区的生命周期。
+- `sample` 携带 DDS 样本元数据：样本状态、实例句柄和 writer 源时间戳。
+  RTPS provider 会填；其它 provider 保持为零，读起来就是普通数据，因为
+  `NB_SAMPLE_STATE_VALID` 本身就是 0。
+- 出站：核心填 `target`、route 和 payload；UDP/TCP 走派生的
+  `peer_host/peer_port` 快路径。
+- `reply_token` 是 provider 私有的回复通道，只用于回复。
 
-## QoS
+## QoS（服务质量）
 
-`nb_qos_t` (`include/nb/qos.h`) mirrors DDS policies; fields default to INHERIT
-so they do not override provider defaults. Current mapping:
+`nb_qos_t`（`include/nb/qos.h`）对齐 DDS 策略；字段默认为 INHERIT，因此不会
+覆盖 provider 默认值。当前映射：
 
 - reliability / durability / history / depth
 - deadline / lifespan / latency budget
 - liveliness / lease duration / ownership / partition
 
-The DDS provider applies binding QoS when creating readers and writers.
-UDP/TCP/SHM keep the configuration readable by applications but do not change
-message semantics. A binding without explicit QoS inherits `transport.qos`.
+DDS provider 在创建 reader/writer 时应用 binding QoS。UDP/TCP/SHM 保留配置
+供应用读取，但不改变消息语义。没有显式 QoS 的 binding 继承 `transport.qos`。
 
-## Status events
+## 状态事件
 
-`nb_status_event_t` (`include/nb/status.h`) is the application-facing half of the
-DDS status contract. A provider that can observe status fills
-`nb_transport_provider_options_t.on_status` and reports on its own thread, with
-the same `user` as `on_receive`:
+`nb_status_event_t`（`include/nb/status.h`）是 DDS 状态契约中面向应用的那一半。
+能观察到状态的 provider 填写
+`nb_transport_provider_options_t.on_status`，在自己的线程上报，`user` 与
+`on_receive` 相同：
 
-- `NB_STATUS_PUBLICATION_MATCHED` / `NB_STATUS_SUBSCRIPTION_MATCHED`: `count` is
-  the current number of matches, so a decrease is the DDS "peer went away"
-  signal, and `total_count` is the cumulative count.
-- `NB_STATUS_QOS_INCOMPATIBLE`: the pair has the same topic and type but cannot
-  match; `reason` names the policy.
+- `NB_STATUS_PUBLICATION_MATCHED` / `NB_STATUS_SUBSCRIPTION_MATCHED`：`count`
+  是当前匹配数，下降即 DDS 的“对端消失”信号；`total_count` 是累计计数。
+- `NB_STATUS_QOS_INCOMPATIBLE`：topic 和 type 相同但无法匹配；`reason`
+  指出具体策略。
 - `NB_STATUS_OFFERED_DEADLINE_MISSED` / `NB_STATUS_REQUESTED_DEADLINE_MISSED`
-  and `NB_STATUS_LIVELINESS_CHANGED`.
+  和 `NB_STATUS_LIVELINESS_CHANGED`。
 
-`endpoint` is the provider's name for the local endpoint; the RTPS provider uses
-the method the endpoint belongs to. Status never travels on the wire as a
-framework message: it is emitted by whichever provider owns the data plane, so
-UDP/TCP/SHM simply leave the callback unset.
+`endpoint` 是 provider 对本地端点的命名；RTPS provider 使用端点所属的方法名。
+状态不会作为框架消息上线：它由拥有数据面的 provider 产生，因此 UDP/TCP/SHM
+根本不设置这个回调。
 
-## Mesh and SHM
+## Mesh 与 SHM
 
-The mesh control plane still propagates services and bindings over UDP
-HELLO/BYE. HELLO v4 carries the full URI of each binding rather than
-`scheme + port`, so provider authorities such as SHM channels and DDS domains
-survive the round trip.
+mesh 控制面仍通过 UDP HELLO/BYE 传播服务和 binding。HELLO v4 携带每个
+binding 的完整 URI，而不是 `scheme + port`，因此 SHM channel、DDS domain
+这类 provider authority 可以完整往返。
 
-The SHM segment uses one inbound queue per node:
+SHM 段每个节点一条入站队列：
 
-- Each node joins the segment as `shm://<channel>:<node-id>`, with `node-id`
-  in `1..9`.
-- Any node may deliver an RPC response or event to any target node; there is no
-  fixed server/client role.
-- The legacy `push_request/push_response` API remains as compatibility
-  wrappers: request means "send to node 1", response means "send to the
-  specified client".
-- Events fan out to subscribed nodes by route; chunk reference counts preserve
-  zero-copy behavior.
-- The first creator initializes the segment; the last closer unlinks it.
+- 每个节点以 `shm://<channel>:<node-id>` 加入，`node-id` 取 `1..9`。
+- 任意节点都可以向任意目标节点投递 RPC 响应或事件；没有固定的
+  server/client 角色。
+- 旧的 `push_request/push_response` API 保留为兼容包装：request 表示
+  “发给节点 1”，response 表示“发给指定客户端”。
+- 事件按 route 扇出到订阅节点；chunk 引用计数维持零拷贝。
+- 第一个创建者初始化共享段，最后一个关闭者 unlink。
 
-This removes the need for a dedicated "SHM server": every mesh node is a peer,
-but node ids must be unique within one channel.
+这样就不需要专门的 “SHM server”：每个 mesh 节点都是对等节点，但同一
+channel 内 node id 必须唯一。
 
-## Capability matrix
+## 能力矩阵
 
-| Capability | UDP | TCP | SHM | DDS |
+| 能力 | UDP | TCP | SHM | DDS |
 | --- | :-: | :-: | :-: | :-: |
-| unary RPC | yes | yes | yes | yes |
-| events / pub-sub | yes | yes | yes | yes |
-| streaming | yes | yes | yes | yes |
-| mesh discovery | yes | yes | yes | yes |
-| zero-copy receive | no | no | yes | while loaned |
-| QoS | kept | kept | kept | mapped |
+| 一元 RPC | 是 | 是 | 是 | 是 |
+| 事件 / 发布订阅 | 是 | 是 | 是 | 是 |
+| 流式 | 是 | 是 | 是 | 是 |
+| mesh 发现 | 是 | 是 | 是 | 是 |
+| 零拷贝接收 | 否 | 否 | 是 | loan 期间 |
+| QoS | 保留 | 保留 | 保留 | 映射 |
 
-## Boundaries
+## 边界
 
-- TLS/DTLS and authentication remain the responsibility of a custom provider or
-  a service interceptor.
-- Cross-thread ownership transfer of DDS loans requires extending the loan
-  lifetime to asynchronous consumers; the worker path still performs a deep
-  copy in core.
-- Recovering a SHM segment after an abnormal exit relies on the last closer or
-  on rebuilding an empty segment; cross-host deployments should use
-  UDP/TCP/DDS.
+- TLS/DTLS 和认证由自定义 provider 或 service interceptor 负责。
+- DDS loan 的跨线程所有权转移，需要把 loan 生命周期延长到异步消费者；
+  worker 路径目前仍在核心层做深拷贝。
+- 异常退出后的 SHM 段恢复依赖最后一个关闭者，或重建空段；跨主机部署应使用
+  UDP/TCP/DDS。
