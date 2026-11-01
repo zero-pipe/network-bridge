@@ -79,11 +79,17 @@ C++ 同步一元 API，单 channel、单 outstanding call。
 
 | 传输 | QPS | mean | p50 | p99 |
 | --- | --- | --- | --- | --- |
+| SHM（同主机跨进程） | 15,381 | 64.8us | 57us | 197us |
 | TCP | 12,491 | 79.9us | 68us | 298us |
 | UDP | 8,438 | 118.3us | 98us | 589us |
 | Cyclone DDS | 6,050 | 165.0us | 138us | 673us |
 | RTPS | 5,360 | 186.3us | 163us | 661us |
 | gRPC 1.16.1 | 10,740 | 91.0us | 72us | 314us |
+
+SHM 行是同一主机上两个独立进程通过一个共享段通信的结果（不是同进程内联），
+两次五秒运行分别为 13,819 / 15,381 QPS，表中取较有代表性的一次。SHM 只支持
+同主机部署，因此不参与下面的跨机对比；它的优势来自跳过内核网络栈和 socket
+唤醒，同时仍然保留完整的信封与 RPC 关联。
 
 跨机（客户端 192.168.54.14 -> 服务端 192.168.54.13）：
 
@@ -104,6 +110,12 @@ UDP 的 NACK/FEC 路径在未注入丢包的情况下也跑过，没有出现重
 
 ```bash
 python3 tools/gate.py perf --transports rtps --payload-bytes 1024 --perf-duration 5
+```
+
+同主机跨进程 SHM（gate 会在两个进程里各用一个 `shm://<channel>:<node-id>`）：
+
+```bash
+python3 tools/gate.py perf --transports shm --payload-bytes 1024 --perf-duration 5
 ```
 
 跨机测试，使用显式单播 SPDP peer（不需要组播）：

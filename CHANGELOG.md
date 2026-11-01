@@ -98,7 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   examples index, testing and performance guides, plus the JSON Schema
   descriptions. Code blocks, identifiers and generated artifacts are unchanged;
   relative links were verified and the obsolete `rtps-api-todo.md` link was
-  removed.
+  removed. The performance guide now also records the same-host cross-process
+  SHM comparison (1 KB, one call in flight).
 - The quality gate now covers RTPS as a first-class transport:
   `tools/gate.py` accepts `--transports rtps` for e2e/perf/stability,
   `bench_server --rtps <binding-uri>` and
