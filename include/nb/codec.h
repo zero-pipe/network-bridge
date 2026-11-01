@@ -34,9 +34,9 @@ typedef struct nb_codec {
     /*
      * Business object -> byte stream. The implementation allocates *out_data
      * and the caller frees it with release. When passed to
-     * nb_proxy_call_async / nb_stub_call_async / nb_proxy_call_event, the
-     * framework copies the bytes before returning, so release may run
-     * immediately after the call returns.
+     * nb_proxy_call_async / nb_proxy_call_event, the framework copies the
+     * bytes before returning, so release may run immediately after the call
+     * returns.
      */
     int (*encode)(void *user, const void *obj, void **out_data, size_t *out_len);
     /* Byte stream -> business object. The implementation allocates *out_obj and

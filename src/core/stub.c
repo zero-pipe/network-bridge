@@ -609,15 +609,6 @@ int nb_stub_call_event_owned_with_metadata(nb_stub_t *stub,
         stub, service, method, NULL, payload, metadata, out_request_id);
 }
 
-int nb_stub_call_event(nb_stub_t *stub,
-                    const char *service,
-                    const char *method,
-                    const nb_payload_t *payload,
-                    nb_request_id_t *out_request_id)
-{
-    return nb_stub_call_event_with_metadata(stub, service, method, payload, NULL, out_request_id);
-}
-
 static int nb_stub_call_impl(nb_stub_t *stub,
                              const char *service,
                              const char *method,
@@ -768,69 +759,6 @@ int nb_stub_call_owned(nb_stub_t *stub,
                              timeout_ms,
                              out_request_id,
                              metadata);
-}
-
-int nb_stub_call_owned_ex(nb_stub_t *stub,
-                          const char *service,
-                          const char *method,
-                          nb_owned_payload_t *payload,
-                          const nb_stub_call_options_t *options)
-{
-    static const nb_stub_call_options_t defaults = NB_STUB_CALL_OPTIONS_INIT;
-    const nb_stub_call_options_t *o = options ? options : &defaults;
-
-    if (!o->cb && !o->chunk_cb) {
-        return NB_ERR_INVALID;
-    }
-    return nb_stub_call_owned(stub,
-                              service,
-                              method,
-                              payload,
-                              o->metadata,
-                              o->cb,
-                              o->chunk_cb,
-                              o->done_cb,
-                              o->streaming,
-                              o->user,
-                              o->timeout_ms,
-                              o->out_request_id);
-}
-
-int nb_stub_call_async(nb_stub_t *stub,
-                    const char *service,
-                    const char *method,
-                    const nb_payload_t *payload,
-                    response_fn cb,
-                    void *user,
-                    uint64_t timeout_ms,
-                    nb_request_id_t *out_request_id)
-{
-    return nb_stub_call_ex(
-        stub, service, method, payload, cb, NULL, NULL, 0, user, timeout_ms, out_request_id, NULL);
-}
-
-int nb_stub_call_async_with_metadata(nb_stub_t *stub,
-                       const char *service,
-                       const char *method,
-                       const nb_payload_t *payload,
-                       const nb_metadata_t *metadata,
-                       response_fn cb,
-                       void *user,
-                       uint64_t timeout_ms,
-                       nb_request_id_t *out_request_id)
-{
-    return nb_stub_call_ex(stub,
-                            service,
-                            method,
-                            payload,
-                            cb,
-                            NULL,
-                            NULL,
-                            0,
-                            user,
-                            timeout_ms,
-                            out_request_id,
-                            metadata);
 }
 
 /* ---- 批量取消（销毁前调用，避免回调访问已释放对象） ---- */

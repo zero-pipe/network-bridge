@@ -1,6 +1,5 @@
-/* 覆盖新增抽象：service_table、message_view、stub 与 sync 便捷层。 */
+/* 覆盖新增抽象：service_table、message_view、proxy 与 sync 便捷层。 */
 #include <nb/proxy.h>
-#include <nb/stub.h>
 #include <nb/node.h>
 #include <nb/codec.h>
 #include <nb/service.h>
@@ -116,7 +115,7 @@ static int counter_read(test_counter_t *counter)
     return value;
 }
 
-static int test_stub_and_sync(void)
+static int test_proxy_and_sync(void)
 {
     nb_node_config_t scfg;
     nb_node_config_t ccfg;
@@ -124,7 +123,6 @@ static int test_stub_and_sync(void)
     nb_node_t *client = NULL;
     nb_service_t *svc = NULL;
     nb_proxy_t *proxy = NULL;
-    nb_stub_t *stub = NULL;
     nb_response_t response;
     nb_payload_t pl;
     uint16_t sport;
@@ -194,18 +192,6 @@ static int test_stub_and_sync(void)
         goto cleanup;
     }
 
-    /* stub 低层原语 + sync 便捷层（proxy 现在在 stub 之上）。 */
-    rc = nb_stub_create(client, NULL, &stub);
-    if (rc != NB_OK || !stub) {
-        nb_log_error("stub create failed: %d", rc);
-        failed = 1;
-        goto cleanup;
-    }
-    if (nb_stub_node(stub) != client) {
-        nb_log_error("stub node mismatch");
-        failed = 1;
-    }
-
     rc = nb_proxy_create(client, NULL, &proxy);
     if (rc != NB_OK) {
         nb_log_error("proxy create failed: %d", rc);
@@ -254,9 +240,6 @@ static int test_stub_and_sync(void)
     }
 
 cleanup:
-    if (stub) {
-        nb_stub_destroy(stub);
-    }
     if (proxy) {
         nb_proxy_destroy(proxy);
     }
@@ -275,7 +258,7 @@ int main(void)
     int failed = 0;
     failed += test_service_table();
     failed += test_message_view();
-    failed += test_stub_and_sync();
+    failed += test_proxy_and_sync();
     if (failed) {
         nb_log_error("nb_api: FAIL");
         return 1;

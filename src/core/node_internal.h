@@ -12,7 +12,6 @@
 #include <nb/types.h>
 #include <nb/node.h>
 #include <nb/codec.h>
-#include <nb/stub.h>
 #include <ntk.h>
 
 #include <stddef.h>
@@ -26,6 +25,7 @@
 #include "registry_backend.h"
 #include "router.h"
 #include "service_internal.h"
+#include "stub_internal.h"
 #include "transport_internal.h"
 
 /* codec 注册项 */

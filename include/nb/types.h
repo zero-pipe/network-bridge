@@ -63,8 +63,8 @@ typedef struct nb_status {
 
 /*
  * Request correlation id. It is 32-bit end to end: the same value is used by
- * the public call options, the stub, nb_call_request_id, and the wire
- * envelope. Wider types only hid truncation and broke cancel/dedup matching.
+ * the public call options, nb_call_request_id, and the wire envelope. Wider
+ * types only hid truncation and broke cancel/dedup matching.
  */
 typedef uint32_t nb_request_id_t;
 
@@ -176,12 +176,11 @@ typedef enum nb_log_level {
  * Lifetime: payloads passed to callbacks are valid only for that callback.
  * Copy them if they must outlive it.
  *
- * Ownership on send: nb_proxy_call_async / nb_stub_call_async /
- * nb_proxy_call_event copy the payload before returning (including
- * cross-thread calls), so the caller keeps ownership of its buffer and may
- * free it immediately. The framework never frees caller memory. Server-side
- * nb_reply() likewise only borrows the response payload for the duration of
- * the call.
+ * Ownership on send: nb_proxy_call_async / nb_proxy_call_event copy the
+ * payload before returning (including cross-thread calls), so the caller keeps
+ * ownership of its buffer and may free it immediately. The framework never
+ * frees caller memory. Server-side nb_reply() likewise only borrows the
+ * response payload for the duration of the call.
  */
 typedef struct nb_payload {
     const void *data;

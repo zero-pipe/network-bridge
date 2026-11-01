@@ -19,7 +19,6 @@ For a minimal include set, include the header that declares what you use:
 | `<nb/node.h>` | node, scheduling, discovery, routing, metrics |
 | `<nb/service.h>` | service, handler, reply, message view |
 | `<nb/proxy.h>` | proxy, async/sync/event/streaming calls |
-| `<nb/stub.h>` | transport-independent call primitive |
 | `<nb/publish.h>`, `<nb/subscribe.h>` | topics, samples, readers |
 | `<nb/endpoint.h>` | endpoint parsing and custom transport providers |
 | `<nb/codec.h>` | codec, message view, service table |
@@ -37,13 +36,19 @@ headers.
 ```text
 node
   ├─ service   registers methods, receives requests and replies
-  ├─ stub      service.method + payload, owns request_id and retries
-  └─ proxy     adds discovery/routing on top of a stub:
+  └─ proxy     discovers/routes and sends calls:
                call_async / call_sync / call_event
 ```
 
 One node can host both client and server roles. A proxy borrows the node's
-pollers and routing table and creates no threads of its own.
+pollers and routing table and creates no threads of its own. The transport is
+selected per binding; custom transports plug in through
+`<nb/transport_provider.h>`.
+
+A node is the runtime/participant handle (poller pool, bindings, discovery),
+not a ROS 2 node: it owns threads and sockets, so an application normally
+creates one for its lifetime. Multiple nodes per process remain supported for
+in-process tests and multi-tenant setups.
 
 Recommended create/destroy order:
 
@@ -74,9 +79,9 @@ nb_node_create
 `nb_payload_t` is only a `{data, len, encoding}` view. The framework never
 interprets its contents.
 
-On send, `nb_proxy_call_async`, `nb_stub_call_async` and
-`nb_proxy_call_event` copy the payload before returning. The caller always owns
-its buffer and may free it immediately.
+On send, `nb_proxy_call_async` and `nb_proxy_call_event` copy the payload
+before returning. The caller always owns its buffer and may free it
+immediately.
 
 On receive, request and response views are valid only inside the callback. Copy
 them if they must outlive it.
@@ -100,20 +105,12 @@ rc = nb_proxy_call_async_owned(proxy, "Svc", "method", &request, &options,
 
 - `nb_proxy_call_async_owned` / `nb_proxy_call_event_owned`: client requests;
   metadata travels through options.
-- `nb_stub_call_owned` / `nb_stub_call_event_owned_with_metadata`: lower-level
-  stub calls.
 - `nb_reply_owned`: server replies.
-
-The 12-argument stub call has been collapsed into `nb_stub_call_owned_ex` plus
-`nb_stub_call_options_t` (service/method/payload/timeout/metadata/callback/user
-pointer/request_id). The old `nb_stub_call_owned` remains as a thin wrapper;
-new code should use the options form.
 
 Owned APIs take over `payload->buf` at entry. The borrowed-plus-copy semantics
 of the older `nb_payload_t` APIs are unchanged. Metadata on the proxy layer
-always uses `nb_call_options_t`; the stub layer keeps separate
-`_with_metadata` variants. Buffers are managed by `nb_base`'s `nb_buf_*`; the
-single-owner path does no atomic reference counting by default.
+always uses `nb_call_options_t`. Buffers are managed by `nb_base`'s `nb_buf_*`;
+the single-owner path does no atomic reference counting by default.
 
 ### Synchronous calls
 
@@ -295,7 +292,7 @@ enqueue posts a permit, so a blocked waiter returns without polling delay.
 `NB_WAITSET_INFINITE` waits forever. The wait set only reports readiness;
 drain the specific subscriptions afterwards.
 
-## Proxy and Stub
+## Proxy
 
 A regular call:
 
@@ -356,10 +353,9 @@ Cancellation is best-effort: the framework sends `KIND_CANCEL` and completes
 the local call with `NB_ERR_NOTFOUND`; a handler that is already running is
 never preempted.
 
-`nb_stub_t` is the call primitive beneath the proxy. `nb_proxy_create`
-automatically creates a stub with a routing send hook installed. Use
-`nb_stub_create` and `nb_stub_call_*` directly only when you need custom send
-logic.
+Beyond the built-in UDP/TCP/SHM/RTPS bindings, a transport implements
+`<nb/transport_provider.h>` and is selected by the node's binding configuration
+(or a `host:port` target for a proxy).
 
 ### Zero-copy publishing (loan/borrow)
 

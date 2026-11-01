@@ -9,6 +9,12 @@
  *   - one or more bindings; when bindings are not configured explicitly, the
  *     transport config creates a single default binding;
  *   - optional service discovery (MESH) and a route table.
+ *
+ * A node is the runtime/participant handle, not a ROS 2 node: it owns threads,
+ * sockets and discovery state, so creation is comparatively expensive and an
+ * application normally creates one for its lifetime. Multiple nodes per
+ * process are still supported (in-process client/server tests, multi-tenant
+ * setups), each with its own pollers, bindings and discovery port.
  */
 
 #include <nb/types.h>

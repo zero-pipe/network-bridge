@@ -1,6 +1,6 @@
 /*
  * 03 Proxy：客户端代理生命周期。对应 fastcall-c 的 03_proxy：
- * 只创建 node + proxy（内部构建在 stub 之上），展示分层与释放顺序。
+ * 只创建 node + proxy，展示分层与释放顺序；代理本身不拥有线程。
  */
 #include <nb/proxy.h>
 #include <nb/node.h>

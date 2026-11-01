@@ -53,7 +53,7 @@
 
 <h2>1. 分层</h2>
 <div class="stack">
-  <div class="layer l-app"><span class="tag">应用</span><span class="desc">node / service / proxy / stub / stream / publish</span></div>
+  <div class="layer l-app"><span class="tag">应用</span><span class="desc">node / service / proxy / stream / publish</span></div>
   <div class="layer l-rpc"><span class="tag">RPC 与消息核心</span><span class="desc">dispatch、pending、dedup、reply、router、registry、waitset、envelope v2</span></div>
   <div class="layer l-disc"><span class="tag">服务发现</span><span class="desc">独立库 ntk_discovery：UDP 广播 HELLO/BYE（不透明 key + value）+ 周期心跳 + 对端注册表</span></div>
   <div class="layer l-xport"><span class="tag">框架传输</span><span class="desc">UDP（分片/乱序窗口/NACK/RTX/AIMD/可选 FEC）、TCP（长度前缀）、SHM（零拷贝）、Cyclone DDS 适配</span></div>
@@ -77,13 +77,13 @@
 <p>服务发现是控制面，和数据面传输解耦：UDP 广播 <b>HELLO/BYE</b>，载荷是 <b>key + value</b>——节点 ID、服务名、以及每个 binding 的完整 URI（<code>udp://</code>、<code>tcp://</code>、<code>shm://</code>、<code>rtps://</code>、<code>dds://</code>）。</p>
 <ul>
   <li>周期心跳刷新 <code>last_seen</code>，超时即摘除对端及其服务；BYE 用于主动下线。</li>
-  <li>结果写入 registry，proxy/stub 按 <code>service.method</code> 解析到具体 endpoint；支持显式单播 target 和静态路由。</li>
+  <li>结果写入 registry，proxy 按 <code>service.method</code> 解析到具体 endpoint；支持显式单播 target 和静态路由。</li>
   <li>RPC 与 SHM 的服务发现是同一套逻辑，区别只在 URI 的 scheme 和端点字段。</li>
 </ul>
 
 <h2>4. TCP / UDP 与 RPC</h2>
 <div class="flow">
-  <div class="box"><b>调用</b>proxy / stub</div><span class="arrow">→</span>
+  <div class="box"><b>调用</b>proxy</div><span class="arrow">→</span>
   <div class="box"><b>信封</b>envelope v2（magic/version/CRC）</div><span class="arrow">→</span>
   <div class="box"><b>传输</b>UDP / TCP / SHM</div><span class="arrow">→</span>
   <div class="box"><b>分发</b>dispatch → service</div>

@@ -9,7 +9,7 @@ all carried by shared framework abstractions.
 
 ```text
 application
-  service / proxy / stub / stream       call forms and lifetime
+  service / proxy / stream              call forms and lifetime
   codec / message_view                  payload encoding and views
 core
   node / dispatch / pending / dedup     correlation, timeouts, retries, scheduling

@@ -39,7 +39,6 @@
 #include <nb/shm.h>
 #include <nb/slotpool.h>
 #include <nb/status.h>
-#include <nb/stub.h>
 #include <nb/subscribe.h>
 #include <nb/transport_provider.h>
 #include <nb/types.h>

@@ -100,7 +100,7 @@ Complete, runnable programs live in [`examples/`](examples/); see the
 | `<nb/nb.h>` | You want the complete API |
 | `<nb/node.h>` | Node, scheduling, discovery, routing, metrics |
 | `<nb/service.h>` | Services, handlers, replies, message views |
-| `<nb/proxy.h>` | Proxies, async/sync/event/streaming calls (`<nb/stub.h>` for the low-level primitive) |
+| `<nb/proxy.h>` | Proxies, async/sync/event/streaming calls |
 | `<nb/publish.h>`, `<nb/subscribe.h>` | Topics, samples and readers |
 | `<nb/endpoint.h>` | Endpoints and custom transport providers (`<nb/transport_provider.h>`) |
 | `<nb/codec.h>` | Payload codecs, message views and service tables |

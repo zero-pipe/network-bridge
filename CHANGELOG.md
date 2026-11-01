@@ -93,6 +93,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The client stub is now an internal call engine instead of a second public
+  client API. `<nb/stub.h>` was removed (use `<nb/proxy.h>`); the request
+  descriptor and the proxy-facing call entries moved to
+  `src/core/stub_internal.h`, and the unused public wrappers were deleted.
+  This is a source-level cleanup only: no wire or behavior change. A new
+  `contract.nb_headers` test keeps `nb_stub` out of the installed headers.
 - Cyclone DDS is now built from source. `3rdparty/cyclonedds` keeps a
   source-only tree (Cyclone DDS 11.0.1, upstream `3a552631`) instead of the
   four prebuilt platform SDKs (`windows_amd64`, `linux_amd64`,

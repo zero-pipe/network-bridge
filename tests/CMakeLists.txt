@@ -108,6 +108,15 @@ set_tests_properties(contract.rtps_headers PROPERTIES
     LABELS "unit;contract;rtps"
     TIMEOUT 30)
 
+# The stub is an internal call engine; public nb headers must not expose it.
+add_test(NAME contract.nb_headers
+    COMMAND ${CMAKE_COMMAND}
+            -DHEADER_DIR=${CMAKE_SOURCE_DIR}/include/nb
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_nb_headers.cmake)
+set_tests_properties(contract.nb_headers PROPERTIES
+    LABELS "unit;contract"
+    TIMEOUT 30)
+
 # The public library must only export rtps_* symbols. Skipped when no nm.
 add_test(NAME contract.rtps_symbols
     COMMAND ${CMAKE_COMMAND}

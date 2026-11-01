@@ -1,7 +1,7 @@
 # 03: Proxy Lifecycle
 
 Create only a node and a proxy to show the client-side create and destroy
-order. A proxy is built on top of a stub and owns no thread of its own.
+order. A proxy owns no thread of its own; calls run on the node's pollers.
 
 ```powershell
 .\example_03_proxy.exe
