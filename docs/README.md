@@ -3,6 +3,9 @@
 - [SDK API](api/sdk-api.md): object model, lifetime, threading and ownership.
 - [Architecture](architecture.md): endpoint / message / QoS / mesh / provider
   layering.
+- [Architecture overview](architecture-overview.html): single-page Chinese
+  overview - ntk runtime, discovery, UDP/TCP/SHM, RTPS and the third-party
+  dependencies, with the layer and data-path diagrams.
 - [RTPS protocol handbook](rtps-protocol.html): plain-language walkthrough of
   the wire format, SPDP/SEDP flows, QoS matching and reliable transfer
   (single-file HTML, opens in a browser).

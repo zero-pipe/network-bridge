@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Network Bridge 架构总览</title>
+<style>
+  :root {
+    --bg:#fbfbfa; --fg:#1f2328; --muted:#5b6570; --line:#d8dee4;
+    --blue:#0b6bcb; --blue-soft:#eaf2fd; --green:#1a7f37; --green-soft:#e9f7ee;
+    --orange:#a15c07; --orange-soft:#fff6e5; --violet:#6e40c9; --violet-soft:#f2ecfd;
+    --code:#f3f5f7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:16px/1.75 "Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif}
+  main{max-width:1040px;margin:0 auto;padding:32px 24px 64px}
+  h1{font-size:27px;margin:0 0 6px}
+  h2{font-size:20px;margin:36px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  h3{font-size:17px;margin:20px 0 6px}
+  p{margin:8px 0}
+  .lead{color:var(--muted);margin:0 0 20px}
+  ul{margin:6px 0 6px 22px;padding:0}
+  li{margin:4px 0}
+  code{background:var(--code);border-radius:4px;padding:1px 5px;font-size:.92em}
+  table{border-collapse:collapse;width:100%;margin:10px 0;font-size:15px}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:#f4f6f8}
+  .note,.tip{border-left:4px solid var(--blue);background:var(--blue-soft);
+             padding:10px 14px;border-radius:0 6px 6px 0;margin:14px 0}
+  .tip{border-color:var(--green);background:var(--green-soft)}
+  .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0}
+  .box{border:1px solid var(--line);border-radius:8px;padding:8px 12px;background:#fff;font-size:14px}
+  .box b{display:block;font-size:13px;color:var(--muted);font-weight:600}
+  .arrow{color:var(--muted);font-size:18px}
+  .stack{margin:18px 0}
+  .layer{display:flex;align-items:center;gap:14px;border:1px solid var(--line);
+         border-radius:10px;background:#fff;padding:10px 14px;margin:6px 0}
+  .layer .tag{min-width:120px;font-weight:700}
+  .layer .desc{color:var(--muted);font-size:14px}
+  .l-app{border-left:6px solid var(--violet)} .l-rpc{border-left:6px solid var(--blue)}
+  .l-disc{border-left:6px solid var(--green)} .l-xport{border-left:6px solid var(--orange)}
+  .l-rtps{border-left:6px solid #b02a37} .l-ntk{border-left:6px solid #0aa2a2}
+  .small{color:var(--muted);font-size:14px}
+  footer{margin-top:40px;color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:12px}
+</style>
+</head>
+<body>
+<main>
+
+<h1>Network Bridge 架构总览</h1>
+<p class="lead">一个跨平台的 C99 通信框架：<b>ntk</b> 提供运行时，之上是发现、传输、RPC/流；另有一条独立的 <b>RTPS/DDS</b> 协议栈，可和 Cyclone DDS 互通。细节见文末的专题文档。</p>
+
+<h2>1. 分层</h2>
+<div class="stack">
+  <div class="layer l-app"><span class="tag">应用</span><span class="desc">node / service / proxy / stub / stream / publish</span></div>
+  <div class="layer l-rpc"><span class="tag">RPC 与消息核心</span><span class="desc">dispatch、pending、dedup、reply、router、registry、waitset、envelope v2</span></div>
+  <div class="layer l-disc"><span class="tag">服务发现</span><span class="desc">UDP 广播 HELLO/BYE（key + value）+ 周期心跳 + 对端注册表</span></div>
+  <div class="layer l-xport"><span class="tag">框架传输</span><span class="desc">UDP（分片/乱序窗口/NACK/RTX/AIMD/可选 FEC）、TCP（长度前缀）、SHM（零拷贝）、Cyclone DDS 适配</span></div>
+  <div class="layer l-rtps"><span class="tag">RTPS / DDS</span><span class="desc">独立协议栈：SPDP/SEDP、可靠传输、分片、QoS；公共 <code>rtps_*</code> 接口；可做框架的 <code>rtps://</code> 传输</span></div>
+  <div class="layer l-ntk"><span class="tag">ntk 运行时</span><span class="desc">跨平台 poller + 线程、定时器、同步原语、MPSC 队列、线程池、poller 负载</span></div>
+</div>
+
+<p class="small">两条数据面是并行的：普通 RPC 走 UDP/TCP/SHM；需要和 DDS 世界互通时走 RTPS（或 Cyclone DDS 适配）。二者共用 ntk，互不依赖。</p>
+
+<h2>2. ntk：跨平台运行时</h2>
+<p><b>Network Tool Kit</b> 等价于 DDS 里的 <code>ddsrt</code>：把 OS 差异收敛成一套 C 接口，框架和 RTPS 都只依赖它。</p>
+<ul>
+  <li><b>poller + 线程模型</b>：每个 node 一个 poller 线程跑事件循环（epoll / kqueue / IOCP 封装）；回调和定时器默认都在 poller 线程执行，没有隐含线程。</li>
+  <li><b>定时器</b>：<code>ntk_timer_start</code>（周期/单次）和 <code>ntk_poller_do_delay</code>（一次性延迟），都挂在 poller 上，不额外起线程。</li>
+  <li><b>负载计算</b>：<code>ntk_poller_get_load</code> / <code>ntk_poller_pool_get_loads</code> 给出负载值，用于观测和 poller 池调度。</li>
+  <li><b>耗时任务</b>：<code>ntk_thread_pool</code>；阻塞 handler 通过 <code>WORKER</code> 模式或调用方 <code>EXECUTOR</code> 挪出 poller 线程。</li>
+  <li><b>其余</b>：mutex/sem/cond、线程、MPSC 队列、socket 封装、日志门面。</li>
+</ul>
+
+<h2>3. 发现：广播 + 心跳</h2>
+<p>服务发现是控制面，和数据面传输解耦：UDP 广播 <b>HELLO/BYE</b>，载荷是 <b>key + value</b>——节点 ID、服务名、以及每个 binding 的完整 URI（<code>udp://</code>、<code>tcp://</code>、<code>shm://</code>、<code>rtps://</code>、<code>dds://</code>）。</p>
+<ul>
+  <li>周期心跳刷新 <code>last_seen</code>，超时即摘除对端及其服务；BYE 用于主动下线。</li>
+  <li>结果写入 registry，proxy/stub 按 <code>service.method</code> 解析到具体 endpoint；支持显式单播 target 和静态路由。</li>
+  <li>RPC 与 SHM 的服务发现是同一套逻辑，区别只在 URI 的 scheme 和端点字段。</li>
+</ul>
+
+<h2>4. TCP / UDP 与 RPC</h2>
+<div class="flow">
+  <div class="box"><b>调用</b>proxy / stub</div><span class="arrow">→</span>
+  <div class="box"><b>信封</b>envelope v2（magic/version/CRC）</div><span class="arrow">→</span>
+  <div class="box"><b>传输</b>UDP / TCP / SHM</div><span class="arrow">→</span>
+  <div class="box"><b>分发</b>dispatch → service</div>
+</div>
+<table>
+  <thead><tr><th>传输</th><th>要点</th></tr></thead>
+  <tbody>
+    <tr><td><b>UDP</b></td><td>类 RTP 头（PT、序号、消息 ID）；分片/重组、乱序窗口；丢包用 <b>NACK + 重传</b>，拥塞用 <b>AIMD</b>；可选<b>整包 XOR FEC</b>（<code>FEC=1</code>，默认关）用一个校验包重建单个丢失分片，省掉一次往返</td></tr>
+    <tr><td><b>TCP</b></td><td>长度前缀分帧，连接复用；跨网段、穿只允许长连接的场景</td></tr>
+    <tr><td><b>SHM</b></td><td>共享段 + 每节点入站队列，chunk 引用计数做零拷贝；本机 RPC/事件优先走它</td></tr>
+  </tbody>
+</table>
+<p class="small">RPC 核心负责关联、超时、重试、去重和回复；传输只搬一个归一化的消息，不解析业务载荷。</p>
+
+<h2>5. RTPS / DDS 协议栈</h2>
+<p><code>src/rtps/</code> 是与框架传输<b>并行</b>的一套 RTPS 2.4 实现，自己的层次也和 Cyclone 对齐：</p>
+<div class="flow">
+  <div class="box"><b>公共 API</b>include/rtps · rtps_*</div><span class="arrow">→</span>
+  <div class="box"><b>引擎</b>src/rtps · SPDP/SEDP/可靠/分片/QoS</div><span class="arrow">→</span>
+  <div class="box"><b>运行时</b>ntk</div>
+</div>
+<ul>
+  <li><b>发现</b>：SPDP 组播 + SEDP 单播；端点 QoS 通告与 RxO 匹配。</li>
+  <li><b>可靠性</b>：writer 历史、HEARTBEAT/ACKNACK/GAP、晚加入者回放；分片 DATA_FRAG/HEARTBEAT_FRAG/NACK_FRAG。</li>
+  <li><b>API</b>：participant → topic → writer/reader（含 publisher/subscriber 分组）、read/take/waitset、loan 视图、状态/发现/指标；接口层只依赖公共头，引擎头在 <code>src/rtps/internal/</code>。</li>
+  <li><b>互通</b>：与 Cyclone DDS 11 的 UDP 组播/单播双向互通已验证；TCP 只在本实现实例之间验证（Cyclone 的 TCP 模式会替换发现传输）。</li>
+  <li><b>框架接入</b>：<code>rtps://&lt;domain&gt;</code> 作为一个 transport provider，和 <code>dds://</code>（Cyclone）并列。</li>
+</ul>
+
+<h2>6. 三方依赖</h2>
+<table>
+  <thead><tr><th>依赖</th><th>用途</th><th>位置</th></tr></thead>
+  <tbody>
+    <tr><td>Cyclone DDS 11.0.1</td><td><code>dds://</code> 传输 provider；RTPS 互通的对照实现；源码内置、静态链接</td><td><code>3rdparty/cyclonedds</code></td></tr>
+    <tr><td>cJSON</td><td>配置文件与 JSON 编解码</td><td><code>3rdparty/cjson</code></td></tr>
+    <tr><td>uthash</td><td>registry/router 等哈希表</td><td><code>3rdparty/uthash</code></td></tr>
+    <tr><td>EasyLogger</td><td>日志后端（<code>nb/log.h</code> 是门面）</td><td><code>3rdparty/elog</code></td></tr>
+    <tr><td>micro-CDR</td><td>RTPS 的 CDR 编解码</td><td><code>3rdparty/micro-cdr</code></td></tr>
+  </tbody>
+</table>
+
+<div class="tip"><b>一句话记住</b>：ntk 是地基；发现是“广播 + 心跳”的通讯录；UDP/TCP/SHM 是三条数据通道，RPC 骑在上面；RTPS 是另一条标准协议通道，自带发现和可靠性，可以和 Cyclone DDS 对接。</div>
+
+<h2>7. 继续阅读</h2>
+<ul>
+  <li><a href="architecture.md">Architecture（英文）</a>：endpoint/message/QoS/provider 的契约与取舍。</li>
+  <li><a href="rtps-spec.md">RTPS 实现规范</a>：报文格式、发现、QoS、可靠性与互通矩阵。</li>
+  <li><a href="rtps-api.md">rtps_* API 参考</a>：对象模型、QoS 继承、read/take/waitset、与 ddsc 的对应。</li>
+  <li><a href="rtps-protocol.html">RTPS 协议大白话手册</a>：抓包与排错视角。</li>
+  <li><a href="performance.md">性能与延迟</a>、<a href="testing.md">测试与质量门禁</a>。</li>
+</ul>
+
+<footer>Network Bridge · 架构总览 · 细节以代码和专题文档为准。</footer>
+</main>
+</body>
+</html>
