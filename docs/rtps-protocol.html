@@ -1,0 +1,1791 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RTPS 协议大白话手册 · network_bridge</title>
+<style>
+:root{
+  --bg:#fbfbfa;
+  --fg:#1f2328;
+  --muted:#5b6570;
+  --line:#d8dee4;
+  --accent:#0b6bcb;
+  --accent-soft:#eaf2fd;
+  --warn:#a15c07;
+  --warn-soft:#fff6e5;
+  --ok:#1a7f37;
+  --ok-soft:#e9f7ee;
+  --code:#f3f5f7;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--fg);
+  font:16px/1.75 "Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+header.top{
+  border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,#ffffff,#f7f9fb);
+}
+header.top .inner{max-width:1180px;margin:0 auto;padding:28px 24px 22px}
+header.top h1{margin:0 0 6px;font-size:26px;letter-spacing:.2px}
+header.top p{margin:0;color:var(--muted);font-size:14px}
+.wrap{
+  max-width:1180px;
+  margin:0 auto;
+  padding:0 24px 80px;
+  display:grid;
+  grid-template-columns:250px minmax(0,1fr);
+  gap:44px;
+}
+nav#toc{
+  position:sticky;
+  top:0;
+  align-self:start;
+  max-height:100vh;
+  overflow:auto;
+  padding:26px 0 40px;
+  font-size:14px;
+  border-right:1px solid var(--line);
+}
+nav#toc .toc-title{font-weight:600;color:var(--muted);font-size:12px;letter-spacing:.12em;text-transform:uppercase;margin:0 0 10px 12px}
+nav#toc ol{list-style:none;margin:0;padding:0}
+nav#toc li{margin:0}
+nav#toc a{display:block;padding:4px 12px;color:#3d4650;border-left:2px solid transparent}
+nav#toc a:hover{background:var(--accent-soft);text-decoration:none;border-left-color:var(--accent)}
+nav#toc .sub a{padding-left:26px;font-size:13px;color:#5b6570}
+main{min-width:0;padding:26px 0 0}
+h2{
+  margin:56px 0 14px;
+  font-size:23px;
+  padding-bottom:8px;
+  border-bottom:1px solid var(--line);
+  scroll-margin-top:16px;
+}
+h2:first-child{margin-top:10px}
+h3{margin:34px 0 10px;font-size:18px;scroll-margin-top:16px}
+h4{margin:24px 0 8px;font-size:15.5px;color:#2b3138}
+p{margin:10px 0}
+ul,ol{padding-left:22px}
+li{margin:5px 0}
+code{
+  font:.88em/1.4 "Cascadia Mono","JetBrains Mono",Consolas,"Courier New",monospace;
+  background:var(--code);
+  border:1px solid #e4e8ec;
+  border-radius:4px;
+  padding:1px 5px;
+  white-space:nowrap;
+}
+pre{
+  background:#0f1720;
+  color:#dfe7ef;
+  padding:14px 16px;
+  border-radius:8px;
+  overflow:auto;
+  font:13px/1.6 "Cascadia Mono","JetBrains Mono",Consolas,monospace;
+  margin:14px 0;
+}
+pre code{background:none;border:0;padding:0;color:inherit;white-space:pre}
+pre.diagram{background:#f7f9fb;color:#26313c;border:1px solid var(--line);font-size:12.5px}
+table{
+  width:100%;
+  border-collapse:collapse;
+  margin:14px 0;
+  font-size:14px;
+}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:#f1f4f7;font-weight:600}
+tbody tr:nth-child(even) td{background:#fcfdfe}
+td code{white-space:nowrap}
+.note,.warn,.tip{
+  margin:16px 0;
+  padding:12px 16px;
+  border-radius:8px;
+  border:1px solid;
+  font-size:14.5px;
+}
+.note{background:var(--accent-soft);border-color:#c9ddf6}
+.warn{background:var(--warn-soft);border-color:#f0d9ad}
+.tip{background:var(--ok-soft);border-color:#c6e6d0}
+.note b,.warn b,.tip b{display:block;margin-bottom:2px;font-size:13px;letter-spacing:.04em}
+.note b{color:var(--accent)}
+.warn b{color:var(--warn)}
+.tip b{color:var(--ok)}
+.lead{font-size:15.5px;color:#3a434d}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 18px;margin:12px 0;font-size:14.5px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0}
+.small{font-size:13px;color:var(--muted)}
+footer{
+  border-top:1px solid var(--line);
+  margin-top:60px;
+  padding:24px 0 0;
+  color:var(--muted);
+  font-size:13px;
+}
+@media (max-width:920px){
+  .wrap{grid-template-columns:1fr;gap:0}
+  nav#toc{position:static;max-height:none;border-right:0;border-bottom:1px solid var(--line);padding-bottom:16px}
+  nav#toc ol{columns:2;column-gap:16px}
+  nav#toc .sub a{padding-left:12px}
+  pre{font-size:12px}
+}
+@media print{
+  nav#toc{display:none}
+  .wrap{display:block;max-width:none}
+  pre{white-space:pre-wrap;word-break:break-word}
+  h2{page-break-after:avoid}
+  table{page-break-inside:avoid}
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="inner">
+    <h1>RTPS 协议大白话手册</h1>
+    <p>以 <code>network_bridge</code> 的自研 RTPS 栈为准 · 报文格式 / SPDP / SEDP / QoS / 可靠传输</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+<nav id="toc">
+  <p class="toc-title">目录</p>
+  <ol>
+    <li><a href="#overview">0. 这份文档怎么读</a></li>
+    <li><a href="#intuition">1. 五分钟建立直觉</a></li>
+    <li><a href="#terms">2. 名词表</a></li>
+    <li><a href="#wire">3. 报文格式</a></li>
+    <li class="sub"><a href="#wire-envelope">3.1 整体结构</a></li>
+    <li class="sub"><a href="#wire-header">3.2 消息头</a></li>
+    <li class="sub"><a href="#wire-subheader">3.3 子消息头</a></li>
+    <li class="sub"><a href="#wire-flags">3.4 标志位</a></li>
+    <li class="sub"><a href="#wire-submessages">3.5 各子消息</a></li>
+    <li class="sub"><a href="#wire-bits">3.6 序列号、时间、位图</a></li>
+    <li class="sub"><a href="#wire-params">3.7 ParameterList</a></li>
+    <li class="sub"><a href="#wire-pids">3.8 PID 总表</a></li>
+    <li><a href="#addressing">4. 地址、端口、Locator</a></li>
+    <li><a href="#spdp">5. SPDP：先找到人</a></li>
+    <li><a href="#sedp">6. SEDP：交换名片</a></li>
+    <li><a href="#qos">7. QoS：能不能聊得来</a></li>
+    <li><a href="#reliable">8. 可靠传输与分片</a></li>
+    <li><a href="#dataplane">9. 一条数据的完整旅程</a></li>
+    <li><a href="#lifecycle">10. 生命周期与状态事件</a></li>
+    <li><a href="#dialect">11. 本仓库的“方言”</a></li>
+    <li><a href="#debug">12. 抓包与排错</a></li>
+    <li><a href="#appendix">13. 附录：常量速查</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<h2 id="overview">0. 这份文档怎么读</h2>
+
+<p class="lead">
+RTPS（Real-Time Publish-Subscribe）说白了就是一套“在 UDP 上互相喊话”的二进制约定：
+谁在线、我有哪些数据、你感不感兴趣、丢了怎么补。它本身不规定你发什么业务数据，
+只规定<strong>怎么找到对方、怎么描述自己、怎么把字节送过去</strong>。
+</p>
+
+<p>
+这份文档讲的是<strong>本仓库这套实现</strong>（<code>src/rtps/</code>），不是 OMG 规范的逐条翻译。
+好处是：每个字段宽度、每个定时器、每条“不匹配”的判定，都能在代码里找到出处；
+代价是：它只覆盖本实现真正用到的子集。
+</p>
+
+<div class="note">
+<b>阅读约定</b>
+文中所有多字节整数默认<strong>小端</strong>（低字节在前）。十六进制写作 <code>0x0015</code> 这种形式。
+“线上”指实际发出的字节；“解析”指收到报文后的处理。发现流程里的“名片”是 ParameterList（参数列表）的口语说法。
+</div>
+
+<p>建议的阅读顺序：</p>
+<ol>
+  <li>先看第 1 章建立整体图景，别急着背字段。</li>
+  <li>要写解析器 / 抓包对照，看第 3、4 章。</li>
+  <li>要排查“为什么发现不到对方”，看第 5、6、12 章。</li>
+  <li>要排查“为什么发现到了却收不到数据”，看第 7、8 章。</li>
+</ol>
+
+<p class="small">
+配套文档：<a href="rtps-spec.md">rtps-spec.md</a>（本实现的规范性说明：字段、默认值、
+限制、QoS 匹配规则与 Cyclone 互通矩阵）。规范细节以 rtps-spec.md 和 src/rtps/ 代码为准，
+本文偏“线上到底长什么样、出问题怎么排”。
+</p>
+
+<h2 id="intuition">1. 五分钟建立直觉</h2>
+
+<h3>1.1 四个角色</h3>
+
+<table>
+<thead><tr><th>角色</th><th>大白话</th><th>在代码里</th></tr></thead>
+<tbody>
+<tr><td>Participant</td><td>进程里的一个“大喇叭”。它有自己的地址、自己的 ID，负责收发一切。</td><td><code>nb_rtps_participant_t</code></td></tr>
+<tr><td>Writer</td><td>“我这儿有数据要发”。一个 writer 对应一个 topic。</td><td><code>NB_RTPS_ENDPOINT_PUBLICATION</code></td></tr>
+<tr><td>Reader</td><td>“我这儿想收数据”。一个 reader 也对应一个 topic。</td><td><code>NB_RTPS_ENDPOINT_SUBSCRIPTION</code></td></tr>
+<tr><td>Topic + Type</td><td>聊什么（话题名）+ 用什么格式聊（类型名）。两者都对上，才算同一个频道。</td><td><code>topic_name</code> / <code>type_name</code></td></tr>
+</tbody>
+</table>
+
+<h3>1.2 两阶段发现</h3>
+
+<p>RTPS 的发现分两步，像现实里的社交：</p>
+
+<ol>
+  <li><strong>SPDP（Simple Participant Discovery Protocol）</strong>：先喊“我在这儿”。
+  内容很少：我是谁、我的地址、我的租约多久、我支持哪些内置端点。相当于在广场上广播“我叫张三，住 3 号楼”。</li>
+  <li><strong>SEDP（Simple Endpoint Discovery Protocol）</strong>：认识之后交换名片。
+  内容变多：我有哪些 writer / reader、每个的 topic、type、QoS。相当于加微信后发详细资料。</li>
+</ol>
+
+<p>
+顺序不能反：不知道对方地址，就没法单播名片；不知道对方有哪些端点，就不知道数据该发给谁。
+</p>
+
+<h3>1.3 一张图</h3>
+
+<pre class="diagram">
+一个 UDP 数据报
+└─ RTPS 消息头（固定 20 字节）
+└─ 子消息 1
+└─ 子消息 2
+└─ ...
+   └─ 每个子消息 = 4 字节头（id / flags / 长度）+ 内容（补齐到 4 字节）
+
+再往里一层：发现报文里 DATA 的载荷 = ParameterList
+└─ PID(u16) + 长度(u16) + 值 + 补齐
+└─ PID(u16) + 长度(u16) + 值 + 补齐
+└─ ...
+└─ SENTINEL（PID 0x0001，长度 0）
+</pre>
+
+<h3>1.4 一句话总结</h3>
+
+<div class="tip">
+<b>记住这三句就够用了</b>
+发现 = 组播喊 SPDP（我在哪）→ 单播发 SEDP（我有什么）→ 双方按 topic/type/QoS 匹配 → 匹配上了才发数据。
+</div>
+
+<h2 id="terms">2. 名词表</h2>
+
+<table>
+<thead><tr><th>词</th><th>什么意思</th><th>本实现的取值 / 布局</th></tr></thead>
+<tbody>
+<tr>
+  <td>Domain</td>
+  <td>逻辑隔离域。同一个域里的 participant 才会互相发现。</td>
+  <td>配置项 <code>domain_id</code>，合法范围 0–232</td>
+</tr>
+<tr>
+  <td>GUID</td>
+  <td>全局唯一 ID，16 字节。</td>
+  <td>GUID prefix（12B）+ EntityId（4B）</td>
+</tr>
+<tr>
+  <td>GUID prefix</td>
+  <td>participant 级别的身份前缀，同一个 participant 下所有实体共用。</td>
+  <td><code>01 9a 'N' 'B' + 8 字节</code>（见 3.2）</td>
+</tr>
+<tr>
+  <td>EntityId</td>
+  <td>实体编号，4 字节。</td>
+  <td>3 字节 key + 1 字节 kind</td>
+</tr>
+<tr>
+  <td>Endpoint</td>
+  <td>writer 或 reader 的统称。</td>
+  <td>用户端点 kind = <code>0x03</code>（writer）/ <code>0x04</code>（reader）</td>
+</tr>
+<tr>
+  <td>Locator</td>
+  <td>“怎么找到我”：地址 + 端口 + 传输类型。</td>
+  <td>24 字节，见第 4 章</td>
+</tr>
+<tr>
+  <td>Metatraffic</td>
+  <td>发现用的流量（SPDP / SEDP / 心跳）。</td>
+  <td>本实现用独立单播端口，另加 SPDP 组播端口</td>
+</tr>
+<tr>
+  <td>User traffic</td>
+  <td>业务数据流量。</td>
+  <td>复用 metatraffic 的单播端口（不区分 d1/d3）</td>
+</tr>
+<tr>
+  <td>SequenceNumber</td>
+  <td>每个 writer 自己的流水号，从 1 开始。</td>
+  <td>两个 32 位：high 恒 0，low 递增</td>
+</tr>
+<tr>
+  <td>Lease</td>
+  <td>“我还能活多久”。到期没再听到对方，就认为它挂了。</td>
+  <td>默认 20 s，允许 1 s – 1 h</td>
+</tr>
+<tr>
+  <td>Builtin endpoints</td>
+  <td>协议自带的端点，不是用户创建的。</td>
+  <td>SPDP、SEDP pubs/subs、ParticipantMessage，见 2.2</td>
+</tr>
+<tr>
+  <td>QoS</td>
+  <td>“我保证什么 / 我要求什么”。</td>
+  <td>写在 SEDP 名片里，见第 7 章</td>
+</tr>
+</tbody>
+</table>
+
+<h3>2.1 EntityId 的构成</h3>
+
+<p>
+4 个字节里，前 3 个是 key（区分不同实体），最后一个字节是 kind（区分类型）。
+kind 决定“这是 writer 还是 reader、是用户建的还是协议内置的”。
+</p>
+
+<table>
+<thead><tr><th>kind</th><th>含义</th><th>典型值</th></tr></thead>
+<tbody>
+<tr><td><code>0x00</code></td><td>未知 / 通配</td><td><code>00 00 00 00</code></td></tr>
+<tr><td><code>0x01</code></td><td>participant 本身</td><td><code>00 00 01 c1</code></td></tr>
+<tr><td><code>0x03</code></td><td>用户 writer（RTPS 语义为“带 key”；本实现不推导 key，数据不带 key）</td><td>本实现创建的 publication</td></tr>
+<tr><td><code>0x04</code></td><td>用户 reader（无 key）</td><td>本实现创建的 subscription</td></tr>
+<tr><td><code>0xc2</code></td><td>内置 writer（带 key）</td><td>SPDP writer、SEDP writer</td></tr>
+<tr><td><code>0xc7</code></td><td>内置 reader（带 key）</td><td>SPDP reader、SEDP reader</td></tr>
+</tbody>
+</table>
+
+<p>
+用户端点共用一个 key 计数器（<code>next_entity_key</code>），从 1 开始递增，与 writer / reader 无关：
+第一个创建的端点 key = 1（例如第一个 writer 是 <code>01 00 00 03</code>），第二个创建的端点是
+<code>02 00 00 04</code>，以此类推。
+</p>
+
+<h3>2.2 内置实体 ID 速查</h3>
+
+<table>
+<thead><tr><th>用途</th><th>EntityId（4 字节）</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>Participant</td><td><code>00 00 01 c1</code></td><td>SPDP 里 <code>PID_PARTICIPANT_GUID</code> 的 entity 部分</td></tr>
+<tr><td>SPDP writer</td><td><code>00 01 00 c2</code></td><td>组播发现报文的 writerId</td></tr>
+<tr><td>SPDP reader</td><td><code>00 01 00 c7</code></td><td>接收 SPDP</td></tr>
+<tr><td>SEDP publications writer</td><td><code>00 00 03 c2</code></td><td>通告“我有哪些 writer”</td></tr>
+<tr><td>SEDP publications reader</td><td><code>00 00 03 c7</code></td><td>接收别人的 writer 通告</td></tr>
+<tr><td>SEDP subscriptions writer</td><td><code>00 00 04 c2</code></td><td>通告“我有哪些 reader”</td></tr>
+<tr><td>SEDP subscriptions reader</td><td><code>00 00 04 c7</code></td><td>接收别人的 reader 通告</td></tr>
+<tr><td>ParticipantMessage writer</td><td><code>00 02 00 c2</code></td><td>liveliness 断言（PMD）</td></tr>
+<tr><td>ParticipantMessage reader</td><td><code>00 02 00 c7</code></td><td>接收 PMD</td></tr>
+<tr><td>Unknown</td><td><code>00 00 00 00</code></td><td>“谁都可以收”，常用在通告类 DATA 的 readerId</td></tr>
+</tbody>
+</table>
+
+<h3>2.3 内置端点集（PID_BUILTIN_ENDPOINT_SET）</h3>
+
+<p>SPDP 里用一个 32 位掩码告诉对方“我支持哪些内置端点”。每一位的含义：</p>
+
+<table>
+<thead><tr><th>位</th><th>名字</th><th>本实现是否置位</th></tr></thead>
+<tbody>
+<tr><td><code>0x00000001</code></td><td>Participant announcer（SPDP 发）</td><td>是</td></tr>
+<tr><td><code>0x00000002</code></td><td>Participant detector（SPDP 收）</td><td>是</td></tr>
+<tr><td><code>0x00000004</code></td><td>Publications announcer（SEDP 发 pubs）</td><td>是</td></tr>
+<tr><td><code>0x00000008</code></td><td>Publications detector</td><td>是</td></tr>
+<tr><td><code>0x00000010</code></td><td>Subscriptions announcer</td><td>是</td></tr>
+<tr><td><code>0x00000020</code></td><td>Subscriptions detector</td><td>是</td></tr>
+<tr><td><code>0x00000400</code></td><td>ParticipantMessage writer</td><td>是</td></tr>
+<tr><td><code>0x00000800</code></td><td>ParticipantMessage reader</td><td>是</td></tr>
+</tbody>
+</table>
+
+<p class="small">另外还有 secure 相关的位（SPDP/SEDP 的 secure 变体），本实现没有安全模块，所以不置位。</p>
+
+<h2 id="wire">3. 报文格式</h2>
+
+<h3 id="wire-envelope">3.1 整体结构</h3>
+
+<p>
+一个 RTPS 报文（就是一个 UDP 数据报的载荷）永远是：
+<strong>一个 20 字节消息头 + 一连串子消息</strong>。
+子消息之间没有分隔符，全靠每个子消息自己的长度字段往下走。
+</p>
+
+<pre class="diagram">
+offset 0                                offset 20
+[ "RTPS" ][2.4][vendor][guidPrefix]     [ submsg 1 ][ submsg 2 ] ... [ submsg N ]
+  4B        1B   1B      12B             每个 = 4B 头 + 内容（补齐到 4B）
+
+消息头：0-3 "RTPS" | 4 verMajor | 5 verMinor | 6-7 vendorId | 8-19 guidPrefix
+子消息头：0 id | 1 flags | 2-3 octetsToNextHeader（内容长度，不含这 4 字节）
+</pre>
+
+<p>几个容易踩的点：</p>
+<ul>
+  <li>子消息的内容<strong>补齐到 4 字节</strong>，补齐的 0 也算在长度里。</li>
+  <li>长度字段是 16 位，所以单个子消息最多 65535 + 4 字节。数据大了必须分片（见第 8 章）。</li>
+  <li>本实现只发<strong>小端</strong>报文，也基本只接受小端；E 标志永远置 1。</li>
+  <li>一个包里可以塞多个子消息，也可以只塞一个。接收方按顺序处理。</li>
+</ul>
+
+<h3 id="wire-header">3.2 消息头（20 字节）</h3>
+
+<table>
+<thead><tr><th>偏移</th><th>宽度</th><th>字段</th><th>本实现的取值 / 说明</th></tr></thead>
+<tbody>
+<tr><td>0–3</td><td>4</td><td>magic</td><td>ASCII <code>"RTPS"</code>（<code>52 54 50 53</code>）。不是“RTPS 缩写”，就是四个字符的定界符。</td></tr>
+<tr><td>4</td><td>1</td><td>versionMajor</td><td><code>2</code></td></tr>
+<tr><td>5</td><td>1</td><td>versionMinor</td><td><code>4</code></td></tr>
+<tr><td>6–7</td><td>2</td><td>vendorId</td><td><code>01 9a</code>（占位值，正式发布前要换成 OMG 分配的厂商号）</td></tr>
+<tr><td>8–19</td><td>12</td><td>guidPrefix</td><td>本 participant 的前缀，见下</td></tr>
+</tbody>
+</table>
+
+<p>GUID prefix 的 12 个字节这样来：</p>
+
+<table>
+<thead><tr><th>字节</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>0–1</td><td>vendor id：<code>01 9a</code></td></tr>
+<tr><td>2–3</td><td>ASCII <code>"NB"</code>（<code>4e 42</code>），标明是本实现</td></tr>
+<tr><td>4–7</td><td>当前毫秒时间戳的低 32 位（小端）</td></tr>
+<tr><td>8–11</td><td>时间戳高 32 位 XOR participant 指针（小端）</td></tr>
+</tbody>
+</table>
+
+<p>
+所以同一台机器上不同进程、不同时刻启动的 participant，前缀基本不会撞。
+它<strong>不是</strong>随机 UUID，也不含 IP。
+</p>
+
+<h3 id="wire-subheader">3.3 子消息头（4 字节）</h3>
+
+<table>
+<thead><tr><th>偏移</th><th>宽度</th><th>字段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>1</td><td>submessageId</td><td>见 3.5 的表</td></tr>
+<tr><td>1</td><td>1</td><td>flags</td><td>见 3.4；同一位在不同子消息里含义不同</td></tr>
+<tr><td>2–3</td><td>2</td><td>octetsToNextHeader</td><td>小端。= 本子消息 body 长度（含补齐），<strong>不含</strong>这 4 字节头</td></tr>
+</tbody>
+</table>
+
+<p>
+因此“下一个子消息从哪开始” = 当前偏移 + 4 + octetsToNextHeader。
+遇到不认识的 id，直接按这个长度跳过即可（本实现就是这么处理 INFO_SRC / INFO_REPLY 的）。
+</p>
+
+<h3 id="wire-flags">3.4 标志位</h3>
+
+<table>
+<thead><tr><th>位</th><th>名字</th><th>用在哪</th><th>含义</th></tr></thead>
+<tbody>
+<tr><td><code>0x01</code></td><td>E（Endianness）</td><td>所有子消息</td><td>1 = 小端，0 = 大端。本实现恒为 1。</td></tr>
+<tr><td><code>0x02</code></td><td>Q（InlineQos）</td><td>DATA / DATA_FRAG</td><td>1 = 序列号后面跟一段 ParameterList（内联 QoS），再往后才是载荷。</td></tr>
+<tr><td><code>0x04</code></td><td>D（Data）</td><td>DATA</td><td>1 = 后面有序列化载荷。删除/只发 key 时清 0。</td></tr>
+<tr><td><code>0x08</code></td><td>K（Key）</td><td>DATA</td><td>1 = 载荷只是 key（实例句柄），不是完整样本。</td></tr>
+<tr><td><code>0x04</code></td><td>K（Key）</td><td>DATA_FRAG</td><td>1 = 这个分片序列承载的是 key-only 样本。<strong>注意不是 0x08</strong>：DATA_FRAG 的 0x08 没有定义。</td></tr>
+<tr><td><code>0x02</code></td><td>F（Final）</td><td>ACKNACK</td><td>1 = “不用回应”。本实现只在纯确认（numBits = 0）时置位；请求补发时清 0。</td></tr>
+<tr><td><code>0x02</code></td><td>F（Final）</td><td>HEARTBEAT</td><td>1 = “不需要 ACKNACK 回应”。本实现不发这一位。</td></tr>
+<tr><td><code>0x04</code></td><td>L（Liveliness）</td><td>HEARTBEAT</td><td>1 = 这个心跳同时断言 writer 还活着（manual-by-topic 用）。<strong>L 是 0x04，不是 0x02。</strong></td></tr>
+<tr><td><code>0x02</code></td><td>I（Invalidate）</td><td>INFO_TS</td><td>1 = 时间戳无效，body 长度为 0。本实现只发有效时间戳。</td></tr>
+</tbody>
+</table>
+
+<div class="warn">
+<b>别把 flags 当全局位图</b>
+<code>0x02</code> 在 ACKNACK 和 HEARTBEAT 里都是 Final，在 INFO_TS 里是 Invalidate；
+<code>0x04</code> 在 HEARTBEAT 里是 Liveliness，在 DATA_FRAG 里却是 Key。
+解析时必须先看 submessageId，再解释 flags。
+</div>
+
+<h3 id="wire-submessages">3.5 各子消息</h3>
+
+<p>下表的偏移都<strong>从子消息第 1 个字节（id）算起</strong>，不是从 UDP 包开头算。</p>
+
+<h4>INFO_TS（0x09）—— 给后面的数据打个时间戳</h4>
+
+<table>
+<thead><tr><th>偏移</th><th>宽度</th><th>字段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>0–3</td><td>4</td><td>子消息头</td><td>id=0x09，flags=E（或 E|I）</td></tr>
+<tr><td>4–7</td><td>4</td><td>seconds</td><td>int32，Unix 秒</td></tr>
+<tr><td>8–11</td><td>4</td><td>fraction</td><td>uint32，单位 2<sup>-32</sup> 秒</td></tr>
+</tbody>
+</table>
+
+<p>
+本实现发每个 DATA 前都会先写一个 INFO_TS；时间来自系统时钟毫秒值：
+<code>fraction = (ms % 1000) &lt;&lt; 32 / 1000</code>。
+INFO_TS 对它<strong>后面所有</strong>子消息生效，直到下一个 INFO_TS。
+</p>
+
+<h4>INFO_DST（0x0e）—— 这包是给谁的</h4>
+
+<table>
+<thead><tr><th>偏移</th><th>宽度</th><th>字段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>0–3</td><td>4</td><td>子消息头</td><td>id=0x0e</td></tr>
+<tr><td>4–15</td><td>12</td><td>guidPrefix</td><td>目标 participant 的前缀；全 0 表示“谁都可以看”</td></tr>
+</tbody>
+</table>
+
+<p>
+单播 SEDP、用户数据、ACKNACK、HEARTBEAT 发送时都会带 INFO_DST，明确写给某个 participant；
+组播 SPDP 不带（它本来就是喊给所有人听的）。
+接收侧目前<strong>不按 INFO_DST 过滤</strong>：单播 socket 已经保证只收到发给本 participant 的包，
+组播 SPDP 永远不带该子消息。看到“写给别人”的 INFO_DST 时，本实现不会因此丢包——
+这是与规范的一处已知偏差，见第 11 章。
+</p>
+
+<h4>INFO_SRC（0x0c）/ INFO_REPLY（0x0f）</h4>
+
+<p>
+规范里用来声明“源 participant”和“回复地址”。本实现<strong>不发</strong>这两种子消息，
+收到也不处理，直接按长度跳过。看到它们不用慌，跳过即可。
+</p>
+
+<h4>DATA（0x15）—— 主力选手</h4>
+
+<table>
+<thead><tr><th>偏移</th><th>宽度</th><th>字段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>0–3</td><td>4</td><td>子消息头</td><td>id=0x15；flags 里 E 必有，Q/D/K 视情况</td></tr>
+<tr><td>4–5</td><td>2</td><td>extraFlags</td><td>本实现恒 0</td></tr>
+<tr><td>6–7</td><td>2</td><td>octetsToInlineQos</td><td>本实现写 <strong>16</strong>：从本字段之后数 16 字节就是内联 QoS 的起点</td></tr>
+<tr><td>8–11</td><td>4</td><td>readerId</td><td>目标 reader；<code>00000000</code> 表示不指定</td></tr>
+<tr><td>12–15</td><td>4</td><td>writerId</td><td>发送方 writer</td></tr>
+<tr><td>16–19</td><td>4</td><td>writerSN.high</td><td>int32，本实现恒 0</td></tr>
+<tr><td>20–23</td><td>4</td><td>writerSN.low</td><td>uint32，从 1 开始</td></tr>
+<tr><td>24…</td><td>变长</td><td>inlineQos</td><td>仅当 Q=1；是一个 ParameterList（到 PID_SENTINEL 结束）</td></tr>
+<tr><td>…</td><td>变长</td><td>serializedPayload</td><td>仅当 D=1；业务数据或发现参数列表</td></tr>
+</tbody>
+</table>
+
+<p>DATA 的三种常见形态：</p>
+<table>
+<thead><tr><th>场景</th><th>flags</th><th>载荷</th></tr></thead>
+<tbody>
+<tr><td>正常样本</td><td>E | D（可能再加 Q）</td><td>完整序列化数据</td></tr>
+<tr><td>只发 key（实例下线）</td><td>E | K</td><td>key 的序列化值</td></tr>
+<tr><td>删除通告 / 带内联 QoS</td><td>E | K | Q</td><td>ParameterList（可含 <code>PID_STATUS_INFO</code>、<code>PID_KEY_HASH</code>）</td></tr>
+</tbody>
+</table>
+
+<p class="small">
+本实现的发现报文用 <code>readerId = 00000000</code>、<code>writerId = 内置 writer</code>、<code>D=1</code>，
+载荷是 ParameterList。业务数据则把 readerId 写成对端的具体实体。
+</p>
+
+<h4>DATA_FRAG（0x16）—— 大样本切片</h4>
+
+<table>
+<thead><tr><th>偏移</th><th>宽度</th><th>字段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>0–3</td><td>4</td><td>子消息头</td><td>id=0x16</td></tr>
+<tr><td>4–5</td><td>2</td><td>extraFlags</td><td>0</td></tr>
+<tr><td>6–7</td><td>2</td><td>octetsToInlineQos</td><td>本实现写 <strong>28</strong></td></tr>
+<tr><td>8–11</td><td>4</td><td>readerId</td><td></td></tr>
+<tr><td>12–15</td><td>4</td><td>writerId</td><td></td></tr>
+<tr><td>16–19</td><td>4</td><td>writerSN.high</td><td>0</td></tr>
+<tr><td>20–23</td><td>4</td><td>writerSN.low</td><td></td></tr>
+<tr><td>24–27</td><td>4</td><td>fragmentStartingNum</td><td>从 1 开始，不是 0</td></tr>
+<tr><td>28–29</td><td>2</td><td>fragmentsInSubmessage</td><td>本实现每包只放 1 片，恒 1</td></tr>
+<tr><td>30–31</td><td>2</td><td>fragmentSize</td><td>本实现 1028</td></tr>
+<tr><td>32–35</td><td>4</td><td>sampleSize</td><td>整个样本的字节数</td></tr>
+<tr><td>36…</td><td>变长</td><td>inlineQos / 分片数据</td><td>Q=1 时先有 ParameterList</td></tr>
+</tbody>
+</table>
+
+<p>
+最后一个分片通常不足 1028 字节，但 <code>fragmentSize</code> 仍然写 1028——
+接收方用 <code>sampleSize</code> 算最后一片的实际长度。
+1028 是 4 的倍数且大于 1024，这是 RTPS 对分片尺寸的硬性要求（严格的实现会把 1024 判为非法）。
+</p>
+
+<h4>HEARTBEAT（0x07）—— “我这儿有 1..N，你缺哪个？”</h4>
+
+<table>
+<thead><tr><th>偏移</th><th>宽度</th><th>字段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>0–3</td><td>4</td><td>子消息头</td><td>id=0x07；L 位表示同时断言 liveliness</td></tr>
+<tr><td>4–7</td><td>4</td><td>readerId</td><td>目标 reader；本实现的 SEDP 心跳固定填对端内置 SEDP reader（实体 ID 恒为 <code>00 00 03 c7</code> / <code>00 00 04 c7</code>）</td></tr>
+<tr><td>8–11</td><td>4</td><td>writerId</td><td></td></tr>
+<tr><td>12–15</td><td>4</td><td>firstSN.high</td><td>0</td></tr>
+<tr><td>16–19</td><td>4</td><td>firstSN.low</td><td>历史里最老的可用序号</td></tr>
+<tr><td>20–23</td><td>4</td><td>lastSN.high</td><td>0</td></tr>
+<tr><td>24–27</td><td>4</td><td>lastSN.low</td><td>最新写过的序号</td></tr>
+<tr><td>28–31</td><td>4</td><td>count</td><td>心跳计数器，每次 +1；用来识别“重复心跳”</td></tr>
+</tbody>
+</table>
+
+<p>
+body 固定 28 字节。读者看到 <code>firstSN</code> 比自己期待的还大，说明中间的样本已经被writer 淘汰了，
+得把窗口直接跳到 <code>firstSN</code>（本实现就是这么做的）。
+</p>
+
+<h4>ACKNACK（0x06）—— “我缺这些”</h4>
+
+<table>
+<thead><tr><th>偏移</th><th>宽度</th><th>字段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>0–3</td><td>4</td><td>子消息头</td><td>id=0x06；F 位 = 不用回心跳</td></tr>
+<tr><td>4–7</td><td>4</td><td>readerId</td><td>发起请求的 reader</td></tr>
+<tr><td>8–11</td><td>4</td><td>writerId</td><td>被要求的 writer</td></tr>
+<tr><td>12–15</td><td>4</td><td>base.high</td><td>0</td></tr>
+<tr><td>16–19</td><td>4</td><td>base.low</td><td>窗口起点（“从这个号开始看”）</td></tr>
+<tr><td>20–23</td><td>4</td><td>numBits</td><td>后面位图的有效位数，本实现上限 256</td></tr>
+<tr><td>24…</td><td>4×n</td><td>bitmap</td><td>n = ceil(numBits/32)，每字 32 位</td></tr>
+<tr><td>…</td><td>4</td><td>count</td><td>ACKNACK 自己的计数器</td></tr>
+</tbody>
+</table>
+
+<h4>GAP（0x08）—— “这些号别等了，我不会发”</h4>
+
+<table>
+<thead><tr><th>偏移</th><th>宽度</th><th>字段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>0–3</td><td>4</td><td>子消息头</td><td>id=0x08</td></tr>
+<tr><td>4–7</td><td>4</td><td>readerId</td><td></td></tr>
+<tr><td>8–11</td><td>4</td><td>writerId</td><td></td></tr>
+<tr><td>12–15</td><td>4</td><td>gapStart.high</td><td>0</td></tr>
+<tr><td>16–19</td><td>4</td><td>gapStart.low</td><td>空洞起点，<strong>包含</strong>这个号</td></tr>
+<tr><td>20–23</td><td>4</td><td>base.high</td><td>0</td></tr>
+<tr><td>24–27</td><td>4</td><td>base.low</td><td>附加空洞的起点</td></tr>
+<tr><td>28–31</td><td>4</td><td>numBits</td><td></td></tr>
+<tr><td>32…</td><td>4×n</td><td>bitmap</td><td>相对 base 的附加空洞</td></tr>
+</tbody>
+</table>
+
+<p>GAP 没有 count 字段，body = 28 + 4n。
+本实现的 writer 只发“连续区间”这一种形态：<code>gapStart = 第一个不可用序号</code>、
+<code>bitmapBase = 最后一个不可用序号 + 1</code>、<code>numBits = 0</code>。
+bitmapBase 绝不能为 0——Cyclone 会把整个 GAP 判为非法报文。</p>
+
+<h4>HEARTBEAT_FRAG（0x13）—— “这个样本一共 K 片”</h4>
+
+<table>
+<thead><tr><th>偏移</th><th>宽度</th><th>字段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>0–3</td><td>4</td><td>子消息头</td><td>id=0x13</td></tr>
+<tr><td>4–7</td><td>4</td><td>readerId</td><td></td></tr>
+<tr><td>8–11</td><td>4</td><td>writerId</td><td></td></tr>
+<tr><td>12–19</td><td>8</td><td>writerSN</td><td>high(4) + low(4)</td></tr>
+<tr><td>20–23</td><td>4</td><td>lastFragmentNum</td><td>总片数</td></tr>
+<tr><td>24–27</td><td>4</td><td>count</td><td></td></tr>
+</tbody>
+</table>
+
+<h4>NACK_FRAG（0x12）—— “这个样本我缺第 3、7 片”</h4>
+
+<table>
+<thead><tr><th>偏移</th><th>宽度</th><th>字段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>0–3</td><td>4</td><td>子消息头</td><td>id=0x12</td></tr>
+<tr><td>4–7</td><td>4</td><td>readerId</td><td></td></tr>
+<tr><td>8–11</td><td>4</td><td>writerId</td><td></td></tr>
+<tr><td>12–19</td><td>8</td><td>writerSN</td><td></td></tr>
+<tr><td>20–23</td><td>4</td><td>bitmapBase</td><td>第一个片号</td></tr>
+<tr><td>24–27</td><td>4</td><td>numBits</td><td></td></tr>
+<tr><td>28…</td><td>4×n</td><td>bitmap</td><td>同样 bit0 = 最高位</td></tr>
+<tr><td>…</td><td>4</td><td>count</td><td></td></tr>
+</tbody>
+</table>
+
+<h3 id="wire-bits">3.6 序列号、时间、位图</h3>
+
+<h4>SequenceNumber：为什么是两个 32 位</h4>
+
+<p>
+规范里它是 64 位有符号数，线上拆成 high（int32）+ low（uint32）。
+本实现永远只用到低 32 位，high 写 0，low 从 1 开始递增。
+解析时如果 high 不为 0，本实现会当成非法报文丢掉——因为它的历史里不可能有那么大的号。
+</p>
+
+<h4>时间与时长：秒 + 2⁻³² 秒</h4>
+
+<p>
+RTPS 的 <code>Time_t</code> 和 <code>Duration_t</code> 都是 8 字节：低 4 字节是秒，高 4 字节是 2<sup>-32</sup> 秒为单位的分数。
+</p>
+
+<pre><code>// 把毫秒转成线上格式
+seconds  = ms / 1000
+fraction = ((ms % 1000) &lt;&lt; 32) / 1000
+
+// 无限时长
+seconds = 0x7fffffff, fraction = 0xffffffff</code></pre>
+
+<div class="note">
+<b>本实现的一个土规矩</b>
+QoS 里的时长用“毫秒 = 0”表示<strong>策略没设置</strong>：这时干脆不写那个 PID，让对端按 DDS 默认值处理
+（deadline / lifespan / lease 默认都是无限）。这跟“显式写一个无限大”不是一回事。
+</div>
+
+<h4>位图：bit 0 是最高位</h4>
+
+<p>
+ACKNACK / GAP / NACK_FRAG 的位图都遵循同一个反直觉约定：
+<strong>第 0 位对应 32 位字的最高位 0x80000000</strong>，而不是最低位。
+</p>
+
+<pre class="diagram">
+base = 5, numBits = 3
+
+bit index :  0        1        2
+mask      : 0x80000000 0x40000000 0x20000000
+sample SN :  5        6        7
+
+bitmap = 0xA0000000  ->  bit0=1, bit1=0, bit2=1  ->  缺 SN 5 和 7，已收到 6
+bitmap = 0x00000000  ->  三个都缺
+bitmap = 0xE0000000  ->  三个都收到了
+</pre>
+
+<p class="small">
+代码里造位图时用的是 <code>1u &lt;&lt; (31 - (i % 32))</code>，解析时反过来。
+写成 <code>1 &lt;&lt; i</code> 是最常见的实现错误，会让抓包看起来“全丢”。
+</p>
+
+<h3 id="wire-params">3.7 ParameterList（参数列表）</h3>
+
+<p>
+发现报文（SPDP / SEDP）的载荷不是结构体，而是一串“键值对”。
+每个键值对叫一个 Parameter，靠 PID 区分“这是什么”。
+</p>
+
+<pre class="diagram">
+ ┌──────────┬──────────┬─────────────────────────┬─────────┐
+ │ PID (u16)│ len (u16)│        value ...        │ padding │
+ └──────────┴──────────┴─────────────────────────┴─────────┘
+  2 字节      2 字节     len 含 padding，必为 4 的倍数
+
+ 结束标志：PID = 0x0001 (PID_SENTINEL), len = 0
+</pre>
+
+<ul>
+  <li>PID 和长度都是<strong>小端</strong>。</li>
+  <li>长度包含 value 后面的补齐字节，所以永远是 4 的倍数。这一点和某些早期实现不同，抓包时容易看错。</li>
+  <li>value 内部的 CDR 对齐从 value 的第一个字节重新算，不是从报文头算。</li>
+  <li><code>PID_PAD = 0x0000</code> 用来占位对齐，内容忽略。</li>
+  <li>遇到不认识的 PID：按长度跳过，不要报错（本实现对厂商私有 PID 就是这么处理的）。</li>
+</ul>
+
+<p>发现报文的载荷前面还有 4 个字节的封装头：</p>
+
+<pre><code>00 03 00 00
+^^ ^^ ^^^^^^
+|  |  └── options = 0
+|  └───── representationIdentifier = 0x0003 = PL_CDR_LE（大端写法）
+└──────── 固定 0x00</code></pre>
+
+<p>
+注意这 4 个字节是<strong>大端</strong>写的（0x0003 高字节在前），跟后面参数列表的小端不一样。
+解析时本实现做兼容：如果开头正好是 <code>00 03 00 00</code> 就跳过，否则当成裸 ParameterList。
+</p>
+
+<h4>字符串怎么编码</h4>
+
+<pre><code>value = length(u32, 含结尾 '\0') + 字符 + '\0' + padding
+
+例："abc"  ->  04 00 00 00  61 62 63 00      （len=4，刚好 8 字节）</code></pre>
+
+<h4>序列怎么编码</h4>
+
+<pre><code>value = count(u32) + 元素 × count
+
+例：Locator 序列  ->  count + locator(24B) × count
+    string 序列   ->  count + 每个字符串（各自带长度）</code></pre>
+
+<h4>Locator（24 字节）</h4>
+
+<table>
+<thead><tr><th>偏移</th><th>宽度</th><th>字段</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>0–3</td><td>4</td><td>kind</td><td>int32：0=无效，1=UDPv4，2=UDPv6，4=TCPv4，8=TCPv6（注意 TCPv6 是 8，不是 5）</td></tr>
+<tr><td>4–7</td><td>4</td><td>port</td><td>uint32（不是 u16，虽然实际值不超过 65535）</td></tr>
+<tr><td>8–23</td><td>16</td><td>address</td><td>IPv4 存在最后 4 个字节，前 12 字节为 0</td></tr>
+</tbody>
+</table>
+
+<p class="small">
+例：<code>127.0.0.1:7410</code> → <code>01 00 00 00 | f2 1c 00 00 | 00×12 | 7f 00 00 01</code>。
+</p>
+
+<h3 id="wire-pids">3.8 PID 总表</h3>
+
+<p>下面这些 PID 是本实现真正认识或真正会发出去的。标“收”表示只解析，标“发”表示会写。</p>
+
+<h4>发现控制类</h4>
+<table>
+<thead><tr><th>PID</th><th>名字</th><th>值编码</th><th>用途</th><th>本实现</th></tr></thead>
+<tbody>
+<tr><td><code>0x0001</code></td><td>PID_SENTINEL</td><td>无</td><td>列表结束</td><td>发/收</td></tr>
+<tr><td><code>0x0002</code></td><td>PARTICIPANT_LEASE_DURATION</td><td>Duration 8B</td><td>SPDP 租约</td><td>发/收</td></tr>
+<tr><td><code>0x0005</code></td><td>TOPIC_NAME</td><td>string</td><td>SEDP 话题名</td><td>发/收</td></tr>
+<tr><td><code>0x0007</code></td><td>TYPE_NAME</td><td>string</td><td>SEDP 类型名</td><td>发/收</td></tr>
+<tr><td><code>0x0015</code></td><td>PROTOCOL_VERSION</td><td>2×u8</td><td>协议版本</td><td>发/收</td></tr>
+<tr><td><code>0x0016</code></td><td>VENDORID</td><td>2×u8</td><td>厂商标识</td><td>发/收</td></tr>
+<tr><td><code>0x002f</code></td><td>UNICAST_LOCATOR</td><td>Locator 24B</td><td>SEDP 端点单播地址</td><td>发/收</td></tr>
+<tr><td><code>0x0030</code></td><td>MULTICAST_LOCATOR</td><td>Locator 24B</td><td>端点组播地址</td><td>发/收</td></tr>
+<tr><td><code>0x0031</code></td><td>DEFAULT_UNICAST_LOCATOR</td><td>Locator</td><td>SPDP 默认单播</td><td>发/收</td></tr>
+<tr><td><code>0x0032</code></td><td>METATRAFFIC_UNICAST_LOCATOR</td><td>Locator</td><td>发现单播（SEDP 发到这）</td><td>发/收</td></tr>
+<tr><td><code>0x0033</code></td><td>METATRAFFIC_MULTICAST_LOCATOR</td><td>Locator</td><td>发现组播</td><td>发/收</td></tr>
+<tr><td><code>0x0048</code></td><td>DEFAULT_MULTICAST_LOCATOR</td><td>Locator</td><td>数据面组播</td><td>发/收</td></tr>
+<tr><td><code>0x0050</code></td><td>PARTICIPANT_GUID</td><td>GUID 16B</td><td>我是谁</td><td>发/收</td></tr>
+<tr><td><code>0x0058</code></td><td>BUILTIN_ENDPOINT_SET</td><td>u32 位集</td><td>我支持哪些内置端点</td><td>发/收</td></tr>
+<tr><td><code>0x0059</code></td><td>PROPERTY_LIST</td><td>序列</td><td>属性表</td><td>收（忽略）</td></tr>
+<tr><td><code>0x005a</code></td><td>ENDPOINT_GUID</td><td>GUID</td><td>SEDP 端点身份</td><td>发/收</td></tr>
+<tr><td><code>0x0062</code></td><td>ENTITY_NAME</td><td>string</td><td>participant 名字</td><td>发/收</td></tr>
+<tr><td><code>0x0070</code></td><td>KEY_HASH</td><td>16B</td><td>实例句柄（内联 QoS）</td><td>发/收</td></tr>
+<tr><td><code>0x0071</code></td><td>STATUS_INFO</td><td>4B</td><td>dispose / unregister 标志</td><td>发/收</td></tr>
+<tr><td><code>0x801c</code></td><td>CYCLONE_REQUESTS_KEYHASH</td><td>1×u8（CDR bool）</td><td>订阅端点请求对端在 keyed 样本里带 PID_KEY_HASH（Cyclone 厂商扩展）</td><td>发</td></tr>
+</tbody>
+</table>
+
+<h4>QoS 类</h4>
+<table>
+<thead><tr><th>PID</th><th>策略</th><th>线上编码</th><th>默认（不发 = 对端按默认）</th></tr></thead>
+<tbody>
+<tr><td><code>0x0004</code></td><td>TIME_BASED_FILTER</td><td>Duration 8B</td><td>0（不过滤）</td></tr>
+<tr><td><code>0x0006</code></td><td>OWNERSHIP_STRENGTH</td><td>u32</td><td>0，仅 EXCLUSIVE 时发</td></tr>
+<tr><td><code>0x001a</code></td><td>RELIABILITY</td><td>u32 kind + Duration max_blocking_time = 12B</td><td>BEST_EFFORT(1)</td></tr>
+<tr><td><code>0x001b</code></td><td>LIVELINESS</td><td>u32 kind + Duration lease = 12B</td><td>AUTOMATIC(0) + 无限</td></tr>
+<tr><td><code>0x001d</code></td><td>DURABILITY</td><td>u32</td><td>VOLATILE(0)</td></tr>
+<tr><td><code>0x001f</code></td><td>OWNERSHIP</td><td>u32</td><td>SHARED(0)</td></tr>
+<tr><td><code>0x0021</code></td><td>PRESENTATION</td><td>u32 scope + u8 coherent + u8 ordered = 6B</td><td>INSTANCE(0), 两标志 0</td></tr>
+<tr><td><code>0x0023</code></td><td>DEADLINE</td><td>Duration 8B</td><td>无限</td></tr>
+<tr><td><code>0x0025</code></td><td>DESTINATION_ORDER</td><td>u32</td><td>BY_RECEPTION(0)</td></tr>
+<tr><td><code>0x0027</code></td><td>LATENCY_BUDGET</td><td>Duration 8B</td><td>0</td></tr>
+<tr><td><code>0x0029</code></td><td>PARTITION</td><td>string 序列</td><td>空（默认分区）</td></tr>
+<tr><td><code>0x002b</code></td><td>LIFESPAN</td><td>Duration 8B</td><td>无限</td></tr>
+<tr><td><code>0x0040</code></td><td>HISTORY</td><td>u32 kind + u32 depth = 8B</td><td>KEEP_LAST(0), depth 1</td></tr>
+<tr><td><code>0x0041</code></td><td>RESOURCE_LIMITS</td><td>3×u32</td><td>0xffffffff = 无限（API 里的 0 在编码时换算成它）</td></tr>
+<tr><td><code>0x002c</code></td><td>USER_DATA</td><td>octet 序列</td><td>空</td></tr>
+</tbody>
+</table>
+
+<div class="note">
+<b>“不发”本身就是一种信息</b>
+本实现只在策略<strong>不是默认值</strong>时才写 PID。所以收到一张名片，发现里面没有 DEADLINE，
+正确理解是“对方用默认值（无限）”，而不是“对方没告诉我”。
+</div>
+
+<h2 id="addressing">4. 地址、端口、Locator</h2>
+
+<p>
+发现的前提是“能找到”。这一章讲清楚：一个 participant 到底监听哪些地址、端口怎么算、
+地址又是怎么告诉对方的。
+</p>
+
+<h3>4.1 端口公式</h3>
+
+<table>
+<thead><tr><th>用途</th><th>公式 / 取值</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>域 ID 范围</td><td>0 – 232</td><td>超过直接创建失败（端口会超过 65535）</td></tr>
+<tr><td>SPDP 组播端口</td><td><code>7400 + 250 × domain_id</code></td><td>规范里的 d0 偏移；domain 0 → 7400</td></tr>
+<tr><td>SPDP 组播地址</td><td><code>239.255.0.1</code></td><td>可通过配置改；置空字符串则关闭组播</td></tr>
+<tr><td>Metatraffic 单播端口</td><td>绑定端口 0 → 系统分配</td><td>实际值通过 SPDP 的 locator 通告出去</td></tr>
+<tr><td>User traffic 端口</td><td>复用上面那个单播端口</td><td>没有单独的 d1/d3，这一点和 Cyclone DDS 不同</td></tr>
+</tbody>
+</table>
+
+<div class="warn">
+<b>和“标准实现”的差异</b>
+RTPS 规范建议参与者使用 <code>d1 = 7400 + 250×d + 10</code> 这类固定偏移给用户数据。
+本实现<strong>不这么做</strong>：单播端口是临时的，靠发现报文互相告知。
+所以如果你拿 Wireshark 的“标准端口”过滤器去抓，很可能会漏包。
+</div>
+
+<h3>4.2 组播的细节</h3>
+
+<ul>
+  <li>加入组播组后，<strong>TTL 设为 1</strong>，即不会跨路由器扩散，只在本地链路喊。</li>
+  <li><strong>组播回环打开</strong>，所以同一台机器上的多个 participant 也能互相发现。</li>
+  <li>绑定 <code>0.0.0.0</code> 时，如果配置里没写 <code>advertise_host</code>，公告地址会退化成 <code>127.0.0.1</code>。</li>
+  <li>关闭组播（<code>multicast_group = ""</code>）后，SPDP 端口也变成临时端口，只向显式配置的 <code>peers</code> 单播。</li>
+</ul>
+
+<div class="tip">
+<b>跨机器发现不到？先看 advertise_host</b>
+如果本机有多张网卡，默认公告的可能是回环地址。对端拿到 <code>127.0.0.1</code> 的单播地址，
+自然发不到你。显式配置 <code>advertise_host</code> 指向真实网卡地址即可。
+</div>
+
+<h3>4.3 Participant 会通告哪些 Locator</h3>
+
+<table>
+<thead><tr><th>PID</th><th>什么时候写</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td><code>METATRAFFIC_UNICAST_LOCATOR</code></td><td>总是</td><td>advertise_host + 单播端口，kind=1（UDPv4）</td></tr>
+<tr><td><code>METATRAFFIC_UNICAST_LOCATOR</code></td><td>启用 TCP 时再写一条</td><td>同样的地址，kind=4（TCPv4），端口是监听端口</td></tr>
+<tr><td><code>METATRAFFIC_MULTICAST_LOCATOR</code></td><td>启用组播时</td><td>组播地址 + SPDP 端口</td></tr>
+<tr><td><code>DEFAULT_UNICAST_LOCATOR</code></td><td>总是</td><td>默认复用单播 metatraffic 地址</td></tr>
+<tr><td><code>DEFAULT_MULTICAST_LOCATOR</code></td><td>有配置时</td><td>数据面组播</td></tr>
+</tbody>
+</table>
+
+<p>
+同一个 PID 可以出现多次（比如 UDP 和 TCP 各一条）。解析方按 <code>kind</code> 挑自己能用的那条：
+本实现优先 TCP（如果双方都通告了），否则用 UDP。
+</p>
+
+<h3>4.4 TCP 承载</h3>
+
+<p>
+TCP 不是 RTPS 规范强制的，但本实现支持，用于跨网段 / 穿透只允许长连接的场景。
+注意它<strong>只是换了个搬运工</strong>：
+</p>
+
+<ul>
+  <li>SPDP 仍然走 UDP 组播/单播（否则没法发现对方）。</li>
+  <li>TCP 连接建立后，里面跑的仍然是完整的 RTPS 报文：20 字节头 + 子消息，<strong>没有额外的长度前缀</strong>。</li>
+  <li>接收方靠“找下一个 <code>RTPS</code> 头”来重新同步字节流。</li>
+  <li>每个连接有接收缓冲（128 KiB）和发送队列（512 KiB），超了会丢而不是无限吃内存。</li>
+  <li>最多同时 16 条连接。</li>
+</ul>
+
+<h2 id="spdp">5. SPDP：先找到人</h2>
+
+<p>
+SPDP 只干三件事：告诉大家“我在”、告诉大家“怎么连我”、以及每隔一会儿重复一遍。
+它<strong>不</strong>描述业务端点，那是 SEDP 的活。
+</p>
+
+<h3>5.1 什么时候发、发给谁</h3>
+
+<dl class="kv">
+  <dt>启动时</dt><dd>立即发一次（不等定时器）。</dd>
+  <dt>周期</dt><dd>默认 3000 ms，带 ±20% 随机抖动，避免一群 participant 同时开火。</dd>
+  <dt>下限</dt><dd>抖动后不小于间隔的一半，且不小于 100 ms。</dd>
+  <dt>目标 1</dt><dd>组播组 <code>239.255.0.1</code> + SPDP 端口（启用组播时）。</dd>
+  <dt>目标 2</dt><dd>每个显式配置的 <code>peers</code>（host:port），单播。</dd>
+  <dt>内容</dt><dd>每次都是<strong>完整</strong>参数列表，序列号 +1。</dd>
+</dl>
+
+<h3>5.2 报文长什么样</h3>
+
+<pre class="diagram">
+消息头         : RTPS 2.4 / vendor 01 9a / 我的 guidPrefix
+INFO_TS       : 当前时间
+DATA.readerId : 00 00 00 00       （谁都可以收）
+DATA.writerId : 00 01 00 c2       （SPDP writer）
+DATA.SN       : 1, 2, 3 ...       （每次公告加一）
+DATA.payload  : 封装头 + ParameterList
+</pre>
+
+<h3>5.3 参数列表的写入顺序</h3>
+
+<p>本实现按下面的顺序写（顺序不影响解析，但抓包对照时有用）：</p>
+
+<table>
+<thead><tr><th>#</th><th>PID</th><th>内容</th><th>是否必写</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>—</td><td>封装头 <code>00 03 00 00</code></td><td>是</td></tr>
+<tr><td>1</td><td><code>0x0015</code></td><td>协议版本 <code>02 04</code></td><td>是</td></tr>
+<tr><td>2</td><td><code>0x0016</code></td><td>vendor id <code>01 9a</code></td><td>是</td></tr>
+<tr><td>3</td><td><code>0x0050</code></td><td>participant GUID（16B）</td><td>是</td></tr>
+<tr><td>4</td><td><code>0x0002</code></td><td>租约时长（Duration 8B）</td><td>是</td></tr>
+<tr><td>5</td><td><code>0x0058</code></td><td>内置端点位集（u32）</td><td>是</td></tr>
+<tr><td>6</td><td><code>0x0032</code></td><td>metatraffic 单播 locator</td><td>是</td></tr>
+<tr><td>7</td><td><code>0x0032</code></td><td>TCP locator（如果启用）</td><td>否</td></tr>
+<tr><td>8</td><td><code>0x0033</code></td><td>metatraffic 组播 locator</td><td>启用组播时</td></tr>
+<tr><td>9</td><td><code>0x0031</code></td><td>默认单播 locator</td><td>是</td></tr>
+<tr><td>10</td><td><code>0x0048</code></td><td>默认组播 locator</td><td>有配置时</td></tr>
+<tr><td>11</td><td><code>0x0062</code></td><td>名字（字符串，可空）</td><td>否</td></tr>
+<tr><td>12</td><td><code>0x002c</code></td><td>user data（octet 序列，可空）</td><td>否</td></tr>
+<tr><td>13</td><td><code>0x0001</code></td><td>SENTINEL</td><td>是</td></tr>
+</tbody>
+</table>
+
+<h3>5.4 收到 SPDP 之后做什么</h3>
+
+<ol>
+  <li><strong>校验必填项</strong>：协议版本（major 必须是 2）、participant GUID、租约、内置端点集、
+  metatraffic 单播 locator（UDP 或 TCP locator 都算）。缺一个就丢弃，不当半个 participant 用。</li>
+  <li><strong>查通讯录</strong>：按 GUID prefix 找远端槽位。
+  没有就新建（满了就淘汰“最久没说话”的那个），有就更新。</li>
+  <li><strong>刷新租约</strong>：记住 <code>now</code>，租约取对方通告的值，夹在 1 s – 1 h 之间。
+  对方没写租约就用本端配置的默认值。</li>
+  <li><strong>发给对方我的名片</strong>：如果是新认识 / 对方单播地址变了，
+  立刻把所有本地端点用 SEDP 单播给它（不等它来问）。</li>
+  <li><strong>立刻断言一次 liveliness</strong>：新 peer 没有历史，早点发一次免得租约马上到期。</li>
+  <li><strong>建立 TCP（如启用）</strong>：按需拨号。</li>
+</ol>
+
+<h3>5.5 租约到期：没有“再见”</h3>
+
+<p>
+SPDP 没有 BYE / 下线报文。participant 消失只有一种表现：<strong>不再发 SPDP</strong>。
+所以接收方每 <strong>200 ms</strong> 扫一遍通讯录，谁的 <code>now - last_seen &gt; lease</code>，
+就把这个 participant 连同它通告过的所有端点一起删掉。
+</p>
+
+<pre class="diagram">
+  t=0     A -> SPDP      B: last_seen = 0
+  t=3s    A -> SPDP      B: last_seen = 3000
+  t=6s    A -> SPDP      B: last_seen = 6000
+  t=9s    A dies
+  t=27s                  B: 27000 - 6000 &gt; 20000  ->  drop A and its endpoints
+</pre>
+
+<div class="tip">
+<b>为什么默认租约是 20 秒而不是 6 秒</b>
+至少要容忍连续丢几个 SPDP。3 秒一次、租约 20 秒，等于允许连丢 6 个还不误判。
+租约调小会让“对方进程卡一下”变成“对方掉线”，很危险。
+</div>
+
+<h2 id="sedp">6. SEDP：交换名片</h2>
+
+<p>
+SPDP 只解决了“知道有这个人”。SEDP 才解决“他有哪些 writer / reader、分别是什么 topic、什么 QoS”。
+</p>
+
+<h3>6.1 两对内置端点</h3>
+
+<table>
+<thead><tr><th>方向</th><th>谁通告</th><th>writerId / readerId</th></tr></thead>
+<tbody>
+<tr><td>我有哪些 publication（writer）</td><td>我的 SEDP pubs writer</td><td><code>00 00 03 c2</code></td></tr>
+<tr><td>接收别人的 publication 通告</td><td>我的 SEDP pubs reader</td><td><code>00 00 03 c7</code></td></tr>
+<tr><td>我有哪些 subscription（reader）</td><td>我的 SEDP subs writer</td><td><code>00 00 04 c2</code></td></tr>
+<tr><td>接收别人的 subscription 通告</td><td>我的 SEDP subs reader</td><td><code>00 00 04 c7</code></td></tr>
+</tbody>
+</table>
+
+<p>
+每对 writer/reader 都是独立的序列号空间，不要混着算。
+</p>
+
+<h3>6.2 什么时候发</h3>
+
+<ul>
+  <li><strong>新 participant 出现</strong>：把本地所有端点逐个单播给它（“证件照回放”）。</li>
+  <li><strong>本地新建端点</strong>：立刻广播给所有已知 remote。</li>
+  <li><strong>本地删除端点</strong>：发一条 dispose（K 标志、D 清 0），让对方摘掉。</li>
+  <li><strong>周期性心跳</strong>：默认每 1000 ms 给每个 remote 发 HEARTBEAT，兜底重传。
+  历史为空也会发（firstSN = lastSN + 1），让对方知道“我这里没有你要等的号”，从而把窗口推进过去。</li>
+</ul>
+
+<h3>6.3 报文长什么样</h3>
+
+<pre class="diagram">
+消息头         : RTPS 2.4 / 我的 guidPrefix
+INFO_TS       : 当前时间
+INFO_DST      : 目标 participant 的 guidPrefix（单播，明确写给谁）
+DATA.readerId : 00 00 00 00
+DATA.writerId : 00 00 03 c2 或 00 00 04 c2
+DATA.SN       : 该 SEDP writer 自己的序列号
+DATA.payload  : 封装头 + 端点 ParameterList
+</pre>
+
+<h3>6.4 端点参数列表的写入顺序</h3>
+
+<table>
+<thead><tr><th>#</th><th>PID</th><th>内容</th><th>备注</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>—</td><td>封装头 <code>00 03 00 00</code></td><td></td></tr>
+<tr><td>1</td><td><code>0x005a</code></td><td>endpoint GUID</td><td>必填</td></tr>
+<tr><td>2</td><td><code>0x0005</code></td><td>topic 名</td><td>必填</td></tr>
+<tr><td>3</td><td><code>0x0007</code></td><td>type 名</td><td>必填</td></tr>
+<tr><td>4</td><td><code>0x001a</code></td><td>reliability + max_blocking_time</td><td>总是写</td></tr>
+<tr><td>5</td><td><code>0x001d</code></td><td>durability</td><td>总是写</td></tr>
+<tr><td>6</td><td><code>0x0040</code></td><td>history kind + depth</td><td>总是写</td></tr>
+<tr><td>7</td><td><code>0x0023</code></td><td>deadline</td><td>设了才写</td></tr>
+<tr><td>8</td><td><code>0x0027</code></td><td>latency budget</td><td>设了才写</td></tr>
+<tr><td>9</td><td><code>0x002b</code></td><td>lifespan</td><td>设了才写</td></tr>
+<tr><td>10</td><td><code>0x0004</code></td><td>time-based filter</td><td>设了才写</td></tr>
+<tr><td>11</td><td><code>0x0041</code></td><td>resource limits</td><td>非全 0 才写</td></tr>
+<tr><td>12</td><td><code>0x001b</code></td><td>liveliness kind + lease</td><td>非默认才写</td></tr>
+<tr><td>13</td><td><code>0x001f</code></td><td>ownership</td><td>非 SHARED 才写</td></tr>
+<tr><td>13b</td><td><code>0x0006</code></td><td>ownership strength</td><td>紧跟 ownership</td></tr>
+<tr><td>14</td><td><code>0x0025</code></td><td>destination order</td><td>非默认才写</td></tr>
+<tr><td>15</td><td><code>0x0021</code></td><td>presentation（6B）</td><td>非默认才写</td></tr>
+<tr><td>16</td><td><code>0x0029</code></td><td>partition（string 序列）</td><td>非空才写</td></tr>
+<tr><td>17</td><td><code>0x002f</code></td><td>单播 locator</td><td>可多条</td></tr>
+<tr><td>18</td><td><code>0x0030</code></td><td>组播 locator</td><td>可多条</td></tr>
+<tr><td>19</td><td><code>0x002c</code></td><td>user data</td><td>非空才写</td></tr>
+<tr><td>19b</td><td><code>0x801c</code></td><td>CYCLONE_REQUESTS_KEYHASH = 1</td><td>仅订阅端点，固定写</td></tr>
+<tr><td>20</td><td><code>0x0001</code></td><td>SENTINEL</td><td></td></tr>
+</tbody>
+</table>
+
+<p class="small">
+RELIABILITY 的默认值是 BEST_EFFORT，HISTORY 的 depth 默认 1（配置 0 时）。
+所以一张“最朴素”的名片也会带 reliability / durability / history 三个 PID。
+RESOURCE_LIMITS 的“无限”在线上写 0xffffffff（LENGTH_UNLIMITED），不是 0。
+</p>
+
+<h3>6.5 删除端点（dispose）</h3>
+
+<p>
+删除不是“发个空包”。本实现会：
+</p>
+
+<ol>
+  <li>打包一个 <strong>key-only</strong> 的 ParameterList：只含 <code>PID_ENDPOINT_GUID</code>，
+  不再带 topic/type/QoS。</li>
+  <li>用 <code>K=1、D=0</code> 的 DATA 发出去，并在内联 QoS 里带
+  <code>PID_STATUS_INFO = 0x00000001</code>（disposed），然后写进 SEDP 历史。
+  <strong>这个状态位是必须的</strong>：没有它，Cyclone 会把样本当成一次“还活着”的重复通告，
+  端点永远删不掉。</li>
+  <li>接收方按 key 找到对应端点，删掉，并上报“端点移除 + 匹配数减少”。</li>
+</ol>
+
+<p>
+这样即使对方当时不在线，下次心跳/重传时也能补上这条“讣告”。
+</p>
+
+<h3>6.6 SEDP 的可靠机制</h3>
+
+<p>SEDP 是“可靠”的（reliable），但实现得很朴素，没有 per-reader 状态：</p>
+
+<ol>
+  <li>writer 把每个端点通告按序列号存进历史（容量按本地端点数分配，默认上限 1024 条；总字节预算 256 KiB）。</li>
+  <li>每 1 s 给每个 remote 发 HEARTBEAT，告诉对方“我有 firstSN..lastSN”。</li>
+  <li>reader 比对 <code>next_expected</code>，把缺的号用 ACKNACK 位图报回去。</li>
+  <li>writer 收到 ACKNACK，从历史里重发缺失的样本；已经被淘汰的用 GAP 告诉对方“别等了”。</li>
+</ol>
+
+<div class="note">
+<b>为什么“不是 per-reader 状态”也能工作</b>
+重传是直接回给“发 ACKNACK 的那个地址”的，不做广播。
+所以同一个 writer 面对多个 reader 时，各自报自己的缺口，互不干扰。
+代价是：没法针对某个 reader 精确地只重传它要的，遇到重复 ACKNACK 还得靠最小间隔（10 ms）压住。
+</div>
+
+<h3>6.7 完整发现时序</h3>
+
+<pre class="diagram">
+   Participant A                                  Participant B
+        |                                               |
+        |  (1) SPDP multicast DATA  ------------------> |
+        |      writerId = 000100c2                      |
+        |                                               |
+        | <----------------- (2) SEDP unicast --------- |
+        |      INFO_DST = A, all of B's endpoints       |
+        |                                               |
+        |  (3) SEDP unicast (A's endpoints) ----------> |
+        |                                               |
+        | <----------------- (4) HEARTBEAT ~1s --------- |
+        |                                               |
+        |  (5) ACKNACK (missing seqnums) -------------> |
+        |                                               |
+        |  (6) QoS match, then user DATA both ways      |
+        |                                               |
+</pre>
+
+<p class="small">
+注意方向：(1) 是 A 喊给所有人听，B 只是听见了；(2) 和 (3) 才是各自把端点名片单播过去。
+实际抓包时，两个方向的 SPDP 往往几乎同时发生，所以 (2) 有可能比 (1) 更早看到。
+</p>
+
+<h2 id="qos">7. QoS：能不能聊得来</h2>
+
+<p>
+QoS（Quality of Service）听起来玄，其实就是两组声明：
+</p>
+
+<ul>
+  <li><strong>writer 说“我保证做到什么”</strong>（offered，我提供多少）；</li>
+  <li><strong>reader 说“我要求你做到什么”</strong>（requested，我要多少）。</li>
+</ul>
+
+<p>
+匹配规则一句话：<strong>writer 提供的能力必须大于等于 reader 提出的要求</strong>。
+达不到就不匹配，双方各上报一个“QoS 不兼容”事件，数据一条也不会发。
+</p>
+
+<div class="note">
+<b>方向别搞反</b>
+是“发布者满足订阅者”，不是反过来。一个 BEST_EFFORT 的 writer 配一个 RELIABLE 的 reader，
+永远匹配不上——哪怕发布者觉得自己已经尽力了。
+</div>
+
+<h3>7.1 本实现支持的策略</h3>
+
+<table>
+<thead><tr><th>策略</th><th>PID</th><th>取值</th><th>默认</th><th>匹配条件</th></tr></thead>
+<tbody>
+<tr>
+  <td>RELIABILITY</td><td><code>0x001a</code></td>
+  <td>1 = BEST_EFFORT<br>2 = RELIABLE<br>后面跟 max_blocking_time（8B）</td>
+  <td>BEST_EFFORT</td>
+  <td>reader 要求 RELIABLE 时，writer 必须也是 RELIABLE</td>
+</tr>
+<tr>
+  <td>DURABILITY</td><td><code>0x001d</code></td>
+  <td>0 = VOLATILE<br>1 = TRANSIENT_LOCAL<br>2 = TRANSIENT<br>3 = PERSISTENT</td>
+  <td>VOLATILE</td>
+  <td>writer 的等级不能低于 reader</td>
+</tr>
+<tr>
+  <td>HISTORY</td><td><code>0x0040</code></td>
+  <td>0 = KEEP_LAST<br>1 = KEEP_ALL<br>后面跟 depth</td>
+  <td>KEEP_LAST, depth 1</td>
+  <td>不参与匹配（只影响本地缓存）</td>
+</tr>
+<tr>
+  <td>DEADLINE</td><td><code>0x0023</code></td>
+  <td>Duration</td>
+  <td>无限</td>
+  <td>reader 要求了，writer 必须有且不能更宽松</td>
+</tr>
+<tr>
+  <td>LATENCY_BUDGET</td><td><code>0x0027</code></td>
+  <td>Duration</td>
+  <td>0</td>
+  <td>reader 要求了，writer 的值不能更大</td>
+</tr>
+<tr>
+  <td>LIFESPAN</td><td><code>0x002b</code></td>
+  <td>Duration</td>
+  <td>无限</td>
+  <td>不参与匹配（影响样本过期）</td>
+</tr>
+<tr>
+  <td>LIVELINESS</td><td><code>0x001b</code></td>
+  <td>0 = AUTOMATIC<br>1 = MANUAL_BY_PARTICIPANT<br>2 = MANUAL_BY_TOPIC<br>后面跟 lease（8B）</td>
+  <td>AUTOMATIC + 无限</td>
+  <td>writer 的 kind 不能更低；lease 要求时 writer 不能更大</td>
+</tr>
+<tr>
+  <td>OWNERSHIP</td><td><code>0x001f</code></td>
+  <td>0 = SHARED<br>1 = EXCLUSIVE</td>
+  <td>SHARED</td>
+  <td>必须完全相等</td>
+</tr>
+<tr>
+  <td>OWNERSHIP_STRENGTH</td><td><code>0x0006</code></td>
+  <td>u32</td>
+  <td>0</td>
+  <td>不参与匹配（EXCLUSIVE 时用来选主）</td>
+</tr>
+<tr>
+  <td>DESTINATION_ORDER</td><td><code>0x0025</code></td>
+  <td>0 = BY_RECEPTION<br>1 = BY_SOURCE</td>
+  <td>BY_RECEPTION</td>
+  <td>writer 的等级不能低于 reader</td>
+</tr>
+<tr>
+  <td>PRESENTATION</td><td><code>0x0021</code></td>
+  <td>scope(4B) + coherent(1B) + ordered(1B)<br>0 = INSTANCE, 1 = TOPIC, 2 = GROUP</td>
+  <td>INSTANCE + 0 + 0</td>
+  <td>writer 的 scope 不能更小；reader 要 coherent/ordered 时 writer 必须支持</td>
+</tr>
+<tr>
+  <td>TIME_BASED_FILTER</td><td><code>0x0004</code></td>
+  <td>Duration</td>
+  <td>0</td>
+  <td>不参与匹配（接收端限流）</td>
+</tr>
+<tr>
+  <td>RESOURCE_LIMITS</td><td><code>0x0041</code></td>
+  <td>3 个 u32；无限写 <code>0xffffffff</code></td>
+  <td>无限</td>
+  <td>不参与匹配</td>
+</tr>
+<tr>
+  <td>PARTITION</td><td><code>0x0029</code></td>
+  <td>字符串序列</td>
+  <td>空</td>
+  <td>两边任意一个名字能对上即可（支持星号通配）</td>
+</tr>
+</tbody>
+</table>
+
+<h3>7.2 匹配的实际顺序</h3>
+
+<p>代码里是“一票否决”式检查，顺序如下，返回第一个不匹配的原因：</p>
+
+<ol>
+  <li><code>topic</code>：话题名必须完全相同（区分大小写）。</li>
+  <li><code>type</code>：类型名必须完全相同。</li>
+  <li><code>partition</code>：分区名列表至少有一对能匹配（支持星号通配）。</li>
+  <li><code>reliability</code>：见上表。</li>
+  <li><code>durability</code>：writer 不能比 reader 弱。</li>
+  <li><code>deadline</code>：reader 要求了，writer 得给得起。</li>
+  <li><code>latency budget</code>：writer 的预算不能比 reader 要求的更宽松。</li>
+  <li><code>ownership</code>：必须一致。</li>
+  <li><code>liveliness kind</code>：AUTOMATIC 低于 MANUAL_BY_PARTICIPANT，后者低于 MANUAL_BY_TOPIC。</li>
+  <li><code>liveliness lease</code>：reader 要求了，writer 的租约不能更大。</li>
+  <li><code>destination order</code>：writer 不能比 reader 弱。</li>
+  <li><code>presentation scope</code>：writer 的作用域不能更小。</li>
+  <li><code>coherent access</code> / <code>ordered access</code>：reader 要，writer 就得有。</li>
+</ol>
+
+<h3>7.3 不匹配会发生什么</h3>
+
+<p>
+不会报错退出，也不会自动重试。双方各自收到一个状态事件，<code>reason</code> 字段就是上面那些短词：
+</p>
+
+<pre><code>kind      = NB_RTPS_STATUS_QOS_INCOMPATIBLE
+endpoint  = 本地端点 GUID
+writer    = 对端端点 GUID
+reason    = "topic" / "reliability" / "durability" / ...
+has_peer  = 1</code></pre>
+
+<p>
+同一个不兼容对只会报一次（重复的 SEDP 刷新不会刷屏）；如果它<strong>曾经</strong>匹配上过，
+后来又不兼容了，就不会再报“不兼容”，而是走“匹配数减少”的通知。
+</p>
+
+<h3>7.4 几张对照表</h3>
+
+<table>
+<thead><tr><th>writer</th><th>reader</th><th>结果</th><th>原因</th></tr></thead>
+<tbody>
+<tr><td>BEST_EFFORT</td><td>BEST_EFFORT</td><td>匹配</td><td></td></tr>
+<tr><td>RELIABLE</td><td>BEST_EFFORT</td><td>匹配</td><td>reader 不要求可靠，writer 更强没关系</td></tr>
+<tr><td>BEST_EFFORT</td><td>RELIABLE</td><td><strong>不匹配</strong></td><td><code>reliability</code></td></tr>
+<tr><td>VOLATILE</td><td>TRANSIENT_LOCAL</td><td><strong>不匹配</strong></td><td><code>durability</code></td></tr>
+<tr><td>TRANSIENT_LOCAL</td><td>VOLATILE</td><td>匹配</td><td>提供得比要求多</td></tr>
+<tr><td>deadline 100 ms</td><td>deadline 200 ms</td><td>匹配</td><td>100 不大于 200</td></tr>
+<tr><td>deadline 未设（无限）</td><td>deadline 200 ms</td><td><strong>不匹配</strong></td><td><code>deadline</code></td></tr>
+<tr><td>partition "a"</td><td>partition "a,b"</td><td>匹配</td><td>任意一对对上即可</td></tr>
+<tr><td>partition "sensor.*"</td><td>partition "sensor.temp"</td><td>匹配</td><td>支持星号通配</td></tr>
+<tr><td>ownership SHARED</td><td>ownership EXCLUSIVE</td><td><strong>不匹配</strong></td><td><code>ownership</code></td></tr>
+</tbody>
+</table>
+
+<h3>7.5 最常见的三个坑</h3>
+
+<ol>
+  <li><strong>类型名对不上</strong>：DDS 里 type name 是字符串，带不带命名空间都算不同。
+  抓包看 <code>PID_TYPE_NAME</code> 的实际值，别只看代码里的 struct 名。</li>
+  <li><strong>以为“没写 PID = 不匹配”</strong>：没写就是默认值。默认 deadline 是无限，所以
+  “reader 要求 200 ms、writer 什么都没写”才是不匹配。</li>
+  <li><strong>durability 影响晚加入者能否拿到旧数据</strong>：TRANSIENT_LOCAL（及更强）的可靠 writer
+  会保留业务数据历史，并在发现新 reader 时主动回放（受历史深度和 256 KiB 预算限制）；
+  VOLATILE reader 则不要求匹配前的历史。实时数据不受 durability 影响。</li>
+</ol>
+
+<h2 id="reliable">8. 可靠传输与分片</h2>
+
+<h3>8.1 两种可靠性，两套做法</h3>
+
+<table>
+<thead><tr><th></th><th>BEST_EFFORT</th><th>RELIABLE</th></tr></thead>
+<tbody>
+<tr><td>发出去就完事</td><td>是</td><td>否，要等 ACKNACK</td></tr>
+<tr><td>有历史缓存</td><td>没有</td><td>有（深度可配）</td></tr>
+<tr><td>发 HEARTBEAT</td><td>不发</td><td>发（用户数据默认 1 s，SEDP 1 s）</td></tr>
+<tr><td>丢包</td><td>就丢了</td><td>靠 ACKNACK 补</td></tr>
+<tr><td>乱序</td><td>按到达顺序交付</td><td>按到达顺序交付，重复丢弃（不做全局重排）；BY_SOURCE_TIMESTAMP 时丢弃更旧的样本</td></tr>
+</tbody>
+</table>
+
+<h3>8.2 writer 这边：历史缓存</h3>
+
+<ul>
+  <li>默认深度 <strong>8</strong> 个样本（配置 <code>data_history_depth</code>，最大 1024）。</li>
+  <li>总字节预算 <strong>256 KiB</strong>，超了就从最老的开始丢，不管深度还剩多少。</li>
+  <li>被丢掉但 reader 还在问的样本，回一个 <strong>GAP</strong>，别让它一直等。</li>
+  <li>每次 ACKNACK 最多重发 <strong>64</strong> 个样本，剩下的下一轮再说（防止一次把链路打满）。</li>
+  <li>同一个 writer 两次重发至少间隔 <strong>10 ms</strong>（限流窗按“该 writer 最近一次请求的
+  reader”记录；ACKNACK 与 NACK_FRAG 共用这个窗口）。</li>
+</ul>
+
+<h3>8.3 reader 这边：窗口加位图</h3>
+
+<p>每个“远端 writer + 本地 reader”组合维护一个小窗口：</p>
+
+<ul>
+  <li><code>next_expected</code>：下一个想收的序列号。</li>
+  <li>一个最多 <strong>256 位</strong>的位图：记录 <code>next_expected</code> 之后哪些已经收到。</li>
+</ul>
+
+<p>收到 HEARTBEAT 后，reader 这样构造 ACKNACK：</p>
+
+<ul>
+  <li><code>base</code> 取 <code>next_expected</code>；</li>
+  <li><code>numBits</code> 取 <code>lastSN - base + 1</code>，最多 256；</li>
+  <li>位图里，<code>base + i</code> 没收到就把第 i 位置 1（bit0 是 0x80000000）；</li>
+  <li><code>count</code> 是本读者的 ACKNACK 计数器，加一。</li>
+</ul>
+
+<p>几个细节：</p>
+
+<ul>
+  <li>同一个 <code>count</code> 的重复心跳<strong>不再应答</strong>（避免心跳风暴）。</li>
+  <li>两次 ACKNACK 至少间隔 <strong>20 ms</strong>。</li>
+  <li>如果 <code>firstSN</code> 大于 <code>next_expected</code>，说明中间被 writer 淘汰了，窗口直接跳到 <code>firstSN</code>。</li>
+  <li>对方进程重启会换 GUID prefix，因此在本实现眼里是一个新的 writer，窗口会重新建立；
+  同一 GUID 内序号整体倒退<strong>不会</strong>自动复位（SEDP 内置 writer 另有一个
+  “<code>lastSN + 1 &lt; next_expected</code> 就复位”的兜底，用户数据不走这条）。</li>
+</ul>
+
+<h3>8.4 定时器一览</h3>
+
+<table>
+<thead><tr><th>定时器</th><th>默认</th><th>可调</th><th>作用</th></tr></thead>
+<tbody>
+<tr><td>SPDP 公告</td><td>3000 ms，上下浮动 20%</td><td><code>announce_interval_ms</code>（最小 100）</td><td>重复喊“我在”</td></tr>
+<tr><td>租约清扫</td><td>200 ms</td><td>固定</td><td>检查谁过期了</td></tr>
+<tr><td>SEDP 心跳</td><td>1000 ms</td><td><code>sedp_heartbeat_ms</code>（最小 100）</td><td>发现报文补发</td></tr>
+<tr><td>用户数据心跳</td><td>1000 ms</td><td><code>data_heartbeat_ms</code>（最小 100）</td><td>可靠数据补发</td></tr>
+<tr><td>ACKNACK 最小间隔</td><td>20 ms</td><td>固定</td><td>防应答风暴</td></tr>
+<tr><td>重发最小间隔</td><td>10 ms</td><td>固定</td><td>防重复 ACKNACK 打爆</td></tr>
+<tr><td>分片补片延迟</td><td>60 ms</td><td>固定</td><td>样本静默这么久才要片</td></tr>
+<tr><td>分片补片重试</td><td>100 ms</td><td>固定</td><td>最多 4 轮</td></tr>
+<tr><td>分片重组超时</td><td>2000 ms</td><td>固定</td><td>收不齐就丢弃</td></tr>
+<tr><td>liveliness 断言</td><td>最短租约的 50%</td><td>固定，下限 50 ms</td><td>PMD 心跳</td></tr>
+</tbody>
+</table>
+
+<h3>8.5 分片：大样本怎么过 UDP</h3>
+
+<p>
+一个 DATA 最多装 <strong>1200</strong> 字节载荷（为了避开常见 MTU 的坑）。超了就走分片：
+</p>
+
+<dl class="kv">
+  <dt>分片大小</dt><dd>1028 字节（4 的倍数且 &gt; 1024）</dd>
+  <dt>每包几片</dt><dd>1 片（实现简单，也能精确重传单片）</dd>
+  <dt>单个样本上限</dt><dd>1 MiB（1048576 字节）</dd>
+  <dt>并发重组</dt><dd>最多 4 个样本，总字节预算 4 MiB</dd>
+  <dt>片号</dt><dd>从 1 开始，和序列号无关</dd>
+</dl>
+
+<p>流程：</p>
+
+<ol>
+  <li>writer 逐片发 DATA_FRAG，每片一个数据报。</li>
+  <li>发完发 HEARTBEAT_FRAG，告诉对方“这个样本一共 K 片”。</li>
+  <li>reader 收齐就拼起来；缺片时，静默 60 ms 后发 NACK_FRAG，只点缺失的片。</li>
+  <li>100 ms 后还没补齐就再要一次，最多 4 轮；还不行就等整个样本重传。</li>
+  <li>2 s 还收不齐，丢弃这次重组，等 writer 心跳触发的整样本重传。</li>
+</ol>
+
+<pre class="diagram">
+  writer                                            reader
+    |                                                 |
+    |  DATA_FRAG #1  -------------------------------> |
+    |  DATA_FRAG #2  --------------------------- X    |   lost
+    |  DATA_FRAG #3  -------------------------------> |
+    |  HEARTBEAT_FRAG (lastFragmentNum=3) ----------> |
+    |                                                 |   60ms quiet
+    | <---------------- NACK_FRAG (bitmap: #2 missing)
+    |  DATA_FRAG #2  -------------------------------> |
+    |                                                 |   assembled
+</pre>
+
+<h3>8.6 可靠性的边界</h3>
+
+<div class="warn">
+<b>“可靠”不等于“持久”</b>
+可靠只保证<strong>在一次会话内、在历史窗口里</strong>补发。以下情况仍然会丢：
+<ul>
+  <li>样本已经被历史淘汰（超过深度或 256 KiB）。</li>
+  <li>writer 进程重启，历史清零。</li>
+  <li>reader 晚于 writer 启动，且 reader 是 VOLATILE（不要历史）或 writer 是 VOLATILE（不保留历史）。</li>
+  <li>读者一直不在线，超过历史窗口后再上线。</li>
+</ul>
+</div>
+
+<h2 id="dataplane">9. 一条数据的完整旅程</h2>
+
+<h3>9.1 发送侧</h3>
+
+<ol>
+  <li><code>nb_rtps_participant_publish()</code> 拿到 writer 的 GUID 和载荷。</li>
+  <li>查本地的 writer 端点，确认它还活着、QoS 允许。</li>
+  <li>序列号加一（每个 writer 独立计数）。</li>
+  <li>如果是可靠 writer，先把样本写进历史（带时间戳、实例句柄）。</li>
+  <li>找出所有匹配的远端 reader（数量上限由 <code>max_remote_endpoints</code> 决定，默认 4096）；
+  每个 reader 最多向 16 个单播地址（多网卡）各发一份。</li>
+  <li>对每个目标单独构造一个 DATA：
+    <ul>
+      <li><code>readerId</code> 填对方的实体 ID，不是 0；</li>
+      <li><code>writerId</code> 填自己的实体 ID；</li>
+      <li>前面加 INFO_TS，必要时加 INFO_DST；</li>
+      <li>载荷不超过 1200 就发 DATA，否则走 DATA_FRAG。</li>
+    </ul>
+  </li>
+</ol>
+
+<p>所以“一次发布”在网上可能是 1 个包，也可能是 N 个包（每个订阅者一个）。</p>
+
+<h3>9.2 接收侧</h3>
+
+<ol>
+  <li>拆消息头，逐个子消息走。</li>
+  <li>INFO_TS：记住时间戳，给后面的 DATA 用。</li>
+  <li>INFO_DST：本实现发送时会写，但接收侧目前不据此过滤（单播 socket 已保证包是给自己的）。</li>
+  <li>DATA：看 <code>readerId</code>，是全 0 或自己的实体才处理。</li>
+  <li>找匹配的本地 reader：topic、type、QoS 都要过（和 SEDP 匹配用的是同一套规则）。</li>
+  <li>可靠 reader 用 256 位窗口去重；样本按到达顺序交付（不做全局重排），best effort 直接交付。</li>
+  <li>解析内联 QoS：<code>PID_KEY_HASH</code>（实例句柄）、<code>PID_STATUS_INFO</code>（dispose / unregister）。</li>
+  <li>回调业务层，附带 SampleInfo（时间戳、实例状态、序号）。</li>
+</ol>
+
+<h3>9.3 实例（key）相关的三个概念</h3>
+
+<table>
+<thead><tr><th>概念</th><th>线上表现</th><th>含义</th></tr></thead>
+<tbody>
+<tr><td>key hash</td><td>内联 QoS 里的 <code>PID_KEY_HASH</code>（16B）</td><td>这条数据属于哪个实例。同一实例的多条数据共享一个句柄。</td></tr>
+<tr><td>dispose</td><td><code>PID_STATUS_INFO</code> 大端值等于 <code>0x00000001</code>（线上最后一个字节是 01）</td><td>实例被删除，但 writer 还在。</td></tr>
+<tr><td>unregister</td><td><code>PID_STATUS_INFO</code> 大端值等于 <code>0x00000002</code>（线上最后一个字节是 02）</td><td>writer 不再负责这个实例。</td></tr>
+</tbody>
+</table>
+
+<p class="small">
+本实现只有在业务层传了实例句柄时才写这些字段；无 key 的 topic 不会出现。
+</p>
+
+<h2 id="lifecycle">10. 生命周期与状态事件</h2>
+
+<h3>10.1 事件类型</h3>
+
+<table>
+<thead><tr><th>事件</th><th>触发条件</th><th>能拿到什么</th></tr></thead>
+<tbody>
+<tr><td><code>PUBLICATION_MATCHED</code></td><td>本地 writer 和远端 reader 匹配</td><td>当前匹配数、累计匹配数、对端 GUID</td></tr>
+<tr><td><code>SUBSCRIPTION_MATCHED</code></td><td>本地 reader 和远端 writer 匹配</td><td>同上</td></tr>
+<tr><td><code>QOS_INCOMPATIBLE</code></td><td>topic/type 相同但 QoS 不兼容</td><td>原因短词（<code>reason</code>）</td></tr>
+<tr><td><code>OFFERED_DEADLINE_MISSED</code></td><td>本地 writer 超过自己承诺的 deadline 没写出数据</td><td>端点 GUID、计数</td></tr>
+<tr><td><code>REQUESTED_DEADLINE_MISSED</code></td><td>本地 reader 超过它要求的 deadline 没收到数据</td><td>端点 GUID、计数</td></tr>
+<tr><td><code>LIVELINESS_CHANGED</code></td><td>writer 的 alive / not-alive 状态变化</td><td>alive 数、not-alive 数</td></tr>
+<tr><td><code>SAMPLE_LOST</code></td><td>可靠 reader 发现序号空洞且补不回来</td><td>丢失计数</td></tr>
+<tr><td><code>SAMPLE_REJECTED</code></td><td>资源限制 / 队列满</td><td>拒绝计数</td></tr>
+<tr><td><code>PARTICIPANT_ADDED / UPDATED / REMOVED</code></td><td>SPDP 层变化</td><td>participant 信息</td></tr>
+<tr><td><code>ENDPOINT_ADDED / UPDATED / REMOVED</code></td><td>SEDP 层变化</td><td>端点信息</td></tr>
+</tbody>
+</table>
+
+<h3>10.2 Liveliness 的三种模式</h3>
+
+<table>
+<thead><tr><th>模式</th><th>谁来证明“还活着”</th><th>本实现怎么处理</th></tr></thead>
+<tbody>
+<tr><td>AUTOMATIC</td><td>participant 自动发</td><td>按最短租约的 50% 周期发 PMD（下限 50 ms）</td></tr>
+<tr><td>MANUAL_BY_PARTICIPANT</td><td>写数据时自动断言</td><td>每次 publish 后发一次 kind=2 的 PMD；当前没有单独的 assert 接口</td></tr>
+<tr><td>MANUAL_BY_TOPIC</td><td>writer 自己发心跳</td><td>HEARTBEAT 的 L 标志置 1</td></tr>
+</tbody>
+</table>
+
+<p>
+接收侧把每次断言记成 <code>last_liveliness_ms</code>；超过租约没动静，就上报 LIVELINESS_CHANGED
+（alive 数减少）。注意这和“participant 租约到期”是两件事：后者会删掉整个 participant。
+</p>
+
+<h3>10.3 端点的一生</h3>
+
+<pre class="diagram">
+  create endpoint
+    -> write into local table, sequence number + 1
+       -> unicast SEDP DATA to every known remote
+          -> peer parses, creates remote endpoint, runs QoS matching
+             -> match     : MATCHED event, data may flow
+             -> mismatch  : QOS_INCOMPATIBLE event (no auto retry)
+
+  delete endpoint
+    -> send dispose (K=1, D=0)
+       -> peer drops remote endpoint, MATCHED event with lower count
+
+  peer process dies
+    -> lease expires (sweep every 200 ms)
+       -> drop participant and all its endpoints, notify application
+</pre>
+
+<h2 id="dialect">11. 本仓库的“方言”</h2>
+
+<p>
+这套实现能用、能和对端互通，但确实有一些本地特色。联调时最好心里有数。
+</p>
+
+<table>
+<thead><tr><th>方面</th><th>本实现</th><th>影响</th></tr></thead>
+<tbody>
+<tr><td>字节序</td><td>只发小端，也只收小端（E=0 的子消息直接丢弃）</td><td>和只发大端的实现互通会失败</td></tr>
+<tr><td>IP 版本</td><td>IPv4（UDP 加可选 TCP）</td><td>IPv6 环境需要改 locator 处理</td></tr>
+<tr><td>安全</td><td>没有 DDS Security</td><td>不能加入启用了认证或加密的域</td></tr>
+<tr><td>端口规划</td><td>单播端口临时分配，然后通告出去</td><td>防火墙要放行整段，不能只开固定端口</td></tr>
+<tr><td>数据面端口</td><td>复用 metatraffic 单播端口</td><td>没有 d1/d3 之分，抓包过滤器要放宽</td></tr>
+<tr><td>Durability</td><td>TRANSIENT_LOCAL 的可靠 writer 会保留并回放业务数据历史（深度 + 256 KiB 预算）；VOLATILE reader 不拉取匹配前的历史</td><td>受历史预算限制，超出部分只能靠 GAP 告知对端</td></tr>
+<tr><td>PMD 载荷</td><td>标准 ParticipantMessageData 布局：GUID prefix(12) + kind(4) + sequence&lt;octet&gt;(=1 个 0 字节)，共 28 字节 CDR_LE</td><td>Cyclone 能识别（automatic/manual 两种 kind 已验证）</td></tr>
+<tr><td>厂商扩展 PID</td><td><code>0x801c</code> 订阅端点请求 key hash</td><td>Cyclone 认识；别的实现按长度忽略，不影响互通</td></tr>
+<tr><td>SPDP 序号</td><td>每次公告都加一并重发完整参数</td><td>比“只发一次”的实现包更多，但更健壮</td></tr>
+<tr><td>下线</td><td>没有 BYE</td><td>只能等租约过期（默认最长 20 秒）</td></tr>
+<tr><td>分片</td><td>每包一片，1028 字节</td><td>大样本的包数偏多，但重传精确</td></tr>
+</tbody>
+</table>
+
+<h3>11.1 容量与上限</h3>
+
+<table>
+<thead><tr><th>项</th><th>默认</th><th>上限</th></tr></thead>
+<tbody>
+<tr><td>远端 participant</td><td>1024</td><td>65536</td></tr>
+<tr><td>本地端点</td><td>1024</td><td>4096</td></tr>
+<tr><td>远端端点</td><td>4096</td><td>4096</td></tr>
+<tr><td>发送包大小</td><td>1400</td><td>固定</td></tr>
+<tr><td>DATA 内联载荷</td><td>1200</td><td>固定</td></tr>
+<tr><td>单个样本</td><td>—</td><td>1 MiB</td></tr>
+<tr><td>writer 历史</td><td>8 个样本</td><td>1024 个样本 / 256 KiB</td></tr>
+<tr><td>TCP 连接</td><td>—</td><td>16</td></tr>
+</tbody>
+</table>
+
+<h3>11.2 和 Cyclone DDS 互通时注意</h3>
+
+<ul>
+  <li>Cyclone 只通告非默认的 QoS，并会带一些厂商 PID（例如 <code>0x800c</code>）；
+  解析时必须按长度跳过不认识的 PID，不能因此丢弃整张名片（本实现已这样做）。</li>
+  <li>Cyclone 要求 SPDP 里同时有 metatraffic 单播 locator 和 default unicast locator
+  （<code>0x0031</code>），缺一个就不建 proxy participant（本实现默认会补上）。</li>
+  <li>Cyclone 的端口遵循 d0/d1/d2/d3，本实现不遵循；靠 locator 互相告知即可，但防火墙要放行。</li>
+  <li>大样本分片：Cyclone 可能在一个包里塞多片，本实现按 <code>fragmentsInSubmessage</code>
+  通用处理，不假设是 1。</li>
+</ul>
+
+<h2 id="debug">12. 抓包与排错</h2>
+
+<h3>12.1 Wireshark 过滤器</h3>
+
+<table>
+<thead><tr><th>想看什么</th><th>过滤器</th></tr></thead>
+<tbody>
+<tr><td>所有 RTPS</td><td><code>rtps</code></td></tr>
+<tr><td>SPDP（组播发现）</td><td><code>rtps.sm.id == 0x15 and rtps.writerEntityId == 0x000100c2</code></td></tr>
+<tr><td>SEDP publications</td><td><code>rtps.writerEntityId == 0x000003c2</code></td></tr>
+<tr><td>SEDP subscriptions</td><td><code>rtps.writerEntityId == 0x000004c2</code></td></tr>
+<tr><td>心跳</td><td><code>rtps.sm.id == 0x07</code></td></tr>
+<tr><td>ACKNACK</td><td><code>rtps.sm.id == 0x06</code></td></tr>
+<tr><td>分片相关</td><td><code>rtps.sm.id == 0x16 or rtps.sm.id == 0x13 or rtps.sm.id == 0x12</code></td></tr>
+<tr><td>某个 participant</td><td><code>rtps.guidPrefix == 01:9a:4e:42:...</code></td></tr>
+</tbody>
+</table>
+
+<p class="small">
+不同 Wireshark 版本的字段名可能略有差异；实在不行先用 <code>rtps</code> 抓全，再按 writerEntityId 人工筛。
+</p>
+
+<h3>12.2 症状对照表</h3>
+
+<table>
+<thead><tr><th>症状</th><th>最可能的原因</th><th>怎么确认</th></tr></thead>
+<tbody>
+<tr>
+  <td>完全看不到对方</td>
+  <td>不在同一个域 / 组播被禁 / 网卡不对</td>
+  <td>确认两边端口公式一致；用 <code>advertise_host</code> 指定网卡；检查组播是否被防火墙拦</td>
+</tr>
+<tr>
+  <td>看得到 SPDP，看不到 SEDP</td>
+  <td>单播 locator 不通</td>
+  <td>SPDP 里通告的端口是否可达；是否只放行了 7400</td>
+</tr>
+<tr>
+  <td>SEDP 有，但没有 MATCHED</td>
+  <td>QoS 不兼容</td>
+  <td>看 <code>QOS_INCOMPATIBLE</code> 的 reason；重点查 reliability 和 type 名</td>
+</tr>
+<tr>
+  <td>匹配上了但收不到数据</td>
+  <td>readerId 不对 / 端口不对 / 对方只开了 TCP 或只开了 UDP</td>
+  <td>抓包里 DATA 的 readerId 是否等于本地实体；目标 IP 和端口是否是自己</td>
+</tr>
+<tr>
+  <td>偶发丢数据</td>
+  <td>best effort / 历史太小 / 分片补不齐</td>
+  <td>看有没有 HEARTBEAT 加 ACKNACK；历史是否频繁淘汰（GAP）</td>
+</tr>
+<tr>
+  <td>participant 反复上下线</td>
+  <td>租约太短 / 收包线程被阻塞</td>
+  <td>租约是否小于 3 倍公告间隔；是否有同步阻塞调用卡住收包线程</td>
+</tr>
+<tr>
+  <td>大样本永远收不全</td>
+  <td>分片超时 / NACK_FRAG 没到</td>
+  <td>看 HEARTBEAT_FRAG 的 lastFragmentNum 与 NACK_FRAG 是否成对出现</td>
+</tr>
+<tr>
+  <td>和 Cyclone 互通失败</td>
+  <td>版本、端口、缺 default locator</td>
+  <td>对照 11.2 逐条排查；确认 SPDP 里有 <code>0x0031</code></td>
+</tr>
+</tbody>
+</table>
+
+<h3>12.3 手工解析一个包的顺序</h3>
+
+<ol>
+  <li>前 4 字节是不是 <code>52 54 50 53</code>？不是就别当 RTPS 解。</li>
+  <li>第 4、5 字节是版本；第 8 到 19 字节是 guidPrefix。</li>
+  <li>从偏移 20 开始循环：读 id、flags、长度，跳到下一个。</li>
+  <li>遇到 DATA（0x15）：先看 flags 的 Q 和 D，再按第 3.5 节的偏移取 readerId、writerId、SN。</li>
+  <li>载荷开头是 <code>00 03 00 00</code> 就跳过 4 字节，然后按 PID 逐个读。</li>
+  <li>PID_SENTINEL（0x0001）结束；长度字段一定是 4 的倍数。</li>
+</ol>
+
+<h2 id="appendix">13. 附录：常量速查</h2>
+
+<h3>13.1 子消息 ID</h3>
+<table>
+<thead><tr><th>ID</th><th>名称</th><th>本实现</th></tr></thead>
+<tbody>
+<tr><td><code>0x06</code></td><td>ACKNACK</td><td>发 / 收</td></tr>
+<tr><td><code>0x07</code></td><td>HEARTBEAT</td><td>发 / 收</td></tr>
+<tr><td><code>0x08</code></td><td>GAP</td><td>发 / 收</td></tr>
+<tr><td><code>0x09</code></td><td>INFO_TS</td><td>发 / 收</td></tr>
+<tr><td><code>0x0c</code></td><td>INFO_SRC</td><td>跳过</td></tr>
+<tr><td><code>0x0e</code></td><td>INFO_DST</td><td>发 / 收</td></tr>
+<tr><td><code>0x0f</code></td><td>INFO_REPLY</td><td>跳过</td></tr>
+<tr><td><code>0x12</code></td><td>NACK_FRAG</td><td>发 / 收</td></tr>
+<tr><td><code>0x13</code></td><td>HEARTBEAT_FRAG</td><td>发 / 收</td></tr>
+<tr><td><code>0x15</code></td><td>DATA</td><td>发 / 收</td></tr>
+<tr><td><code>0x16</code></td><td>DATA_FRAG</td><td>发 / 收</td></tr>
+</tbody>
+</table>
+
+<h3>13.2 代码地图</h3>
+<table>
+<thead><tr><th>文件</th><th>负责什么</th></tr></thead>
+<tbody>
+<tr><td><code>src/rtps/rtps_types.h/.c</code></td><td>GUID、EntityId、Locator 的布局与常量</td></tr>
+<tr><td><code>src/rtps/rtps_message.h/.c</code></td><td>消息头、子消息编解码、PMD</td></tr>
+<tr><td><code>src/rtps/rtps_param.h/.c</code></td><td>ParameterList 的读写（PID、长度、对齐）</td></tr>
+<tr><td><code>src/rtps/rtps_spdp.c</code></td><td>SPDP 载荷的构造与解析</td></tr>
+<tr><td><code>src/rtps/rtps_sedp.c</code></td><td>SEDP 载荷（端点 QoS）的构造与解析</td></tr>
+<tr><td><code>src/rtps/rtps_reliable.h/.c</code></td><td>writer 历史与 reader 窗口</td></tr>
+<tr><td><code>src/rtps/rtps_participant.h/.c</code></td><td>运行时：线程、定时器、匹配、收发数据</td></tr>
+<tr><td><code>src/rtps/rtps_tcp.h/.c</code></td><td>TCP 承载与流式重组</td></tr>
+<tr><td><code>src/rtps/rtps_cdr.h/.c</code></td><td>小端 CDR 读写辅助</td></tr>
+</tbody>
+</table>
+
+<h3>13.3 自己实现解析时的检查清单</h3>
+
+<ul>
+  <li>消息头 20 字节，magic 是 <code>"RTPS"</code>。</li>
+  <li>子消息长度不含 4 字节头，含补齐。</li>
+  <li>flags 要按子消息 ID 解释，不能全局套用。</li>
+  <li>DATA 的 <code>octetsToInlineQos</code> 从本字段之后算，本实现是 16。</li>
+  <li>ACKNACK、GAP、NACK_FRAG 的位图 bit0 是最高位。</li>
+  <li>ParameterList 的 length 含补齐，必为 4 的倍数。</li>
+  <li>发现载荷前可能有 <code>00 03 00 00</code> 封装头。</li>
+  <li>Duration 等于秒加 2⁻³² 秒。</li>
+  <li>Locator 的 port 是 u32，地址 16 字节。</li>
+  <li>“没写 PID”等于用 DDS 默认值，不是错误。</li>
+</ul>
+
+<footer>
+  <p>
+    本文与 <code>src/rtps/</code> 当前实现对应。字段偏移、默认值和定时器都能在对应源文件里找到出处；
+    更严格、可逐条核对的版本见 <a href="rtps-spec.md">rtps-spec.md</a>。
+    若代码与本文冲突，以代码为准，并请顺手修正本文。
+  </p>
+  <p class="small">
+    network_bridge · RTPS 协议大白话手册 · 单文件 HTML，可直接用浏览器打开或打印为 PDF。
+  </p>
+</footer>
+
+</main>
+</div>
+</body>
+</html>

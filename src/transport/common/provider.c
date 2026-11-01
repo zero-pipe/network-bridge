@@ -1,0 +1,72 @@
+#include "transport_internal.h"
+
+#include <string.h>
+
+#define PROVIDER_MAX 32
+
+static const nb_transport_provider_t *nb_g_providers[PROVIDER_MAX];
+static size_t nb_g_provider_count;
+
+/* ---- Provider 注册 ---- */
+
+int nb_transport_provider_register(const nb_transport_provider_t *provider)
+{
+    size_t i;
+    if (!provider || !provider->scheme || !provider->scheme[0] || !provider->ops ||
+        !provider->ops->create || !provider->ops->start || !provider->ops->stop ||
+        !provider->ops->destroy || !provider->ops->send || !provider->ops->reply) {
+        return NB_ERR_INVALID;
+    }
+    if (provider->ops->abi_version != 0u &&
+        provider->ops->abi_version != NB_TRANSPORT_PROVIDER_ABI_VERSION) {
+        return NB_ERR_NOT_SUPPORTED;
+    }
+    if (provider->ops->struct_size != 0u &&
+        provider->ops->struct_size < sizeof(nb_transport_provider_ops_t)) {
+        return NB_ERR_INVALID;
+    }
+    for (i = 0; i < nb_g_provider_count; i++) {
+        if (strcmp(nb_g_providers[i]->scheme, provider->scheme) == 0) {
+            return NB_ERR_STATE;
+        }
+    }
+    if (nb_g_provider_count >= PROVIDER_MAX) {
+        return NB_ERR_NOMEM;
+    }
+    nb_g_providers[nb_g_provider_count++] = provider;
+    return NB_OK;
+}
+
+int nb_transport_provider_unregister(const char *scheme)
+{
+    size_t i;
+
+    if (!scheme || !scheme[0]) {
+        return NB_ERR_INVALID;
+    }
+    for (i = 0; i < nb_g_provider_count; i++) {
+        if (strcmp(nb_g_providers[i]->scheme, scheme) == 0) {
+            size_t j;
+            for (j = i; j + 1 < nb_g_provider_count; j++) {
+                nb_g_providers[j] = nb_g_providers[j + 1];
+            }
+            nb_g_provider_count--;
+            return NB_OK;
+        }
+    }
+    return NB_ERR_NOTFOUND;
+}
+
+const nb_transport_provider_t *nb_transport_provider_find(const char *scheme)
+{
+    size_t i;
+    if (!scheme) {
+        return NULL;
+    }
+    for (i = 0; i < nb_g_provider_count; i++) {
+        if (strcmp(nb_g_providers[i]->scheme, scheme) == 0) {
+            return nb_g_providers[i];
+        }
+    }
+    return NULL;
+}

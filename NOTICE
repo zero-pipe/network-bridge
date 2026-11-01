@@ -1,0 +1,18 @@
+Network Bridge
+Copyright 2026 The Network Bridge Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It bundles the following third-party components. See the corresponding
+directories under 3rdparty/ and tests/google/ for their full license texts.
+
+  * network-tool-kit (3rdparty/ntk)      - see 3rdparty/ntk/LICENSE*
+  * EasyLogger (3rdparty/elog)           - see 3rdparty/elog/LICENSE*
+  * cJSON (3rdparty/cjson)               - MIT
+  * uthash (3rdparty/uthash)             - BSD 1-Clause
+  * Eclipse Cyclone DDS (3rdparty/cyclonedds)
+                                         - Eclipse Public License 2.0 or
+                                           Eclipse Distribution License 1.0
+  * GoogleTest (tests/google/gtest)      - BSD 3-Clause
+  * Google Benchmark (tests/google/benchmark)
+                                         - Apache License 2.0

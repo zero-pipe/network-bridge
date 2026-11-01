@@ -1,0 +1,348 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://network-bridge.local/config.schema.json",
+  "title": "network bridge framework configuration",
+  "description": "JSON configuration accepted by nb_config_parse and nb_config_parse_file. String enums are lowercase and case-sensitive. Unknown fields are ignored (nb_config_parse logs a warning).",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "maxLength": 63,
+      "description": "Node name. Default: nb."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["mesh", "static"],
+      "description": "Discovery mode. Default: mesh. static is equivalent to discovery.disable=true."
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "io_threads": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8,
+          "description": "Poller threads. 0 means hardware concurrency; values above NB_TRANSPORT_MAX_IO (8) are rejected."
+        },
+        "handler_threads": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1024,
+          "description": "Worker thread count. 0 disables the worker pool."
+        },
+        "handler_max_concurrency": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum queued plus running worker/executor tasks. 0 means unlimited."
+        },
+        "max_inflight": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum client pending calls. 0 means the default 65536."
+        },
+        "max_streams": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64,
+          "description": "Maximum concurrent inbound streams. 0 means the default 64."
+        },
+        "peer_rate_limit_pps": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Per-peer inbound request limit per second. 0 means unlimited."
+        },
+        "send_lanes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64,
+          "description": "Dedicated send-lane poller threads, isolated from the io pollers that receive and dispatch. Run publish loops via nb_node_post_send so nb_proxy_call_event takes the inline send fast path. 0 disables."
+        }
+      },
+      "additionalProperties": true
+    },
+    "transport": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["udp", "tcp"],
+          "description": "Default transport when no explicit bindings are given. Default: udp."
+        },
+        "bind_host": {
+          "type": "string",
+          "maxLength": 63,
+          "description": "Default bind address. Default: 0.0.0.0."
+        },
+        "data_port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "Default data port. 0 lets the OS choose."
+        },
+        "bindings": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "description": "Endpoint URI such as tcp://127.0.0.1:42420."
+              },
+              {
+                "type": "object",
+                "required": ["endpoint"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 15
+                  },
+                  "endpoint": {
+                    "type": "string",
+                    "maxLength": 255
+                  },
+                  "intra_process": {
+                    "type": "string",
+                    "enum": ["off", "auto", "only"],
+                    "description": "DDS event in-process fast path."
+                  },
+                  "poll_us": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Busy-poll window in microseconds after draining before falling back to a blocking wait (shm). 0 blocks on wakeup."
+                  },
+                  "qos": {
+                    "$ref": "#/$defs/qos"
+                  }
+                },
+                "additionalProperties": true
+              }
+            ]
+          },
+          "description": "Explicit listening endpoints."
+        },
+        "frag_bytes": {
+          "type": "integer",
+          "anyOf": [
+            { "const": 0 },
+            { "minimum": 256, "maximum": 8192 }
+          ],
+          "description": "UDP fragment size. 0 uses the default 1440 (IPv4 1500 MTU minus 60 bytes of headers); otherwise 256..8192."
+        },
+        "max_msg_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 67108864,
+          "description": "Maximum envelope size. Default 1 MiB; maximum 64 MiB."
+        },
+        "backpressure_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Outbound high-water mark. Default 4 MiB."
+        },
+        "rtcp_interval_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "UDP RTCP report interval. Default 1000 ms."
+        },
+        "disable_rtcp": {
+          "type": "boolean",
+          "description": "Set true to disable RTCP."
+        },
+        "qos": {
+          "$ref": "#/$defs/qos"
+        }
+      },
+      "additionalProperties": true
+    },
+    "discovery": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["mesh", "static", "off", "none"],
+          "description": "mesh enables discovery; static/off/none disable it. A top-level mode of static always disables discovery."
+        },
+        "broadcast": {
+          "type": "string",
+          "description": "Discovery host:port. Default 255.255.255.255:41953."
+        },
+        "peers": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "description": "Unicast HELLO target in host:port form."
+          }
+        },
+        "hello_interval_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "HELLO interval. Default 3000 ms."
+        },
+        "node_ttl_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Peer expiration time. Default 9000 ms."
+        }
+      },
+      "additionalProperties": true
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "disable": {
+          "type": "boolean",
+          "description": "Disable all metric collection."
+        },
+        "disable_latency_histogram": {
+          "type": "boolean",
+          "description": "Disable the latency histogram only."
+        },
+        "sample_every": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Latency sampling interval. 0 or 1 means every call."
+        }
+      },
+      "additionalProperties": true
+    },
+    "log": {
+      "type": "object",
+      "properties": {
+        "disable": {
+          "type": "boolean",
+          "description": "Disable log output."
+        },
+        "level": {
+          "type": "string",
+          "enum": ["assert", "error", "warn", "info", "debug", "verbose"],
+          "description": "Log level. Default: info."
+        }
+      },
+      "additionalProperties": true
+    },
+    "routes": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "required": ["service", "endpoint"],
+        "properties": {
+          "service": {
+            "type": "string",
+            "maxLength": 63
+          },
+          "endpoint": {
+            "type": "string",
+            "maxLength": 255,
+            "description": "Endpoint URI such as tcp://127.0.0.1:42420."
+          }
+        },
+        "additionalProperties": true
+      },
+      "description": "Static service routes that bypass discovery."
+    }
+  },
+  "$defs": {
+    "qos": {
+      "type": "object",
+      "properties": {
+        "reliability": {
+          "type": "string",
+          "enum": ["best_effort", "reliable"],
+          "description": "DDS ReliabilityQosPolicy."
+        },
+        "durability": {
+          "type": "string",
+          "enum": ["volatile", "transient_local"],
+          "description": "DDS DurabilityQosPolicy."
+        },
+        "history": {
+          "type": "string",
+          "enum": ["keep_last", "keep_all"],
+          "description": "DDS HistoryQosPolicy."
+        },
+        "depth": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "History depth for keep_last. 0 uses the provider default."
+        },
+        "deadline_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "DDS DeadlineQosPolicy in milliseconds."
+        },
+        "lifespan_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "DDS LifespanQosPolicy in milliseconds."
+        },
+        "lease_duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "DDS LivelinessQosPolicy lease duration in milliseconds."
+        },
+        "latency_budget_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "DDS LatencyBudgetQosPolicy in milliseconds."
+        },
+        "min_separation_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "DDS TimeBasedFilterQosPolicy minimum separation in milliseconds; a subscription drops samples that arrive closer together."
+        },
+        "max_samples": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "DDS ResourceLimitsQosPolicy max_samples; 0 means unlimited."
+        },
+        "max_instances": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "DDS ResourceLimitsQosPolicy max_instances; 0 means the built-in cap. A subscription rejects samples that would create more instances."
+        },
+        "max_samples_per_instance": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "DDS ResourceLimitsQosPolicy max_samples_per_instance; 0 means unlimited."
+        },
+        "autodispose_unregistered_instances": {
+          "type": "boolean",
+          "description": "DDS WriterDataLifecycleQosPolicy; dispose the instances of a writer that unregisters."
+        },
+        "liveliness": {
+          "type": "string",
+          "enum": ["automatic", "manual_by_participant", "manual_by_topic"],
+          "description": "DDS LivelinessQosPolicy kind."
+        },
+        "ownership": {
+          "type": "string",
+          "enum": ["shared", "exclusive"],
+          "description": "DDS OwnershipQosPolicy."
+        },
+        "presentation_scope": {
+          "type": "string",
+          "enum": ["instance", "topic", "group"],
+          "description": "DDS PresentationQosPolicy access scope; a reader that asks for a wider scope than the writer offers does not match."
+        },
+        "coherent_access": {
+          "type": "boolean",
+          "description": "DDS PresentationQosPolicy coherent_access; announced and checked for compatibility."
+        },
+        "ordered_access": {
+          "type": "boolean",
+          "description": "DDS PresentationQosPolicy ordered_access; announced and checked for compatibility."
+        },
+        "partition": {
+          "type": "string",
+          "maxLength": 127,
+          "description": "DDS PartitionQosPolicy (single partition name)."
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

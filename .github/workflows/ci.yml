@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CTEST_OUTPUT_ON_FAILURE: 1
+
+jobs:
+  linux:
+    name: Linux / GCC / Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DNB_BUILD_TESTS=ON \
+            -DNB_BUILD_TOOLS=ON \
+            -DNB_BUILD_EXAMPLES=ON
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+      - name: Unit tests
+        run: ctest --test-dir build -L unit --output-on-failure
+      - name: End-to-end tests
+        run: ctest --test-dir build -L e2e --output-on-failure
+
+  windows:
+    name: Windows / MSVC / Debug
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: >
+          cmake -S . -B build -A x64
+          -DNB_BUILD_TESTS=ON
+          -DNB_BUILD_TOOLS=ON
+          -DNB_BUILD_EXAMPLES=ON
+      - name: Build
+        run: cmake --build build --config Debug --parallel
+      - name: Unit tests
+        run: ctest --test-dir build -C Debug -L unit --output-on-failure
+
+  sanitizers:
+    name: Linux / GCC / ASan+UBSan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DNB_SANITIZE=address,undefined \
+            -DNB_BUILD_TESTS=ON \
+            -DNB_BUILD_TOOLS=OFF \
+            -DNB_BUILD_EXAMPLES=OFF \
+            -DNB_ENABLE_DDS=OFF
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+      - name: Unit tests
+        run: ctest --test-dir build -L unit --output-on-failure
+      - name: End-to-end tests (TCP/UDP)
+        run: ctest --test-dir build -L e2e --output-on-failure
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1

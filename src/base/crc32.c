@@ -1,0 +1,34 @@
+#include "crc32.h"
+#include "atomic.h"
+
+/* CRC32 查表（IEEE 802.3），运行时按需构建一次；只读表，构建用原子一次性置位。 */
+static uint32_t nb_g_crc_table[256];
+/* 0 = 未构建，1 = 构建中，2 = 就绪。 */
+static uint32_t nb_g_crc_table_state;
+
+static void nb_crc_table_build(void)
+{
+    uint32_t i;
+    for (i = 0; i < 256; i++) {
+        uint32_t c = i;
+        int k;
+        for (k = 0; k < 8; k++) {
+            c = (c & 1u) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+        }
+        nb_g_crc_table[i] = c;
+    }
+}
+
+uint32_t nb_crc32(const void *data, size_t len, uint32_t seed)
+{
+    const uint8_t *p = (const uint8_t *)data;
+    uint32_t crc = ~seed;
+    if (nb_atomic_once_begin(&nb_g_crc_table_state)) {
+        nb_crc_table_build();
+        nb_atomic_once_end(&nb_g_crc_table_state);
+    }
+    while (len-- > 0) {
+        crc = nb_g_crc_table[(crc ^ *p++) & 0xffu] ^ (crc >> 8);
+    }
+    return ~crc;
+}
