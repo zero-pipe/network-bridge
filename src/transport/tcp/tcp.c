@@ -20,7 +20,7 @@
 #include "metric_macros.h"
 #include <nb/poolset.h>
 #include "envelope.h"
-#include "iobuf.h"
+#include <nb/iobuf.h>
 #include "util.h"
 
 #define NB_LOG_TAG "tcp"
@@ -196,7 +196,7 @@ static void nb_tcp_link_flush_tx(nb_tcp_transport_t *t, nb_tcp_link_t *link)
         return;
     }
     while (!nb_iobuf_empty(&link->tx)) {
-        ntk_socket_iov iov[NTK_SOCKET_IOV_MAX];
+        nb_iov_t iov[NTK_SOCKET_IOV_MAX];
         unsigned n = nb_iobuf_iovec(&link->tx, iov, NTK_SOCKET_IOV_MAX, 0);
         ntk_socket *sock;
         ntk_ssize_t sent;
@@ -208,7 +208,8 @@ static void nb_tcp_link_flush_tx(nb_tcp_transport_t *t, nb_tcp_link_t *link)
         if (!sock) {
             break;
         }
-        sent = ntk_socket_sendv(sock, iov, n);
+        /* nb_iov_t 与 ntk_socket_iov 布局一致，直接复用系统 sendv。 */
+        sent = ntk_socket_sendv(sock, (const ntk_socket_iov *)iov, n);
         if (sent > 0) {
             nb_iobuf_consume(&link->tx, (size_t)sent);
             continue;
@@ -228,7 +229,6 @@ static int nb_tcp_link_emit(nb_tcp_transport_t *t,
                          const void *payload,
                          size_t payload_len)
 {
-    ntk_poller *poller = ntk_poller_current();
     size_t total = header_len + payload_len;
 
     if (!t || !link || !link->used || !header || header_len == 0) {
@@ -260,7 +260,7 @@ static int nb_tcp_link_emit(nb_tcp_transport_t *t,
     }
     if (!link->connected) {
         /* 异步 connect 尚未完成：整帧原子入队，on_connect 后由 flush_tx 发出。 */
-        if (nb_iobuf_append_copy2(&link->tx, poller, header, header_len, payload, payload_len) !=
+        if (nb_iobuf_append_copy2(&link->tx, header, header_len, payload, payload_len) !=
             0) {
             return NB_ERR_NOMEM;
         }
@@ -269,7 +269,7 @@ static int nb_tcp_link_emit(nb_tcp_transport_t *t,
 
     /* 已有积压：整帧入队（拷贝），冲刷由队列驱动。 */
     if (!nb_iobuf_empty(&link->tx)) {
-        if (nb_iobuf_append_copy2(&link->tx, poller, header, header_len, payload, payload_len) !=
+        if (nb_iobuf_append_copy2(&link->tx, header, header_len, payload, payload_len) !=
             0) {
             return NB_ERR_NOMEM;
         }
@@ -326,7 +326,7 @@ static int nb_tcp_link_emit(nb_tcp_transport_t *t,
                 rem2 = NULL;
                 len2 = 0;
             }
-            if (nb_iobuf_append_copy2(&link->tx, poller, rem1, len1, rem2, len2) != 0) {
+            if (nb_iobuf_append_copy2(&link->tx, rem1, len1, rem2, len2) != 0) {
                 if ((size_t)sent > 0) {
                     /* 帧已部分写到对端，无法补齐剩余字节：断开连接避免流错位。 */
                     nb_tcp_free_link(t, link);

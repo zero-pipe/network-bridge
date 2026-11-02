@@ -35,6 +35,13 @@ typedef void (*nb_buf_free_fn)(void *opaque, uint8_t *data);
 
 /* Pool flag: create slots lazily; slot_count > 0 acts as a hard cap. */
 #define NB_BUF_POOL_FLAG_LAZY 0x0001u
+/*
+ * Pool flag: lock-free, single-owning-thread pool (poller-local).
+ * Acquire/return on the owning thread skip the spinlock. A return from a
+ * non-owning thread frees the buffer instead of touching the freelist, so an
+ * outstanding block never dangles. Created on, and owned by, the creating thread.
+ */
+#define NB_BUF_POOL_FLAG_LOCAL 0x0002u
 
 typedef struct nb_buf_view {
     nb_buf_t *owner; /* borrowed; does not add a reference */
@@ -60,6 +67,22 @@ typedef struct nb_buf_pool_stats {
 
 nb_buf_t *nb_buf_alloc(size_t size);
 nb_buf_t *nb_buf_alloc_aligned(size_t size, size_t alignment);
+
+/*
+ * Allocate from the calling thread's lazily-created size-class pool, falling
+ * back to nb_buf_alloc when no class fits or is exhausted. The pool is
+ * lock-free and owned by the creating thread; a buffer handed back from another
+ * thread is freed rather than returned to the freelist. Frees the calling
+ * thread's local pools when the thread exits (see nb_buf_local_release).
+ */
+nb_buf_t *nb_buf_alloc_local(size_t size);
+/*
+ * Destroy the calling thread's local pools. Call once on the owning thread at
+ * thread exit, only after every buffer that thread allocated has been released;
+ * otherwise the pools are reclaimed only at process exit. Buffers still
+ * outstanding when the pools are destroyed must not be released afterwards.
+ */
+void nb_buf_local_release(void);
 nb_buf_t *nb_buf_create_external(void *data,
                                  size_t size,
                                  nb_buf_free_fn free_fn,

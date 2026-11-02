@@ -3,6 +3,8 @@ set(NB_BASE_SOURCES
     base/buf.c
     base/poolset.c
     base/slotpool.c
+    base/iobuf.c
+    base/poller_alloc.c
     base/crc32.c
 )
 
@@ -51,9 +53,7 @@ set(NB_SOURCES
     core/discovery_view.c
     utils/error.c
     utils/metrics.c
-    utils/poller_alloc.c
     utils/util.c
-    utils/iobuf.c
     utils/endpoint.c
     utils/qos.c
     utils/json/codec_json.c

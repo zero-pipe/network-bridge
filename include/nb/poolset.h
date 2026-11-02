@@ -28,6 +28,16 @@ nb_poolset_t *nb_poolset_create(const size_t *slot_sizes,
                                 const size_t *slot_counts,
                                 size_t class_count);
 
+/*
+ * As nb_poolset_create, but when `local` is non-zero each class pool is created
+ * with NB_BUF_POOL_FLAG_LOCAL: lock-free, owned by the creating thread. Used for
+ * per-thread hot-path pools; the poolset must be destroyed on the owning thread.
+ */
+nb_poolset_t *nb_poolset_create_ex(const size_t *slot_sizes,
+                                   const size_t *slot_counts,
+                                   size_t class_count,
+                                   int local);
+
 /* Take a buffer with capacity >= size; returns NULL when no class can serve it. */
 nb_buf_t *nb_poolset_acquire(nb_poolset_t *poolset, size_t size);
 

@@ -4,7 +4,7 @@
 
 #include "envelope.h"
 #include "metric_macros.h"
-#include "poller_alloc.h"
+#include <nb/poller_alloc.h>
 #include "util.h"
 
 #include <nb/log.h>

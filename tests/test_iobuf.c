@@ -1,4 +1,4 @@
-#include "iobuf.h"
+#include <nb/iobuf.h>
 
 #define NB_LOG_TAG "test"
 #include <nb/log.h>
@@ -22,11 +22,11 @@ static void test_copy_peek_consume(void)
     const char a[] = "hello";
     const char c[] = " world";
     char out[32];
-    ntk_socket_iov iov[4];
+    nb_iov_t iov[4];
 
     nb_iobuf_init(&b);
-    CHECK(nb_iobuf_append_copy(&b, NULL, a, sizeof(a) - 1) == 0);
-    CHECK(nb_iobuf_append_copy(&b, NULL, c, sizeof(c) - 1) == 0);
+    CHECK(nb_iobuf_append_copy(&b, a, sizeof(a) - 1) == 0);
+    CHECK(nb_iobuf_append_copy(&b, c, sizeof(c) - 1) == 0);
     CHECK(nb_iobuf_len(&b) == 11);
     memset(out, 0, sizeof(out));
     CHECK(nb_iobuf_peek(&b, 0, out, 11) == 11);
@@ -46,22 +46,21 @@ static void test_copy_peek_consume(void)
 static void test_ref_and_borrow(void)
 {
     nb_iobuf_t b;
-    ntk_buf *owner;
+    nb_buf_t *owner;
     const char borrowed[] = "borrowed";
     char out[32];
 
     nb_iobuf_init(&b);
-    owner = ntk_buf_alloc(16);
+    owner = nb_buf_alloc(16);
     CHECK(owner != NULL);
     if (!owner) {
         return;
     }
-    memcpy((void *)ntk_buf_data(owner), "owned", 5);
-    ntk_buf_set_len(owner, 5);
-    CHECK(ntk_buf_refcnt(owner) == 1);
-    CHECK(nb_iobuf_append_buf(&b, owner, ntk_buf_data(owner), 5) == 0);
-    CHECK(ntk_buf_refcnt(owner) == 2);
-    ntk_buf_unref(owner);
+    memcpy(nb_buf_data(owner), "owned", 5);
+    nb_buf_set_size(owner, 5);
+    CHECK(nb_buf_share(owner) == 0);
+    CHECK(nb_iobuf_append_buf(&b, owner, nb_buf_data(owner), 5) == 0);
+    nb_buf_release(owner); /* 丢弃调用方初始引用；block 仍持有一份 */
     CHECK(nb_iobuf_append_borrow(&b, borrowed, sizeof(borrowed) - 1) == 0);
     memset(out, 0, sizeof(out));
     CHECK(nb_iobuf_peek(&b, 0, out, 13) == 13);
@@ -72,24 +71,24 @@ static void test_ref_and_borrow(void)
 static void test_view(void)
 {
     nb_iobuf_t b;
-    ntk_buf *scratch = NULL;
+    nb_buf_t *scratch = NULL;
     const uint8_t *view;
     const char first[] = "abc";
     const char second[] = "def";
 
     nb_iobuf_init(&b);
-    CHECK(nb_iobuf_append_copy(&b, NULL, first, 3) == 0);
-    view = nb_iobuf_view(&b, 3, NULL, &scratch);
+    CHECK(nb_iobuf_append_copy(&b, first, 3) == 0);
+    view = nb_iobuf_view(&b, 3, &scratch);
     CHECK(view != NULL);
     CHECK(memcmp(view, "abc", 3) == 0);
     CHECK(scratch == NULL); /* 单块连续视图不需要 scratch */
-    CHECK(nb_iobuf_append_copy(&b, NULL, second, 3) == 0);
-    view = nb_iobuf_view(&b, 6, NULL, &scratch);
+    CHECK(nb_iobuf_append_copy(&b, second, 3) == 0);
+    view = nb_iobuf_view(&b, 6, &scratch);
     CHECK(view != NULL);
     CHECK(scratch != NULL);
     CHECK(memcmp(view, "abcdef", 6) == 0);
     if (scratch) {
-        ntk_buf_unref(scratch);
+        nb_buf_release(scratch);
     }
     nb_iobuf_reset(&b);
 }

@@ -1,10 +1,10 @@
-#include "iobuf.h"
-#include "poller_alloc.h"
+#include <nb/iobuf.h>
+#include <nb/poller_alloc.h>
 
 #include <stdlib.h>
 #include <string.h>
 
-static nb_iobuf_blk_t *nb_blk_new(ntk_buf *owner, const void *data, size_t len)
+static nb_iobuf_blk_t *nb_blk_new(nb_buf_t *owner, const void *data, size_t len)
 {
     nb_iobuf_blk_t *blk;
 
@@ -29,7 +29,7 @@ static void nb_blk_release(nb_iobuf_blk_t *blk)
         return;
     }
     if (blk->owner) {
-        ntk_buf_unref(blk->owner);
+        nb_buf_release(blk->owner);
     }
     nb_poller_free(blk);
 }
@@ -85,39 +85,38 @@ int nb_iobuf_empty(const nb_iobuf_t *b)
     return (!b || b->total == 0) ? 1 : 0;
 }
 
-int nb_iobuf_append_copy(nb_iobuf_t *b, ntk_poller *poller, const void *data, size_t len)
+int nb_iobuf_append_copy(nb_iobuf_t *b, const void *data, size_t len)
 {
-    return nb_iobuf_append_copy2(b, poller, data, len, NULL, 0);
+    return nb_iobuf_append_copy2(b, data, len, NULL, 0);
 }
 
 int nb_iobuf_append_copy2(nb_iobuf_t *b,
-                          ntk_poller *poller,
                           const void *data1,
                           size_t len1,
                           const void *data2,
                           size_t len2)
 {
-    ntk_buf *owner;
+    nb_buf_t *owner;
     nb_iobuf_blk_t *blk;
     size_t total = len1 + len2;
 
     if (!b || total == 0 || (len1 && !data1) || (len2 && !data2)) {
         return -1;
     }
-    owner = ntk_buf_alloc_local(poller, total);
+    owner = nb_buf_alloc_local(total);
     if (!owner) {
         return -1;
     }
     if (len1) {
-        memcpy((void *)ntk_buf_data(owner), data1, len1);
+        memcpy(nb_buf_data(owner), data1, len1);
     }
     if (len2) {
-        memcpy((uint8_t *)ntk_buf_data(owner) + len1, data2, len2);
+        memcpy(nb_buf_data(owner) + len1, data2, len2);
     }
-    ntk_buf_set_len(owner, total);
-    blk = nb_blk_new(owner, ntk_buf_data(owner), total);
+    nb_buf_set_size(owner, total);
+    blk = nb_blk_new(owner, nb_buf_data(owner), total);
     if (!blk) {
-        ntk_buf_unref(owner);
+        nb_buf_release(owner);
         return -1;
     }
     if (nb_iobuf_push(b, blk) != 0) {
@@ -127,17 +126,19 @@ int nb_iobuf_append_copy2(nb_iobuf_t *b,
     return 0;
 }
 
-int nb_iobuf_append_buf(nb_iobuf_t *b, ntk_buf *owner, const void *data, size_t len)
+int nb_iobuf_append_buf(nb_iobuf_t *b, nb_buf_t *owner, const void *data, size_t len)
 {
     nb_iobuf_blk_t *blk;
 
     if (!b || !owner || !data || len == 0) {
         return -1;
     }
-    ntk_buf_ref(owner); /* block 持有一份引用 */
+    if (!nb_buf_ref(owner)) { /* 仅共享态可 +1 引用 */
+        return -1;
+    }
     blk = nb_blk_new(owner, data, len);
     if (!blk) {
-        ntk_buf_unref(owner);
+        nb_buf_release(owner);
         return -1;
     }
     if (nb_iobuf_push(b, blk) != 0) {
@@ -214,9 +215,9 @@ size_t nb_iobuf_peek(const nb_iobuf_t *b, size_t off, void *dst, size_t n)
 }
 
 unsigned nb_iobuf_iovec(const nb_iobuf_t *b,
-                         ntk_socket_iov *iov,
-                         unsigned max_count,
-                         size_t max_bytes)
+                        nb_iov_t *iov,
+                        unsigned max_count,
+                        size_t max_bytes)
 {
     const nb_iobuf_blk_t *blk;
     unsigned n = 0;
@@ -271,7 +272,7 @@ void nb_iobuf_consume(nb_iobuf_t *b, size_t n)
     }
 }
 
-const uint8_t *nb_iobuf_view(nb_iobuf_t *b, size_t n, ntk_poller *poller, ntk_buf **scratch)
+const uint8_t *nb_iobuf_view(nb_iobuf_t *b, size_t n, nb_buf_t **scratch)
 {
     const nb_iobuf_blk_t *blk;
     size_t head_remain;
@@ -292,19 +293,19 @@ const uint8_t *nb_iobuf_view(nb_iobuf_t *b, size_t n, ntk_poller *poller, ntk_bu
     if (!scratch) {
         return NULL;
     }
-    if (!*scratch || ntk_buf_cap(*scratch) < n) {
-        ntk_buf *nb = ntk_buf_alloc_local(poller, n);
+    if (!*scratch || nb_buf_capacity(*scratch) < n) {
+        nb_buf_t *nb = nb_buf_alloc_local(n);
         if (!nb) {
             return NULL;
         }
         if (*scratch) {
-            ntk_buf_unref(*scratch);
+            nb_buf_release(*scratch);
         }
         *scratch = nb;
     }
-    if (nb_iobuf_peek(b, 0, (void *)ntk_buf_data(*scratch), n) != n) {
+    if (nb_iobuf_peek(b, 0, nb_buf_data(*scratch), n) != n) {
         return NULL;
     }
-    ntk_buf_set_len(*scratch, n);
-    return ntk_buf_data(*scratch);
+    nb_buf_set_size(*scratch, n);
+    return nb_buf_data(*scratch);
 }

@@ -1,4 +1,4 @@
-#include "poller_alloc.h"
+#include <nb/poller_alloc.h>
 #include "node_access.h"
 #include "pending.h"
 
@@ -51,31 +51,11 @@ static void pool_probe(void *user)
 {
     nb_node_t *node = (nb_node_t *)user;
     ntk_poller *cur = ntk_poller_current();
-    ntk_buf_pool *pool;
-    void *a;
-    void *b;
-    size_t cap_a = 0;
-    size_t cap_b = 0;
 
     g_task_ok = 0;
     if (cur != nb_node_poller(node)) {
         goto done;
     }
-    pool = ntk_poller_buf_pool(cur);
-    if (!pool) {
-        goto done;
-    }
-    a = ntk_buf_pool_acquire(pool, 128, &cap_a);
-    if (!a) {
-        goto done;
-    }
-    ntk_buf_pool_release(pool, a, cap_a);
-    b = ntk_buf_pool_acquire(pool, 128, &cap_b);
-    if (b != a) {
-        ntk_buf_pool_release(pool, b, cap_b);
-        goto done;
-    }
-    ntk_buf_pool_release(pool, b, cap_b);
 
     /* nb_mem：owner 线程内释放应复用同一块。 */
     {
@@ -129,7 +109,6 @@ int main(void)
     for (i = 0; i < n; i++) {
         ntk_poller *p = ntk_poller_pool_at(nb_node_pool(node), i);
         CHECK(p != NULL);
-        CHECK(ntk_poller_buf_pool(p) != NULL);
     }
 
     /* 在 owner poller 线程内验证 current + 复用。 */

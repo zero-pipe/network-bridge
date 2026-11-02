@@ -1,4 +1,5 @@
 #include <nb/buf.h>
+#include <nb/poolset.h>
 #include "atomic.h"
 
 #include <nb/error.h>
@@ -6,6 +7,12 @@
 #include <string.h>
 
 #define NB_BUF_MAGIC 0x4e424246u /* 'NBBF' */
+
+#if defined(_MSC_VER)
+#define NB_TLS __declspec(thread)
+#else
+#define NB_TLS __thread
+#endif
 
 struct nb_buf {
     uint32_t magic;
@@ -29,8 +36,31 @@ struct nb_buf_pool {
     size_t cached;
     size_t outstanding;
     int dead;
+    int thread_safe;      /* 0 = NB_BUF_POOL_FLAG_LOCAL: lock-free, owned thread */
+    uintptr_t owner_token; /* thread token of the owning thread (thread_safe=0) */
     nb_buf_pool_stats_t stats;
 };
+
+/* Per-thread token: the address of a thread-local byte is unique per thread. */
+static NB_TLS char g_thread_token;
+static uintptr_t nb_thread_token(void)
+{
+    return (uintptr_t)&g_thread_token;
+}
+
+static void pool_lock(nb_buf_pool_t *pool)
+{
+    if (pool->thread_safe) {
+        nb_spinlock_lock(&pool->lock);
+    }
+}
+
+static void pool_unlock(nb_buf_pool_t *pool)
+{
+    if (pool->thread_safe) {
+        nb_spinlock_unlock(&pool->lock);
+    }
+}
 
 static nb_buf_t *nb_buf_new_internal(size_t size, size_t alignment, nb_buf_pool_t *pool)
 {
@@ -121,7 +151,17 @@ static void nb_buf_pool_return(nb_buf_pool_t *pool, nb_buf_t *buf)
 {
     int last;
 
-    nb_spinlock_lock(&pool->lock);
+    /*
+     * Lock-free local pool: a return from a non-owning thread cannot touch the
+     * freelist, so free the block directly. The block is malloc-backed, so this
+     * is always safe and the pool's counters stay owned-thread-only.
+     */
+    if (!pool->thread_safe && pool->owner_token != nb_thread_token()) {
+        nb_buf_destroy(buf);
+        return;
+    }
+
+    pool_lock(pool);
     if (pool->outstanding > 0) {
         pool->outstanding--;
     }
@@ -130,14 +170,14 @@ static void nb_buf_pool_return(nb_buf_pool_t *pool, nb_buf_t *buf)
         buf->next = pool->free_head;
         pool->free_head = buf;
         pool->cached++;
-        nb_spinlock_unlock(&pool->lock);
+        pool_unlock(pool);
         return;
     }
     if (pool->created > 0) {
         pool->created--;
     }
     last = pool->dead && pool->outstanding == 0;
-    nb_spinlock_unlock(&pool->lock);
+    pool_unlock(pool);
     nb_buf_destroy(buf);
     if (last) {
         nb_buf_pool_free_mem(pool);
@@ -310,6 +350,8 @@ nb_buf_pool_t *nb_buf_pool_create(const nb_buf_pool_config_t *config)
         pool->config.max_cached = pool->config.slot_count ? pool->config.slot_count : 64;
     }
     nb_spinlock_init(&pool->lock);
+    pool->thread_safe = (pool->config.flags & NB_BUF_POOL_FLAG_LOCAL) ? 0 : 1;
+    pool->owner_token = pool->thread_safe ? 0u : nb_thread_token();
     if (pool->config.slot_count == 0 || (pool->config.flags & NB_BUF_POOL_FLAG_LAZY)) {
         return pool;
     }
@@ -340,9 +382,9 @@ nb_buf_t *nb_buf_acquire(nb_buf_pool_t *pool)
     if (!pool) {
         return NULL;
     }
-    nb_spinlock_lock(&pool->lock);
+    pool_lock(pool);
     if (pool->dead) {
-        nb_spinlock_unlock(&pool->lock);
+        pool_unlock(pool);
         return NULL;
     }
     if (pool->free_head) {
@@ -353,25 +395,25 @@ nb_buf_t *nb_buf_acquire(nb_buf_pool_t *pool)
         }
         pool->outstanding++;
         pool->stats.hits++;
-        nb_spinlock_unlock(&pool->lock);
+        pool_unlock(pool);
         nb_buf_reset_for_use(buf, pool);
         return buf;
     }
     if (pool->config.slot_count != 0 && pool->created >= pool->config.slot_count) {
         pool->stats.misses++;
-        nb_spinlock_unlock(&pool->lock);
+        pool_unlock(pool);
         return NULL;
     }
     pool->created++;
     pool->outstanding++;
     pool->stats.misses++;
     need_alloc = 1;
-    nb_spinlock_unlock(&pool->lock);
+    pool_unlock(pool);
 
     if (need_alloc) {
         buf = nb_buf_new_internal(pool->config.slot_size, 0, pool);
         if (!buf) {
-            nb_spinlock_lock(&pool->lock);
+            pool_lock(pool);
             if (pool->created > 0) {
                 pool->created--;
             }
@@ -379,7 +421,7 @@ nb_buf_t *nb_buf_acquire(nb_buf_pool_t *pool)
                 pool->outstanding--;
             }
             pool->stats.failed++;
-            nb_spinlock_unlock(&pool->lock);
+            pool_unlock(pool);
         }
     }
     return buf;
@@ -397,7 +439,27 @@ void nb_buf_pool_destroy(nb_buf_pool_t *pool)
     }
     p = pool;
 
-    nb_spinlock_lock(&p->lock);
+    if (!p->thread_safe) {
+        /*
+         * Owner-thread teardown of a lock-free local pool: callers destroy it at
+         * thread exit, so no further owner-thread returns can happen. Cross-thread
+         * returns free their block directly and never touch the pool. Drain the
+         * freelist and free the pool object without the (absent) lock.
+         */
+        p->dead = 1;
+        list = p->free_head;
+        p->free_head = NULL;
+        p->cached = 0;
+        while (list) {
+            nb_buf_t *next = list->next;
+            nb_buf_destroy(list);
+            list = next;
+        }
+        nb_buf_pool_free_mem(p);
+        return;
+    }
+
+    pool_lock(p);
     p->dead = 1;
     list = p->free_head;
     count = p->cached;
@@ -409,7 +471,7 @@ void nb_buf_pool_destroy(nb_buf_pool_t *pool)
         p->created = 0;
     }
     last = p->outstanding == 0;
-    nb_spinlock_unlock(&p->lock);
+    pool_unlock(p);
 
     while (list) {
         nb_buf_t *next = list->next;
@@ -426,12 +488,60 @@ void nb_buf_pool_get_stats(const nb_buf_pool_t *pool, nb_buf_pool_stats_t *out)
     if (!pool || !out) {
         return;
     }
-    nb_spinlock_lock((nb_spinlock_t *)&pool->lock);
+    pool_lock((nb_buf_pool_t *)pool);
     out->hits = pool->stats.hits;
     out->misses = pool->stats.misses;
     out->failed = pool->stats.failed;
     out->outstanding = pool->outstanding;
     out->cached = pool->cached;
     out->created = pool->created;
-    nb_spinlock_unlock((nb_spinlock_t *)&pool->lock);
+    pool_unlock((nb_buf_pool_t *)pool);
+}
+
+/* ---- per-thread local pools (nb_buf_alloc_local) ---- */
+
+static const size_t k_local_class_sizes[] = {
+    64,    128,   256,   512,   1024,   2048,   4096,   8192,
+    16384, 32768, 65536, 131072, 524288, 1048576, 2097152,
+};
+static const size_t k_local_class_counts[] = {
+    4096, 4096, 2048, 1024, 1024, 512, 256, 128,
+    64,   32,   16,   8,    4,     2,     1,
+};
+#define NB_LOCAL_CLASS_COUNT (sizeof(k_local_class_sizes) / sizeof(k_local_class_sizes[0]))
+
+static NB_TLS nb_poolset_t *g_local_poolset;
+static NB_TLS int g_local_poolset_state; /* 0 = uninit, 1 = ready, 2 = disabled */
+
+static nb_poolset_t *nb_local_poolset(void)
+{
+    if (g_local_poolset_state == 0) {
+        g_local_poolset = nb_poolset_create_ex(k_local_class_sizes,
+                                               k_local_class_counts,
+                                               NB_LOCAL_CLASS_COUNT, 1);
+        g_local_poolset_state = g_local_poolset ? 1 : 2;
+    }
+    return g_local_poolset_state == 1 ? g_local_poolset : NULL;
+}
+
+nb_buf_t *nb_buf_alloc_local(size_t size)
+{
+    nb_poolset_t *set = nb_local_poolset();
+
+    if (set) {
+        nb_buf_t *buf = nb_poolset_acquire(set, size);
+        if (buf) {
+            return buf;
+        }
+    }
+    return nb_buf_alloc(size);
+}
+
+void nb_buf_local_release(void)
+{
+    if (g_local_poolset_state == 1 && g_local_poolset) {
+        nb_poolset_destroy(g_local_poolset);
+    }
+    g_local_poolset = NULL;
+    g_local_poolset_state = 0;
 }

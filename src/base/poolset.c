@@ -12,6 +12,14 @@ nb_poolset_t *nb_poolset_create(const size_t *slot_sizes,
                                 const size_t *slot_counts,
                                 size_t class_count)
 {
+    return nb_poolset_create_ex(slot_sizes, slot_counts, class_count, 0);
+}
+
+nb_poolset_t *nb_poolset_create_ex(const size_t *slot_sizes,
+                                   const size_t *slot_counts,
+                                   size_t class_count,
+                                   int local)
+{
     nb_poolset_t *set;
     size_t i;
 
@@ -38,7 +46,8 @@ nb_poolset_t *nb_poolset_create(const size_t *slot_sizes,
         cfg.slot_size = slot_sizes[i];
         cfg.slot_count = slot_counts[i];
         cfg.max_cached = slot_counts[i];
-        cfg.flags = NB_BUF_POOL_FLAG_LAZY;
+        cfg.flags = NB_BUF_POOL_FLAG_LAZY |
+                    (local ? NB_BUF_POOL_FLAG_LOCAL : 0u);
         /* 单个分档创建失败不致命：acquire 会跳过它并回退到更大分档。 */
         set->pools[i] = nb_buf_pool_create(&cfg);
     }
