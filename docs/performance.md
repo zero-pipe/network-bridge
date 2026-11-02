@@ -133,6 +133,44 @@ NB_RTPS_ADVERTISE_HOST=192.168.54.14 build/tools/loadgen \
   --output result.json
 ```
 
+## 缓冲池统一后的性能（1 KB，回归对比）
+
+本次重构把 `iobuf` / `poller_alloc` 从 ntk 的 `ntk_buf` / `ntk_buf_pool` 解耦，统一
+到 base 的 `nb_buf` 体系：每线程惰性创建的**无锁、按大小分档**的 `nb_poolset`，
+保留 `nb_buf` 的 unique 模式（非原子引用计数）与跨线程直接 free 兜底。目标是不
+引入性能退化并提升可移植性，因此做了改造前后的 A/B 对比。
+
+测量设置：回环、1 KB 请求/响应、`--window 1`（单请求在途，同步 RTT 受限）、
+`CMAKE_BUILD_TYPE=Release`（`-O3`）、服务端 `--io-threads 6 --handler-threads 2`、
+UDP 与 TCP 各跑 5 轮取中位数。客户端与服务端位于同一台共享虚拟机（k8s master，
+测量时 load average ≈ 4），带明显噪声，**只用于相对比较，不代表硬件上限**。
+所有轮次 `failed=0`、`timeouts=0`，门禁在 20% 容差内 PASS。
+
+| 指标 | 旧（ntk_buf 池） | 新（nb_buf 本地池） | 变化 |
+| --- | --- | --- | --- |
+| TCP QPS | 13,562 | 14,576 | +7.5% |
+| TCP p99 | 186us | 174us | -6.5% |
+| UDP QPS | 10,727 | 11,969 | +11.6% |
+| UDP p99 | 469us | 343us | -26.9% |
+
+结论：统一到 `nb_buf` 没有带来退化，TCP 基本持平（p99 略降），UDP 反而更好。
+UDP 的提升主要来自两点：`nb_buf` unique 路径不做原子引用计数（旧实现每个 buffer
+都走原子 ref），以及每线程无锁分档池取代了共享 `ntk_buf_pool` 的取锁/回投逻辑。
+绝对 QPS 低于前面几节，是因为这里未绑核且与其它负载共享宿主机。
+
+复现（分别在旧、新两棵树上构建后对比）：
+
+```bash
+# 旧代码树（如 ../baseline）：生成基线，写入 tests/perf/baseline.json
+cd ../baseline && python3 tools/gate.py perf --build-dir build --transports udp,tcp \
+  --payload-bytes 1024 --perf-duration 6 --update-baseline
+
+# 新代码树：与基线对比，容差 20%
+cd - && python3 tools/gate.py perf --build-dir build --transports udp,tcp \
+  --payload-bytes 1024 --perf-duration 6 \
+  --baseline ../baseline/tests/perf/baseline.json --tolerance 0.2
+```
+
 ## 尖峰归因实验
 
 | 实验 | 结果 | 解释 |
