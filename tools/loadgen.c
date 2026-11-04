@@ -1022,7 +1022,11 @@ int main(int argc, char **argv)
                     "\"tcp_frames_received\":%llu,"
                     "\"rtcp_sr_sent\":%llu,\"rtcp_rr_sent\":%llu,"
                     "\"rtcp_sr_received\":%llu,\"rtcp_rr_received\":%llu,"
-                    "\"rtcp_rtt_ms\":%u,\"rtcp_jitter_ms\":%u,\"rtcp_remote_lost\":%d}}\n",
+                    "\"rtcp_rtt_ms\":%u,\"rtcp_jitter_ms\":%u,\"rtcp_remote_lost\":%d,"
+                    "\"rtps_packets_sent\":%llu,\"rtps_packets_received\":%llu,"
+                    "\"rtps_data_sent\":%llu,\"rtps_data_received\":%llu,"
+                    "\"rtps_heartbeats_sent\":%llu,\"rtps_heartbeats_received\":%llu,"
+                    "\"rtps_acknacks_sent\":%llu,\"rtps_acknacks_received\":%llu}}\n",
                     (unsigned long long)metrics.requests_sent,
                     (unsigned long long)metrics.responses_received,
                     (unsigned long long)metrics.requests_failed,
@@ -1043,7 +1047,15 @@ int main(int argc, char **argv)
                     (unsigned long long)metrics.rtcp_rr_received,
                     (unsigned)metrics.rtcp_rtt_ms,
                     (unsigned)metrics.rtcp_jitter_ms,
-                    (int)metrics.rtcp_remote_lost);
+                    (int)metrics.rtcp_remote_lost,
+                    (unsigned long long)metrics.rtps_packets_sent,
+                    (unsigned long long)metrics.rtps_packets_received,
+                    (unsigned long long)metrics.rtps_data_sent,
+                    (unsigned long long)metrics.rtps_data_received,
+                    (unsigned long long)metrics.rtps_heartbeats_sent,
+                    (unsigned long long)metrics.rtps_heartbeats_received,
+                    (unsigned long long)metrics.rtps_acknacks_sent,
+                    (unsigned long long)metrics.rtps_acknacks_received);
         }
     }
 

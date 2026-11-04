@@ -61,7 +61,13 @@
 #define NB_RTPS_TRANSPORT_MAX_PEERS 16
 /* Non-"dds::Message" so the engine hands back the raw CDR body. */
 #define NB_RTPS_TRANSPORT_TYPE_NAME "nb::Frame"
-#define NB_RTPS_TRANSPORT_DEFAULT_HEARTBEAT_MS 250u
+/* Heartbeat cadence for reliable application writers. Cyclone DDS defaults to
+ * 100 ms; matching it keeps loss recovery equally prompt now that a write no
+ * longer sends an immediate, per-message heartbeat. */
+#define NB_RTPS_TRANSPORT_DEFAULT_HEARTBEAT_MS 100u
+/* Frames up to this size are encoded on the stack. 1 KB payloads with the
+ * envelope fit comfortably, so the common case does not allocate. */
+#define NB_RTPS_TRANSPORT_INLINE_FRAME 1536u
 
 typedef struct nb_rtps_transport nb_rtps_transport_t;
 
@@ -405,8 +411,10 @@ static int nb_rtps_transport_publish(nb_rtps_transport_t *inst,
                                      const nb_transport_message_t *message)
 {
     nb_envelope_t env;
-    uint8_t *buf;
+    uint8_t inline_frame[NB_RTPS_TRANSPORT_INLINE_FRAME];
+    uint8_t *buf = inline_frame;
     size_t frame_len;
+    int buf_heap = 0;
     int rc;
 
     (void)inst;
@@ -455,16 +463,23 @@ static int nb_rtps_transport_publish(nb_rtps_transport_t *inst,
     if (frame_len == 0) {
         return NB_ERR_INVALID;
     }
-    buf = (uint8_t *)malloc(frame_len);
-    if (!buf) {
-        return NB_ERR_NOMEM;
+    if (frame_len > sizeof(inline_frame)) {
+        buf = (uint8_t *)malloc(frame_len);
+        if (!buf) {
+            return NB_ERR_NOMEM;
+        }
+        buf_heap = 1;
     }
     if (nb_envelope_encode(buf, frame_len, &env) != frame_len) {
-        free(buf);
+        if (buf_heap) {
+            free(buf);
+        }
         return NB_ERR_INVALID;
     }
     rc = nb_rtps_transport_status(rtps_writer_write(writer, buf, frame_len));
-    free(buf);
+    if (buf_heap) {
+        free(buf);
+    }
     return rc;
 }
 

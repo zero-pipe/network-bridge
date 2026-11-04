@@ -462,9 +462,27 @@ static ntk_err_t resolve_endpoint(const char *ip, uint16_t port, struct addrinfo
     return NTK_OK;
 }
 
+/* A numeric IPv4 address needs no resolver. The batch path below has had this
+ * fast path for a while; single sends must not pay getaddrinfo per datagram
+ * (RTPS sends several per message). */
+static int numeric_endpoint_v4(const char *ip, uint16_t port, struct sockaddr_in *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->sin_family = AF_INET;
+    out->sin_port = htons(port);
+    return ip && inet_pton(AF_INET, ip, &out->sin_addr) == 1 ? 0 : -1;
+}
+
 ntk_ssize_t ntk_sockplat_sendto(int fd, const void *buf, size_t len, const char *ip, uint16_t port)
 {
     struct addrinfo *res = NULL;
+    struct sockaddr_in fast;
+
+    if (numeric_endpoint_v4(ip, port, &fast) == 0) {
+        ssize_t n = sendto(fd, buf, len, MSG_NOSIGNAL,
+                           (struct sockaddr *)&fast, sizeof(fast));
+        return n >= 0 ? (ntk_ssize_t)n : (ntk_ssize_t)map_errno();
+    }
     if (resolve_endpoint(ip, port, &res) != NTK_OK)
         return (ssize_t)NTK_ERR_IO;
 

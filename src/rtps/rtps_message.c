@@ -500,7 +500,10 @@ int nb_rtps_heartbeat(nb_cdr_writer_t *writer, const nb_rtps_heartbeat_t *heartb
                                      NB_RTPS_FLAG_ENDIAN_LITTLE |
                                          (heartbeat->liveliness
                                               ? NB_RTPS_FLAG_HEARTBEAT_LIVELINESS
-                                              : 0u));
+                                              : 0u) |
+                                         (heartbeat->ack_requested
+                                              ? 0u
+                                              : NB_RTPS_FLAG_HEARTBEAT_FINAL));
     if (start == SIZE_MAX) {
         return NB_ERR_TOOBIG;
     }
@@ -514,7 +517,10 @@ int nb_rtps_heartbeat(nb_cdr_writer_t *writer, const nb_rtps_heartbeat_t *heartb
     return nb_rtps_submessage_end(writer, start);
 }
 
-int nb_rtps_heartbeat_decode(const uint8_t *body, size_t body_len, nb_rtps_heartbeat_t *out)
+int nb_rtps_heartbeat_decode(uint32_t flags,
+                             const uint8_t *body,
+                             size_t body_len,
+                             nb_rtps_heartbeat_t *out)
 {
     if (!body || !out || body_len < 28) {
         return NB_ERR_BAD_MESSAGE;
@@ -527,6 +533,9 @@ int nb_rtps_heartbeat_decode(const uint8_t *body, size_t body_len, nb_rtps_heart
     out->last_sn.high = (int32_t)rd_u32(body + 16);
     out->last_sn.low = rd_u32(body + 20);
     out->count = rd_u32(body + 24);
+    out->liveliness = (flags & NB_RTPS_FLAG_HEARTBEAT_LIVELINESS) != 0;
+    /* FINAL means "no answer required". */
+    out->ack_requested = (flags & NB_RTPS_FLAG_HEARTBEAT_FINAL) == 0;
     return NB_OK;
 }
 

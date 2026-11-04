@@ -124,9 +124,14 @@ typedef struct nb_rtps_heartbeat {
     nb_rtps_sequence_number_t first_sn;
     nb_rtps_sequence_number_t last_sn;
     uint32_t count;
-    /* Receive side: set from the submessage flags by the dispatcher. Send
+    /* Receive side: set from the submessage flags by the decoder. Send
      * side: asserts liveliness when set. */
     int liveliness;
+    /* Receive side: the writer wants an acknowledgement (FINAL clear). Send
+     * side: set to ask for one. A periodic heartbeat leaves this at zero and
+     * is encoded with FINAL, so a reader that has nothing missing does not
+     * answer it; Cyclone DDS does the same. */
+    int ack_requested;
 } nb_rtps_heartbeat_t;
 
 typedef struct nb_rtps_acknack {
@@ -236,7 +241,10 @@ int nb_rtps_data_frag_decode(uint8_t flags,
                              nb_rtps_data_frag_t *out);
 
 int nb_rtps_heartbeat(nb_cdr_writer_t *writer, const nb_rtps_heartbeat_t *heartbeat);
-int nb_rtps_heartbeat_decode(const uint8_t *body, size_t body_len, nb_rtps_heartbeat_t *out);
+int nb_rtps_heartbeat_decode(uint32_t flags,
+                             const uint8_t *body,
+                             size_t body_len,
+                             nb_rtps_heartbeat_t *out);
 
 int nb_rtps_acknack(nb_cdr_writer_t *writer, const nb_rtps_acknack_t *acknack);
 int nb_rtps_acknack_decode(const uint8_t *body, size_t body_len, nb_rtps_acknack_t *out);

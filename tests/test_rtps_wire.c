@@ -509,7 +509,12 @@ static void test_heartbeat_acknack(void)
         count++;
         if (view.id == NB_RTPS_SUBMSG_HEARTBEAT) {
             CHECK((view.flags & NB_RTPS_FLAG_HEARTBEAT_LIVELINESS) != 0);
-            CHECK(nb_rtps_heartbeat_decode(view.body, view.body_len, &parsed_heartbeat) == NB_OK);
+            /* ack_requested is zero, so the encoder must set FINAL. */
+            CHECK((view.flags & NB_RTPS_FLAG_HEARTBEAT_FINAL) != 0);
+            CHECK(nb_rtps_heartbeat_decode(view.flags, view.body, view.body_len,
+                                           &parsed_heartbeat) == NB_OK);
+            CHECK(parsed_heartbeat.liveliness == 1);
+            CHECK(parsed_heartbeat.ack_requested == 0);
             CHECK(nb_rtps_entity_id_equal(&parsed_heartbeat.writer_id,
                                           &nb_rtps_eid_sedp_publications_writer));
             CHECK(parsed_heartbeat.first_sn.low == 1);

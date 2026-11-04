@@ -415,9 +415,36 @@ static ntk_err_t resolve_endpoint(const char *ip, uint16_t port, struct addrinfo
     return NTK_OK;
 }
 
+/* A numeric IPv4 address needs no resolver. Single sends must not pay
+ * getaddrinfo per datagram (RTPS sends several per message). Parsed by hand so
+ * the fast path does not depend on InetPton availability. */
+static int numeric_endpoint_v4(const char *ip, uint16_t port, struct sockaddr_in *out)
+{
+    unsigned a, b, c, d;
+    int tail = 0;
+
+    memset(out, 0, sizeof(*out));
+    out->sin_family = AF_INET;
+    out->sin_port = htons(port);
+    if (!ip || sscanf(ip, "%u.%u.%u.%u%c", &a, &b, &c, &d, &tail) != 4)
+        return -1;
+    if (a > 255 || b > 255 || c > 255 || d > 255)
+        return -1;
+    out->sin_addr.s_addr = htonl((a << 24) | (b << 16) | (c << 8) | d);
+    return 0;
+}
+
 ntk_ssize_t ntk_sockplat_sendto(int fd, const void *buf, size_t len, const char *ip, uint16_t port)
 {
     struct addrinfo *res = NULL;
+    struct sockaddr_in fast;
+
+    if (numeric_endpoint_v4(ip, port, &fast) == 0) {
+        int send_len = (int)(len > 0x7fffffff ? 0x7fffffff : len);
+        int fn = sendto(to_sock(fd), (const char *)buf, send_len, 0,
+                        (struct sockaddr *)&fast, (int)sizeof(fast));
+        return fn == SOCKET_ERROR ? (ntk_ssize_t)map_errno() : (ntk_ssize_t)fn;
+    }
     if (resolve_endpoint(ip, port, &res) != NTK_OK)
         return (ntk_ssize_t)NTK_ERR_IO;
 
