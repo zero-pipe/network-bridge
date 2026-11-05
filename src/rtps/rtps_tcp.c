@@ -27,8 +27,7 @@ typedef struct nb_rtps_tcp_conn {
     size_t rx_cap;
     int has_header;
     nb_rtps_header_t header;
-    int has_source_ts;
-    nb_rtps_time_t source_ts;
+    nb_rtps_receiver_state_t state;
 
     /* Outbound queue, guarded by the instance mutex. */
     uint8_t *tx;
@@ -140,7 +139,7 @@ static int conn_release(nb_rtps_tcp_t *tcp, int index)
     conn->host[0] = '\0';
     conn->port = 0;
     conn->has_header = 0;
-    conn->has_source_ts = 0;
+    memset(&conn->state, 0, sizeof(conn->state));
     conn->rx_len = 0;
     conn->tx_len = 0;
     poller_del(tcp, fd);
@@ -239,7 +238,7 @@ static void conn_parse(nb_rtps_tcp_t *tcp, nb_rtps_tcp_conn_t *conn, int index)
             }
             conn->header = header;
             conn->has_header = 1;
-            conn->has_source_ts = 0;
+            memset(&conn->state, 0, sizeof(conn->state));
             tcp->stats.messages_received++;
             /* The header is the whole buffer we asked about; whatever followed
              * it is still in the reassembly buffer. */
@@ -284,8 +283,7 @@ static void conn_parse(nb_rtps_tcp_t *tcp, nb_rtps_tcp_conn_t *conn, int index)
                                 index,
                                 &conn->header,
                                 &view,
-                                &conn->has_source_ts,
-                                &conn->source_ts);
+                                &conn->state);
             }
             if (!conn->used) {
                 return;

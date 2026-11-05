@@ -17,6 +17,13 @@
 
 #define NB_RTPS_SPDP_BASE_PORT 7400u
 #define NB_RTPS_SPDP_DOMAIN_GAIN 250u
+/* RTPS 2.5 9.6.1.4 port mapping: d0 multicast meta, d1 unicast meta,
+ * d2 multicast user, d3 unicast user; participant gain PG. */
+#define NB_RTPS_PORT_OFFSET_D0 0u
+#define NB_RTPS_PORT_OFFSET_D1 10u
+#define NB_RTPS_PORT_OFFSET_D2 1u
+#define NB_RTPS_PORT_OFFSET_D3 11u
+#define NB_RTPS_PORT_PARTICIPANT_GAIN 2u
 #define NB_RTPS_DEFAULT_ANNOUNCE_MS 3000u
 #define NB_RTPS_DEFAULT_LEASE_MS 20000u
 #define NB_RTPS_MIN_ANNOUNCE_MS 100u
@@ -106,8 +113,8 @@ typedef struct nb_rtps_local_endpoint {
     int used;
     nb_rtps_endpoint_kind_t kind;
     nb_rtps_endpoint_info_t info;
-    uint32_t sn;
-    uint32_t data_sn;
+    uint64_t sn;
+    uint64_t data_sn;
     nb_rtps_reliable_writer_t *history; /* reliable publications only */
     uint32_t heartbeat_count;
     uint64_t last_resend_ms;
@@ -205,7 +212,7 @@ typedef struct nb_rtps_frag_assembly {
     int complete;
     nb_rtps_guid_t writer;
     nb_rtps_entity_id_t reader_id;
-    uint32_t sn;
+    uint64_t sn;
     uint32_t sample_size;
     uint16_t fragment_size;
     uint32_t fragment_count;
@@ -252,6 +259,8 @@ struct nb_rtps_participant {
     char multicast_group[NB_RTPS_PEER_HOST_MAX];
     char name[NB_RTPS_SPDP_NAME_MAX];
     uint32_t domain_id;
+    uint32_t participant_id;
+    int standard_ports;
     uint16_t spdp_port;
     uint16_t unicast_port;
     uint32_t announce_interval_ms;
@@ -272,6 +281,10 @@ struct nb_rtps_participant {
 
     ntk_socket *rx_sock;
     ntk_socket *unicast_sock;
+    /* Standard mapping only: user-data unicast port (d3+PG*pid). NULL means
+     * user data shares unicast_sock. */
+    ntk_socket *data_sock;
+    uint16_t data_port;
     ntk_poller *poller;
     ntk_thread *thread;
     ntk_mutex *lock;
@@ -321,7 +334,7 @@ struct nb_rtps_participant {
     volatile int stop;
     int started;
     uint32_t rng;
-    uint32_t spdp_sn;
+    uint64_t spdp_sn;
     uint64_t next_announce_ms;
     uint64_t next_sweep_ms;
     uint64_t next_sedp_heartbeat_ms;
@@ -329,12 +342,18 @@ struct nb_rtps_participant {
     /* ParticipantMessageData cadence; 0 means no local publication needs
      * automatic assertions, so nothing is sent. */
     uint32_t pmd_interval_ms;
-    uint32_t pmd_sn;
+    uint64_t pmd_sn;
     uint64_t next_pmd_ms;
     nb_rtps_stats_t stats;
     int dump_frames;
     nb_rtps_tcp_t *tcp;
 };
+
+static ntk_socket *participant_data_socket(const nb_rtps_participant_t *participant)
+{
+    return participant && participant->data_sock ? participant->data_sock
+                                                  : participant->unicast_sock;
+}
 
 #define NB_RTPS_DUMP_BYTES 48
 
@@ -421,15 +440,15 @@ static void notify_matches(nb_rtps_participant_t *participant,
 static int send_user_heartbeat(nb_rtps_participant_t *participant,
                                nb_rtps_local_endpoint_t *local,
                                const nb_rtps_endpoint_info_t *remote,
-                               uint32_t first_sn,
-                               uint32_t last_sn,
+                               uint64_t first_sn,
+                               uint64_t last_sn,
                                const char *host,
                                uint16_t port);
 
 static int send_user_data_all(nb_rtps_participant_t *participant,
                               const nb_rtps_guid_t *writer_guid,
                               const nb_rtps_guid_t *reader_guid,
-                              uint32_t sn,
+                              uint64_t sn,
                               uint64_t source_ns,
                               const void *payload,
                               size_t payload_len,
@@ -440,11 +459,11 @@ static int send_user_data_all(nb_rtps_participant_t *participant,
 static void send_user_heartbeat_all(nb_rtps_participant_t *participant,
                                     nb_rtps_local_endpoint_t *local,
                                     const nb_rtps_endpoint_info_t *reader_info,
-                                    uint32_t first_sn,
-                                    uint32_t last_sn,
+                                    uint64_t first_sn,
+                                    uint64_t last_sn,
                                     const nb_rtps_targets_t *targets);
 
-static int sample_expired(const nb_rtps_local_endpoint_t *local, uint32_t sn, uint64_t now);
+static int sample_expired(const nb_rtps_local_endpoint_t *local, uint64_t sn, uint64_t now);
 
 static void arm_reader_deadlines(nb_rtps_participant_t *participant,
                                  const nb_rtps_remote_endpoint_t *remote);
@@ -783,7 +802,7 @@ static void notify_endpoint(nb_rtps_participant_t *participant,
 
 static int send_sedp_data(nb_rtps_participant_t *participant,
                           nb_rtps_endpoint_kind_t kind,
-                          uint32_t sn,
+                          uint64_t sn,
                           const uint8_t *payload,
                           size_t payload_len,
                           int dispose,
@@ -815,8 +834,7 @@ static int send_sedp_data(nb_rtps_participant_t *participant,
     data.writer_id = kind == NB_RTPS_ENDPOINT_PUBLICATION
                          ? nb_rtps_eid_sedp_publications_writer
                          : nb_rtps_eid_sedp_subscriptions_writer;
-    data.writer_sn.high = 0;
-    data.writer_sn.low = sn;
+    nb_rtps_sn_from_u64(&data.writer_sn, sn);
     data.payload = payload;
     data.payload_len = payload_len;
     data.dispose = dispose ? 1 : 0;
@@ -876,7 +894,7 @@ static int build_instance_inline_qos(const uint8_t *handle,
 static int send_user_fragment(nb_rtps_participant_t *participant,
                               const nb_rtps_guid_t *writer_guid,
                               const nb_rtps_guid_t *reader_guid,
-                              uint32_t sn,
+                              uint64_t sn,
                               uint64_t source_ns,
                               const uint8_t *payload,
                               size_t payload_len,
@@ -912,8 +930,7 @@ static int send_user_fragment(nb_rtps_participant_t *participant,
     memset(&fragment, 0, sizeof(fragment));
     fragment.reader_id = reader_guid->entity;
     fragment.writer_id = writer_guid->entity;
-    fragment.writer_sn.high = 0;
-    fragment.writer_sn.low = sn;
+    nb_rtps_sn_from_u64(&fragment.writer_sn, sn);
     fragment.fragment_starting_num = fragment_num;
     fragment.fragments_in_submessage = 1;
     fragment.fragment_size = NB_RTPS_FRAGMENT_SIZE;
@@ -939,7 +956,7 @@ static int send_user_fragment(nb_rtps_participant_t *participant,
         !nb_cdr_writer_ok(&writer)) {
         return NB_ERR_BAD_MESSAGE;
     }
-    if (nb_rtps_sendto(participant, participant->unicast_sock,
+    if (nb_rtps_sendto(participant, participant_data_socket(participant),
                           message,
                           nb_cdr_writer_len(&writer),
                           host,
@@ -960,7 +977,7 @@ static int send_user_fragment(nb_rtps_participant_t *participant,
 static int send_user_heartbeat_frag(nb_rtps_participant_t *participant,
                                     const nb_rtps_guid_t *writer_guid,
                                     const nb_rtps_guid_t *reader_guid,
-                                    uint32_t sn,
+                                    uint64_t sn,
                                     uint32_t last_fragment_num,
                                     const char *host,
                                     uint16_t port)
@@ -979,8 +996,7 @@ static int send_user_heartbeat_frag(nb_rtps_participant_t *participant,
     memset(&heartbeat, 0, sizeof(heartbeat));
     heartbeat.reader_id = reader_guid->entity;
     heartbeat.writer_id = writer_guid->entity;
-    heartbeat.writer_sn.high = 0;
-    heartbeat.writer_sn.low = sn;
+    nb_rtps_sn_from_u64(&heartbeat.writer_sn, sn);
     heartbeat.last_fragment_num = last_fragment_num;
     heartbeat.count = ++participant->frag_heartbeat_count;
 
@@ -991,7 +1007,7 @@ static int send_user_heartbeat_frag(nb_rtps_participant_t *participant,
         !nb_cdr_writer_ok(&writer)) {
         return NB_ERR_BAD_MESSAGE;
     }
-    if (nb_rtps_sendto(participant, participant->unicast_sock,
+    if (nb_rtps_sendto(participant, participant_data_socket(participant),
                           message,
                           nb_cdr_writer_len(&writer),
                           host,
@@ -1006,7 +1022,7 @@ static int send_user_heartbeat_frag(nb_rtps_participant_t *participant,
 static int send_user_data_fragmented(nb_rtps_participant_t *participant,
                                      const nb_rtps_guid_t *writer_guid,
                                      const nb_rtps_guid_t *reader_guid,
-                                     uint32_t sn,
+                                     uint64_t sn,
                                      uint64_t source_ns,
                                      const uint8_t *payload,
                                      size_t payload_len,
@@ -1079,7 +1095,7 @@ static int build_instance_inline_qos(const uint8_t *handle,
 static int send_user_data(nb_rtps_participant_t *participant,
                           const nb_rtps_guid_t *writer_guid,
                           const nb_rtps_guid_t *reader_guid,
-                          uint32_t sn,
+                          uint64_t sn,
                           uint64_t source_ns,
                           const void *payload,
                           size_t payload_len,
@@ -1120,8 +1136,7 @@ static int send_user_data(nb_rtps_participant_t *participant,
     memset(&data, 0, sizeof(data));
     data.reader_id = reader_guid->entity;
     data.writer_id = writer_guid->entity;
-    data.writer_sn.high = 0;
-    data.writer_sn.low = sn;
+    nb_rtps_sn_from_u64(&data.writer_sn, sn);
     data.payload = (const uint8_t *)payload;
     data.payload_len = payload_len;
     if (handle) {
@@ -1143,7 +1158,7 @@ static int send_user_data(nb_rtps_participant_t *participant,
         return NB_ERR_BAD_MESSAGE;
     }
     message_len = nb_cdr_writer_len(&writer);
-    if (nb_rtps_sendto(participant, participant->unicast_sock, message, message_len, host, port) < 0) {
+    if (nb_rtps_sendto(participant, participant_data_socket(participant), message, message_len, host, port) < 0) {
         return NB_ERR_IO;
     }
     participant->stats.data_sent++;
@@ -1175,7 +1190,7 @@ static void send_local_endpoint_to_remote(nb_rtps_participant_t *participant,
 
 static void broadcast_sedp_sample(nb_rtps_participant_t *participant,
                                   nb_rtps_endpoint_kind_t kind,
-                                  uint32_t sn,
+                                  uint64_t sn,
                                   const uint8_t *payload,
                                   size_t payload_len,
                                   int dispose)
@@ -1244,8 +1259,8 @@ static void send_sedp_heartbeat(nb_rtps_participant_t *participant,
     nb_rtps_reliable_writer_t *history = kind == NB_RTPS_ENDPOINT_PUBLICATION
                                              ? participant->publications_writer
                                              : participant->subscriptions_writer;
-    uint32_t first_sn = 0;
-    uint32_t last_sn = 0;
+    uint64_t first_sn = 0;
+    uint64_t last_sn = 0;
     size_t sample_count = 0;
     char host[NB_RTPS_PEER_HOST_MAX];
     uint16_t port;
@@ -1272,10 +1287,8 @@ static void send_sedp_heartbeat(nb_rtps_participant_t *participant,
     heartbeat.writer_id = kind == NB_RTPS_ENDPOINT_PUBLICATION
                               ? nb_rtps_eid_sedp_publications_writer
                               : nb_rtps_eid_sedp_subscriptions_writer;
-    heartbeat.first_sn.high = 0;
-    heartbeat.first_sn.low = first_sn;
-    heartbeat.last_sn.high = 0;
-    heartbeat.last_sn.low = last_sn;
+    nb_rtps_sn_from_u64(&heartbeat.first_sn, first_sn);
+    nb_rtps_sn_from_u64(&heartbeat.last_sn, last_sn);
 
     if (nb_rtps_message_init(&writer, message, sizeof(message), &header) != NB_OK ||
         nb_rtps_info_ts(&writer, &timestamp, false) != NB_OK ||
@@ -1334,8 +1347,7 @@ static void send_sedp_acknack(nb_rtps_participant_t *participant,
     acknack.writer_id = kind == NB_RTPS_ENDPOINT_PUBLICATION
                             ? nb_rtps_eid_sedp_publications_writer
                             : nb_rtps_eid_sedp_subscriptions_writer;
-    acknack.base.high = 0;
-    acknack.base.low = base;
+    nb_rtps_sn_from_u64(&acknack.base, base);
     acknack.num_bits = num_bits;
     acknack.count = count;
     if (bitmap) {
@@ -1364,7 +1376,7 @@ static int send_spdp(nb_rtps_participant_t *participant)
     nb_cdr_writer_t writer;
     size_t payload_len = 0;
     size_t message_len;
-    uint32_t sn;
+    uint64_t sn;
     size_t i;
     int sent = 0;
     int targets = 0;
@@ -1392,8 +1404,7 @@ static int send_spdp(nb_rtps_participant_t *participant)
     memset(&data, 0, sizeof(data));
     data.reader_id = nb_rtps_eid_unknown;
     data.writer_id = nb_rtps_eid_spdp_writer;
-    data.writer_sn.high = 0;
-    data.writer_sn.low = sn;
+    nb_rtps_sn_from_u64(&data.writer_sn, sn);
     data.payload = payload;
     data.payload_len = payload_len;
 
@@ -1649,9 +1660,9 @@ static void replay_retained_history(nb_rtps_participant_t *participant,
         nb_rtps_local_endpoint_t *local = &participant->local_endpoints[i];
         nb_rtps_remote_endpoint_t *remote;
         nb_rtps_targets_t targets;
-        uint32_t first_sn = 0;
-        uint32_t last_sn = 0;
-        uint32_t sn;
+        uint64_t first_sn = 0;
+        uint64_t last_sn = 0;
+        uint64_t sn;
         size_t sample_count = 0;
 
         if (!local->used || local->kind != NB_RTPS_ENDPOINT_PUBLICATION ||
@@ -1986,7 +1997,9 @@ static void handle_sedp_data(nb_rtps_participant_t *participant,
     nb_rtps_endpoint_info_t info;
     nb_rtps_guid_t key;
 
-    if (data->writer_sn.high != 0) {
+    uint64_t sample_sn = nb_rtps_sn_to_u64(&data->writer_sn);
+
+    if (sample_sn == 0) {
         return;
     }
     /* Acknowledge the sequence number before interpreting the sample. A SEDP
@@ -1997,7 +2010,7 @@ static void handle_sedp_data(nb_rtps_participant_t *participant,
     remote = find_remote(participant, source_prefix);
     if (remote) {
         state = sedp_reader_state(remote, kind);
-        (void)nb_rtps_reader_on_sample(state, data->writer_sn.low);
+        (void)nb_rtps_reader_on_sample(state, sample_sn);
     }
     ntk_mutex_unlock(participant->lock);
     if (!remote) {
@@ -2055,15 +2068,18 @@ static void handle_sedp_heartbeat(nb_rtps_participant_t *participant,
     uint32_t num_bits = 0;
     uint32_t bitmap[NB_RTPS_ACKNACK_MAX_WORDS];
     uint32_t count;
-    uint32_t first_sn;
-    uint32_t last_sn;
+    uint64_t first_sn;
+    uint64_t last_sn;
     uint32_t i;
 
-    if (heartbeat->first_sn.high != 0 || heartbeat->last_sn.high != 0) {
+    first_sn = nb_rtps_sn_to_u64(&heartbeat->first_sn);
+    if (first_sn == 0) {
+        first_sn = 1;
+    }
+    last_sn = nb_rtps_sn_to_u64(&heartbeat->last_sn);
+    if (last_sn == 0) {
         return;
     }
-    first_sn = heartbeat->first_sn.low ? heartbeat->first_sn.low : 1u;
-    last_sn = heartbeat->last_sn.low;
     memset(bitmap, 0, sizeof(bitmap));
 
     ntk_mutex_lock(participant->lock);
@@ -2118,7 +2134,7 @@ typedef struct sedp_resend_context {
 } sedp_resend_context_t;
 
 static int sedp_resend_callback(void *user,
-                                uint32_t sn,
+                                uint64_t sn,
                                 const uint8_t *payload,
                                 size_t len,
                                 int dispose)
@@ -2563,7 +2579,7 @@ static nb_rtps_data_reader_state_t *find_data_reader(nb_rtps_participant_t *part
 static nb_rtps_data_reader_state_t *get_data_reader(nb_rtps_participant_t *participant,
                                                     const nb_rtps_guid_t *writer,
                                                     const nb_rtps_entity_id_t *reader,
-                                                    uint32_t first_expected)
+                                                    uint64_t first_expected)
 {
     nb_rtps_data_reader_state_t *state = find_data_reader(participant, writer, reader);
     nb_rtps_remote_endpoint_t *remote;
@@ -2702,8 +2718,8 @@ static void drop_data_readers_for_reader(nb_rtps_participant_t *participant,
 static int send_user_gap(nb_rtps_participant_t *participant,
                          const nb_rtps_guid_t *writer_guid,
                          const nb_rtps_guid_t *reader_guid,
-                         uint32_t first_sn,
-                         uint32_t last_sn,
+                         uint64_t first_sn,
+                         uint64_t last_sn,
                          const char *host,
                          uint16_t port)
 {
@@ -2726,15 +2742,13 @@ static int send_user_gap(nb_rtps_participant_t *participant,
     memset(&gap, 0, sizeof(gap));
     gap.reader_id = reader_guid->entity;
     gap.writer_id = writer_guid->entity;
-    gap.gap_start.high = 0;
-    gap.gap_start.low = first_sn;
+    nb_rtps_sn_from_u64(&gap.gap_start, first_sn);
     /* GAP semantics (RTPS 2.5 8.3.7.4): the reader must consider unavailable
      * every sequence number in [gapStart, bitmapBase) plus the set bits. Every
      * caller here announces one contiguous range, so an empty bitmap with
      * bitmapBase just past the range is both the shortest encoding and the one
      * Cyclone accepts: a zero bitmapBase is rejected as malformed. */
-    gap.base.high = 0;
-    gap.base.low = last_sn + 1u;
+    nb_rtps_sn_from_u64(&gap.base, last_sn + 1u);
     gap.num_bits = 0;
     if (nb_rtps_message_init(&writer, message, sizeof(message), &header) != NB_OK ||
         nb_rtps_info_ts(&writer, &timestamp, false) != NB_OK ||
@@ -2744,7 +2758,7 @@ static int send_user_gap(nb_rtps_participant_t *participant,
         return NB_ERR_BAD_MESSAGE;
     }
     message_len = nb_cdr_writer_len(&writer);
-    if (nb_rtps_sendto(participant, participant->unicast_sock, message, message_len, host, port) < 0) {
+    if (nb_rtps_sendto(participant, participant_data_socket(participant), message, message_len, host, port) < 0) {
         return NB_ERR_IO;
     }
     participant->stats.gaps_sent++;
@@ -2782,7 +2796,7 @@ static int send_user_acknack(nb_rtps_participant_t *participant,
         return NB_ERR_BAD_MESSAGE;
     }
     message_len = nb_cdr_writer_len(&writer);
-    if (nb_rtps_sendto(participant, participant->unicast_sock, message, message_len, host, port) < 0) {
+    if (nb_rtps_sendto(participant, participant_data_socket(participant), message, message_len, host, port) < 0) {
         return NB_ERR_IO;
     }
     participant->stats.acknacks_sent++;
@@ -2793,8 +2807,8 @@ static int send_user_acknack(nb_rtps_participant_t *participant,
 static int send_user_heartbeat(nb_rtps_participant_t *participant,
                                nb_rtps_local_endpoint_t *local,
                                const nb_rtps_endpoint_info_t *remote,
-                               uint32_t first_sn,
-                               uint32_t last_sn,
+                               uint64_t first_sn,
+                               uint64_t last_sn,
                                const char *host,
                                uint16_t port)
 {
@@ -2813,10 +2827,8 @@ static int send_user_heartbeat(nb_rtps_participant_t *participant,
     memset(&heartbeat, 0, sizeof(heartbeat));
     heartbeat.reader_id = remote->endpoint_guid.entity;
     heartbeat.writer_id = local->info.endpoint_guid.entity;
-    heartbeat.first_sn.high = 0;
-    heartbeat.first_sn.low = first_sn;
-    heartbeat.last_sn.high = 0;
-    heartbeat.last_sn.low = last_sn;
+    nb_rtps_sn_from_u64(&heartbeat.first_sn, first_sn);
+    nb_rtps_sn_from_u64(&heartbeat.last_sn, last_sn);
     heartbeat.count = ++local->heartbeat_count;
     if (nb_rtps_message_init(&writer, message, sizeof(message), &header) != NB_OK ||
         nb_rtps_info_ts(&writer, &timestamp, false) != NB_OK ||
@@ -2826,7 +2838,7 @@ static int send_user_heartbeat(nb_rtps_participant_t *participant,
         return NB_ERR_BAD_MESSAGE;
     }
     message_len = nb_cdr_writer_len(&writer);
-    if (nb_rtps_sendto(participant, participant->unicast_sock, message, message_len, host, port) < 0) {
+    if (nb_rtps_sendto(participant, participant_data_socket(participant), message, message_len, host, port) < 0) {
         return NB_ERR_IO;
     }
     participant->stats.heartbeats_sent++;
@@ -2862,23 +2874,29 @@ static void send_user_liveliness_heartbeat(nb_rtps_participant_t *participant,
     memset(&heartbeat, 0, sizeof(heartbeat));
     heartbeat.reader_id = remote->endpoint_guid.entity;
     heartbeat.writer_id = local->info.endpoint_guid.entity;
-    heartbeat.first_sn.low = 1u;
-    heartbeat.last_sn.low = 1u;
-    if (local->history) {
-        uint32_t first_sn = 0;
-        uint32_t last_sn = 0;
+    {
+        uint64_t first_sn = 1;
+        uint64_t last_sn = 1;
 
-        nb_rtps_reliable_state(local->history, &first_sn, &last_sn, NULL);
-        /* Advertise the range the writer actually has. A best-effort writer
-         * has no history and uses its own send counter; a reliable one has
-         * always advanced next_sn, so last_sn is the newest sequence number. */
-        if (last_sn != 0) {
-            heartbeat.first_sn.low = first_sn;
-            heartbeat.last_sn.low = last_sn;
+        if (local->history) {
+            uint64_t history_first = 0;
+            uint64_t history_last = 0;
+
+            nb_rtps_reliable_state(local->history, &history_first, &history_last, NULL);
+            /* Advertise the range the writer actually has. A best-effort
+             * writer has no history and uses its own send counter; a reliable
+             * one has always advanced next_sn, so last_sn is the newest
+             * sequence number. */
+            if (history_last != 0) {
+                first_sn = history_first;
+                last_sn = history_last;
+            }
+        } else if (local->data_sn != 0) {
+            first_sn = local->data_sn;
+            last_sn = local->data_sn;
         }
-    } else if (local->data_sn != 0) {
-        heartbeat.first_sn.low = local->data_sn;
-        heartbeat.last_sn.low = local->data_sn;
+        nb_rtps_sn_from_u64(&heartbeat.first_sn, first_sn);
+        nb_rtps_sn_from_u64(&heartbeat.last_sn, last_sn);
     }
     heartbeat.count = ++local->heartbeat_count;
     heartbeat.liveliness = 1;
@@ -2890,7 +2908,7 @@ static void send_user_liveliness_heartbeat(nb_rtps_participant_t *participant,
         return;
     }
     message_len = nb_cdr_writer_len(&writer);
-    (void)nb_rtps_sendto(participant, participant->unicast_sock, message, message_len, host, port);
+    (void)nb_rtps_sendto(participant, participant_data_socket(participant), message, message_len, host, port);
     participant->stats.heartbeats_sent++;
 }
 
@@ -2901,7 +2919,7 @@ static void send_user_liveliness_heartbeat(nb_rtps_participant_t *participant,
 static int send_user_data_all(nb_rtps_participant_t *participant,
                               const nb_rtps_guid_t *writer_guid,
                               const nb_rtps_guid_t *reader_guid,
-                              uint32_t sn,
+                              uint64_t sn,
                               uint64_t source_ns,
                               const void *payload,
                               size_t payload_len,
@@ -2941,8 +2959,8 @@ static int send_user_data_all(nb_rtps_participant_t *participant,
 static void send_user_gap_all(nb_rtps_participant_t *participant,
                               const nb_rtps_guid_t *writer_guid,
                               const nb_rtps_guid_t *reader_guid,
-                              uint32_t gap_start,
-                              uint32_t gap_last,
+                              uint64_t gap_start,
+                              uint64_t gap_last,
                               const nb_rtps_targets_t *targets)
 {
     size_t i;
@@ -2964,8 +2982,8 @@ static void send_user_gap_all(nb_rtps_participant_t *participant,
 static void send_user_heartbeat_all(nb_rtps_participant_t *participant,
                                     nb_rtps_local_endpoint_t *local,
                                     const nb_rtps_endpoint_info_t *reader_info,
-                                    uint32_t first_sn,
-                                    uint32_t last_sn,
+                                    uint64_t first_sn,
+                                    uint64_t last_sn,
                                     const nb_rtps_targets_t *targets)
 {
     size_t i;
@@ -2992,8 +3010,8 @@ static void send_data_heartbeats(nb_rtps_participant_t *participant)
     ntk_mutex_lock(participant->lock);
     for (i = 0; i < participant->max_local_endpoints; i++) {
         nb_rtps_local_endpoint_t *local = &participant->local_endpoints[i];
-        uint32_t first_sn = 0;
-        uint32_t last_sn = 0;
+        uint64_t first_sn = 0;
+        uint64_t last_sn = 0;
 
         if (!local->used || local->kind != NB_RTPS_ENDPOINT_PUBLICATION ||
             !local->history) {
@@ -3237,12 +3255,14 @@ static void handle_user_data(nb_rtps_participant_t *participant,
     int has_instance_handle = 0;
     int dds_parsed = 0;
     int dds_ok = 0;
+    uint64_t sample_sn;
     size_t i;
 
     if (!participant || !data || !source_prefix) {
         return;
     }
-    if (data->writer_sn.high != 0) {
+    sample_sn = nb_rtps_sn_to_u64(&data->writer_sn);
+    if (sample_sn == 0) {
         return;
     }
     writer_guid.prefix = *source_prefix;
@@ -3330,9 +3350,9 @@ static void handle_user_data(nb_rtps_participant_t *participant,
                 &local->info.endpoint_guid.entity,
                 local->info.durability >= NB_RTPS_DURABILITY_TRANSIENT_LOCAL
                     ? 1u
-                    : data->writer_sn.low);
+                    : sample_sn);
             if (reader_state &&
-                !nb_rtps_reader_on_sample(&reader_state->state, data->writer_sn.low)) {
+                !nb_rtps_reader_on_sample(&reader_state->state, sample_sn)) {
                 continue;
             }
             if (reader_state) {
@@ -3490,7 +3510,7 @@ static void handle_user_data(nb_rtps_participant_t *participant,
         if (delivered.state != NB_SAMPLE_STATE_VALID) {
             memset(&view, 0, sizeof(view));
             view.sample = delivered;
-            view.writer_sn = data->writer_sn.low;
+            view.writer_sn = sample_sn;
             callback(user, &readers[i], &writer_guid, &view);
             continue;
         }
@@ -3517,7 +3537,7 @@ static void handle_user_data(nb_rtps_participant_t *participant,
             view.payload_len = data->payload_len - NB_RTPS_CDR_HEADER_SIZE;
             view.sample = delivered;
         }
-        view.writer_sn = data->writer_sn.low;
+        view.writer_sn = sample_sn;
         callback(user, &readers[i], &writer_guid, &view);
     }
 }
@@ -3536,12 +3556,14 @@ static void handle_user_gap(nb_rtps_participant_t *participant,
     nb_rtps_queued_status_t queued[NB_RTPS_MAX_DATA_TARGETS];
     size_t queued_count = 0;
     uint32_t lost = 0;
+    uint64_t gap_start;
     size_t i;
 
     if (!participant || !gap || !source_prefix) {
         return;
     }
-    if (gap->gap_start.high == 0 && gap->gap_start.low != 0) {
+    gap_start = nb_rtps_sn_to_u64(&gap->gap_start);
+    if (gap_start != 0) {
         /* gap_start plus every bit the gap lists is a sample the writer
          * withdrew: the reader knows it will never arrive. */
         lost = 1;
@@ -3576,7 +3598,7 @@ static void handle_user_gap(nb_rtps_participant_t *participant,
                 participant,
                 &writer_guid,
                 &local->info.endpoint_guid.entity,
-                gap->gap_start.low);
+                gap_start);
             if (state) {
                 nb_rtps_reader_on_gap(&state->state, gap);
             }
@@ -3609,19 +3631,24 @@ static void handle_user_heartbeat(nb_rtps_participant_t *participant,
     nb_rtps_remote_endpoint_t *remote;
     char target_host[NB_RTPS_PEER_HOST_MAX];
     uint16_t target_port = source_port;
-    uint32_t first_sn;
-    uint32_t last_sn;
+    uint64_t first_sn;
+    uint64_t last_sn;
     uint64_t now;
     size_t i;
 
-    if (!participant || !heartbeat || !source_prefix ||
-        heartbeat->first_sn.high != 0 || heartbeat->last_sn.high != 0) {
+    if (!participant || !heartbeat || !source_prefix) {
         return;
     }
     writer_guid.prefix = *source_prefix;
     writer_guid.entity = heartbeat->writer_id;
-    first_sn = heartbeat->first_sn.low ? heartbeat->first_sn.low : 1u;
-    last_sn = heartbeat->last_sn.low;
+    first_sn = nb_rtps_sn_to_u64(&heartbeat->first_sn);
+    if (first_sn == 0) {
+        first_sn = 1;
+    }
+    last_sn = nb_rtps_sn_to_u64(&heartbeat->last_sn);
+    if (last_sn == 0) {
+        return;
+    }
     copy_str(target_host, sizeof(target_host), source_host);
 
     ntk_mutex_lock(participant->lock);
@@ -3722,7 +3749,7 @@ static void handle_user_heartbeat(nb_rtps_participant_t *participant,
  * again, even if it is still in the history. Retained samples therefore expire
  * before history eviction would drop them.
  */
-static int sample_expired(const nb_rtps_local_endpoint_t *local, uint32_t sn, uint64_t now)
+static int sample_expired(const nb_rtps_local_endpoint_t *local, uint64_t sn, uint64_t now)
 {
     uint64_t written_ms = 0;
 
@@ -3752,18 +3779,22 @@ static void handle_user_acknack(nb_rtps_participant_t *participant,
     nb_rtps_remote_endpoint_t *remote;
     char target_host[NB_RTPS_PEER_HOST_MAX];
     uint16_t target_port = source_port;
-    uint32_t first_sn = 0;
-    uint32_t last_sn = 0;
+    uint64_t first_sn = 0;
+    uint64_t last_sn = 0;
     size_t sample_count = 0;
     size_t resent = 0;
     size_t i;
     uint64_t now;
-    uint32_t gap_start = 0;
-    uint32_t gap_last = 0;
+    uint64_t gap_start = 0;
+    uint64_t gap_last = 0;
+    uint64_t ack_base;
 
     if (!participant || !acknack || !source_prefix ||
-        acknack->base.high != 0 || acknack->base.low == 0 ||
         acknack->num_bits > NB_RTPS_ACKNACK_MAX_BITS) {
+        return;
+    }
+    ack_base = nb_rtps_sn_to_u64(&acknack->base);
+    if (ack_base == 0) {
         return;
     }
     writer_guid.prefix = participant->local_guid.prefix;
@@ -3777,18 +3808,18 @@ static void handle_user_acknack(nb_rtps_participant_t *participant,
      * reliable peer's reader window from waiting for it. */
     if (nb_rtps_entity_id_equal(&acknack->writer_id,
                                 &nb_rtps_eid_participant_message_writer)) {
-        uint32_t last;
+        uint64_t last;
 
         ntk_mutex_lock(participant->lock);
         last = participant->pmd_sn;
         ntk_mutex_unlock(participant->lock);
-        if (last < acknack->base.low) {
-            last = acknack->base.low;
+        if (last < ack_base) {
+            last = ack_base;
         }
         (void)send_user_gap(participant,
                             &writer_guid,
                             &reader_guid,
-                            acknack->base.low,
+                            ack_base,
                             last,
                             source_host,
                             source_port);
@@ -3830,13 +3861,13 @@ static void handle_user_acknack(nb_rtps_participant_t *participant,
         int has_handle = 0;
         uint32_t status = 0;
         uint64_t source_ns = 0;
-        uint32_t sn;
+        uint64_t sn;
         int rc;
 
         if ((acknack->bitmap[i / 32u] & (1u << (31u - (i % 32u)))) == 0) {
             continue;
         }
-        sn = acknack->base.low + (uint32_t)i;
+        sn = ack_base + i;
         rc = nb_rtps_reliable_get_instance(local->history,
                                            sn,
                                            &payload,
@@ -3915,10 +3946,15 @@ static void handle_user_nack_frag(nb_rtps_participant_t *participant,
     uint64_t now;
     uint64_t source_ns = 0;
     int dispose = 0;
+    uint64_t writer_sn;
 
-    if (!participant || !nack || !source_prefix || nack->writer_sn.high != 0 ||
-        nack->writer_sn.low == 0 || nack->bitmap_base == 0 || nack->num_bits == 0 ||
+    if (!participant || !nack || !source_prefix ||
+        nack->bitmap_base == 0 || nack->num_bits == 0 ||
         nack->num_bits > NB_RTPS_FRAG_NUMBER_SET_MAX_BITS) {
+        return;
+    }
+    writer_sn = nb_rtps_sn_to_u64(&nack->writer_sn);
+    if (writer_sn == 0) {
         return;
     }
     writer_guid.prefix = participant->local_guid.prefix;
@@ -3954,7 +3990,7 @@ static void handle_user_nack_frag(nb_rtps_participant_t *participant,
     local->last_resend_ms = now;
 
     if (nb_rtps_reliable_get_instance(local->history,
-                                      nack->writer_sn.low,
+                                      writer_sn,
                                       &payload,
                                       &payload_len,
                                       &dispose,
@@ -3966,13 +4002,13 @@ static void handle_user_nack_frag(nb_rtps_participant_t *participant,
         return;
     }
     (void)nb_rtps_reliable_source_ns(
-        local->history, nack->writer_sn.low, &source_ns);
-    if (sample_expired(local, nack->writer_sn.low, now)) {
+        local->history, writer_sn, &source_ns);
+    if (sample_expired(local, writer_sn, now)) {
         (void)send_user_gap(participant,
                             &local->info.endpoint_guid,
                             &reader_guid,
-                            nack->writer_sn.low,
-                            nack->writer_sn.low,
+                            writer_sn,
+                            writer_sn,
                             target_host,
                             target_port);
         ntk_mutex_unlock(participant->lock);
@@ -3995,7 +4031,7 @@ static void handle_user_nack_frag(nb_rtps_participant_t *participant,
         (void)send_user_fragment(participant,
                                  &local->info.endpoint_guid,
                                  &reader_guid,
-                                 nack->writer_sn.low,
+                                 writer_sn,
                                  source_ns,
                                  payload,
                                  payload_len,
@@ -4010,7 +4046,7 @@ static void handle_user_nack_frag(nb_rtps_participant_t *participant,
     (void)send_user_heartbeat_frag(participant,
                                    &local->info.endpoint_guid,
                                    &reader_guid,
-                                   nack->writer_sn.low,
+                                   writer_sn,
                                    fragment_count,
                                    target_host,
                                    target_port);
@@ -4075,7 +4111,7 @@ static void frag_assembly_release(nb_rtps_participant_t *participant,
 
 static nb_rtps_frag_assembly_t *frag_assembly_find(nb_rtps_participant_t *participant,
                                                    const nb_rtps_guid_t *writer,
-                                                   uint32_t sn)
+                                                   uint64_t sn)
 {
     size_t i;
 
@@ -4119,7 +4155,7 @@ static nb_rtps_frag_assembly_t *frag_assembly_free_slot(nb_rtps_participant_t *p
  */
 static nb_rtps_frag_assembly_t *frag_assembly_get(nb_rtps_participant_t *participant,
                                                   const nb_rtps_guid_t *writer,
-                                                  uint32_t sn,
+                                                  uint64_t sn,
                                                   uint32_t sample_size,
                                                   uint16_t fragment_size,
                                                   uint64_t now)
@@ -4224,9 +4260,14 @@ static void handle_data_frag(nb_rtps_participant_t *participant,
     size_t offset;
     size_t copy_len;
     uint64_t now;
+    uint64_t writer_sn;
     int complete = 0;
 
-    if (!participant || !fragment || !prefix || fragment->writer_sn.high != 0) {
+    if (!participant || !fragment || !prefix) {
+        return;
+    }
+    writer_sn = nb_rtps_sn_to_u64(&fragment->writer_sn);
+    if (writer_sn == 0) {
         return;
     }
     if (fragment->sample_size == 0 || fragment->sample_size > NB_RTPS_SAMPLE_MAX ||
@@ -4240,7 +4281,7 @@ static void handle_data_frag(nb_rtps_participant_t *participant,
     ntk_mutex_lock(participant->lock);
     assembly = frag_assembly_get(participant,
                                  &writer,
-                                 fragment->writer_sn.low,
+                                 writer_sn,
                                  fragment->sample_size,
                                  fragment->fragment_size,
                                  now);
@@ -4366,8 +4407,7 @@ static int send_frag_nack(nb_rtps_participant_t *participant,
     memset(&nack, 0, sizeof(nack));
     nack.reader_id = assembly->reader_id;
     nack.writer_id = assembly->writer.entity;
-    nack.writer_sn.high = 0;
-    nack.writer_sn.low = assembly->sn;
+    nb_rtps_sn_from_u64(&nack.writer_sn, assembly->sn);
     /* Fragment numbers are 1-based, so index i of the received bitmap is
      * fragment number i + 1. */
     nack.bitmap_base = first_missing + 1u;
@@ -4388,7 +4428,7 @@ static int send_frag_nack(nb_rtps_participant_t *participant,
         nb_rtps_nack_frag(&writer, &nack) != NB_OK || !nb_cdr_writer_ok(&writer)) {
         return NB_ERR_BAD_MESSAGE;
     }
-    if (nb_rtps_sendto(participant, participant->unicast_sock,
+    if (nb_rtps_sendto(participant, participant_data_socket(participant),
                           message,
                           nb_cdr_writer_len(&writer),
                           assembly->source_host,
@@ -4415,8 +4455,11 @@ static void handle_user_heartbeat_frag(nb_rtps_participant_t *participant,
     nb_rtps_frag_assembly_t *assembly;
     uint64_t now;
 
-    if (!participant || !heartbeat || !source_prefix || heartbeat->writer_sn.high != 0 ||
-        heartbeat->writer_sn.low == 0) {
+    if (!participant || !heartbeat || !source_prefix) {
+        return;
+    }
+    uint64_t writer_sn = nb_rtps_sn_to_u64(&heartbeat->writer_sn);
+    if (writer_sn == 0) {
         return;
     }
     writer.prefix = *source_prefix;
@@ -4424,7 +4467,7 @@ static void handle_user_heartbeat_frag(nb_rtps_participant_t *participant,
 
     now = ntk_wall_ms();
     ntk_mutex_lock(participant->lock);
-    assembly = frag_assembly_find(participant, &writer, heartbeat->writer_sn.low);
+    assembly = frag_assembly_find(participant, &writer, writer_sn);
     if (assembly && !assembly->complete && assembly->nack_count < NB_RTPS_FRAG_MAX_NACKS) {
         (void)send_frag_nack(participant, assembly, now);
     }
@@ -4441,14 +4484,71 @@ static void handle_user_heartbeat_frag(nb_rtps_participant_t *participant,
  * `has_source_ts` and `source_ts` are per-message state: INFO_TS applies to
  * every DATA that follows it until the next INFO_TS or the next message.
  */
+static int guid_prefix_is_zero(const nb_rtps_guid_prefix_t *prefix)
+{
+    size_t i;
+
+    if (!prefix) {
+        return 1;
+    }
+    for (i = 0; i < NB_RTPS_GUID_PREFIX_SIZE; i++) {
+        if (prefix->bytes[i] != 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static void handle_submessage(nb_rtps_participant_t *participant,
                               const nb_rtps_header_t *header,
                               const nb_rtps_submessage_view_t *view,
-                              int *has_source_ts,
-                              nb_rtps_time_t *source_ts,
+                              nb_rtps_receiver_state_t *state,
                               const char *source_host,
                               uint16_t source_port)
 {
+    const nb_rtps_guid_prefix_t *source_prefix;
+
+    /* Interpreter submessages update the per-message state and are never
+     * filtered by INFO_DST: a message may carry INFO_TS/INFO_SRC before an
+     * INFO_DST that redirects the entity submessages that follow. */
+    if (view->id == NB_RTPS_SUBMSG_INFO_DST) {
+        nb_rtps_guid_prefix_t prefix;
+
+        if (nb_rtps_info_dst_decode(view->flags, view->body, view->body_len,
+                                    &prefix) == NB_OK) {
+            state->dst_prefix = prefix;
+            state->has_dst_prefix = 1;
+        } else {
+            state->has_dst_prefix = 0;
+            participant->stats.parse_errors++;
+        }
+        return;
+    }
+    if (view->id == NB_RTPS_SUBMSG_INFO_SRC) {
+        nb_rtps_guid_prefix_t prefix;
+
+        if (nb_rtps_info_src_decode(view->flags, view->body, view->body_len,
+                                    &prefix) == NB_OK) {
+            state->source_prefix = prefix;
+            state->has_source_prefix = 1;
+        } else {
+            state->has_source_prefix = 0;
+            participant->stats.parse_errors++;
+        }
+        return;
+    }
+
+    source_prefix = state->has_source_prefix ? &state->source_prefix
+                                             : &header->guid_prefix;
+    /* INFO_DST addresses the following Entity Submessages to one participant.
+     * An all-zero prefix is treated as "no destination" (broadcast), which is
+     * also what a peer that writes INFO_DST without a target produces. */
+    if (state->has_dst_prefix && !guid_prefix_is_zero(&state->dst_prefix) &&
+        !nb_rtps_guid_prefix_equal(&state->dst_prefix,
+                                   &participant->local_guid.prefix)) {
+        return;
+    }
+
     if (view->id == NB_RTPS_SUBMSG_DATA) {
         nb_rtps_data_view_t data;
 
@@ -4468,8 +4568,8 @@ static void handle_submessage(nb_rtps_participant_t *participant,
         }
         dispatch_data_view(participant,
                            &data,
-                           (*has_source_ts) ? source_ts : NULL,
-                           &header->guid_prefix,
+                           state->has_source_ts ? &state->source_ts : NULL,
+                           source_prefix,
                            source_host,
                            source_port);
     } else if (view->id == NB_RTPS_SUBMSG_DATA_FRAG) {
@@ -4480,8 +4580,8 @@ static void handle_submessage(nb_rtps_participant_t *participant,
             participant->stats.fragments_received++;
             handle_data_frag(participant,
                              &fragment,
-                             (*has_source_ts) ? source_ts : NULL,
-                             &header->guid_prefix,
+                             state->has_source_ts ? &state->source_ts : NULL,
+                             source_prefix,
                              source_host,
                              source_port);
         } else {
@@ -4490,11 +4590,11 @@ static void handle_submessage(nb_rtps_participant_t *participant,
     } else if (view->id == NB_RTPS_SUBMSG_INFO_TS) {
         /* INFO_TS applies to the submessages that follow it until the next
          * INFO_TS, so remember it for DATA and DATA_FRAG. */
-        if (nb_rtps_info_ts_decode(view->flags, view->body, view->body_len, source_ts) ==
-            NB_OK) {
-        *has_source_ts = 1;
+        if (nb_rtps_info_ts_decode(view->flags, view->body, view->body_len,
+                                   &state->source_ts) == NB_OK) {
+            state->has_source_ts = 1;
         } else {
-            *has_source_ts = 0;
+            state->has_source_ts = 0;
         }
     } else if (view->id == NB_RTPS_SUBMSG_HEARTBEAT) {
         nb_rtps_heartbeat_t heartbeat;
@@ -4512,7 +4612,7 @@ static void handle_submessage(nb_rtps_participant_t *participant,
             handle_sedp_heartbeat(participant,
                                   NB_RTPS_ENDPOINT_PUBLICATION,
                                   &heartbeat,
-                                  &header->guid_prefix,
+                                  source_prefix,
                                   source_host,
                                   source_port);
         } else if (nb_rtps_entity_id_equal(&heartbeat.writer_id,
@@ -4520,13 +4620,13 @@ static void handle_submessage(nb_rtps_participant_t *participant,
             handle_sedp_heartbeat(participant,
                                   NB_RTPS_ENDPOINT_SUBSCRIPTION,
                                   &heartbeat,
-                                  &header->guid_prefix,
+                                  source_prefix,
                                   source_host,
                                   source_port);
         } else {
             handle_user_heartbeat(participant,
                                   &heartbeat,
-                                  &header->guid_prefix,
+                                  source_prefix,
                                   source_host,
                                   source_port);
         }
@@ -4543,7 +4643,7 @@ static void handle_submessage(nb_rtps_participant_t *participant,
             handle_sedp_acknack(participant,
                                 NB_RTPS_ENDPOINT_PUBLICATION,
                                 &acknack,
-                                &header->guid_prefix,
+                                source_prefix,
                                 source_host,
                                 source_port);
         } else if (nb_rtps_entity_id_equal(&acknack.writer_id,
@@ -4551,13 +4651,13 @@ static void handle_submessage(nb_rtps_participant_t *participant,
             handle_sedp_acknack(participant,
                                 NB_RTPS_ENDPOINT_SUBSCRIPTION,
                                 &acknack,
-                                &header->guid_prefix,
+                                source_prefix,
                                 source_host,
                                 source_port);
         } else {
             handle_user_acknack(participant,
                                 &acknack,
-                                &header->guid_prefix,
+                                source_prefix,
                                 source_host,
                                 source_port);
         }
@@ -4567,7 +4667,7 @@ static void handle_submessage(nb_rtps_participant_t *participant,
         if (nb_rtps_nack_frag_decode(view->body, view->body_len, &nack) == NB_OK) {
             participant->stats.nack_frags_received++;
             handle_user_nack_frag(
-                participant, &nack, &header->guid_prefix, source_host, source_port);
+                participant, &nack, source_prefix, source_host, source_port);
         } else {
             participant->stats.parse_errors++;
         }
@@ -4576,7 +4676,7 @@ static void handle_submessage(nb_rtps_participant_t *participant,
 
         if (nb_rtps_heartbeat_frag_decode(view->body, view->body_len, &heartbeat) == NB_OK) {
             participant->stats.heartbeats_received++;
-            handle_user_heartbeat_frag(participant, &heartbeat, &header->guid_prefix);
+            handle_user_heartbeat_frag(participant, &heartbeat, source_prefix);
         } else {
             participant->stats.parse_errors++;
         }
@@ -4590,16 +4690,16 @@ static void handle_submessage(nb_rtps_participant_t *participant,
                 handle_sedp_gap(participant,
                                 NB_RTPS_ENDPOINT_PUBLICATION,
                                 &gap,
-                                &header->guid_prefix);
+                                source_prefix);
             } else if (nb_rtps_entity_id_equal(
                            &gap.writer_id,
                            &nb_rtps_eid_sedp_subscriptions_writer)) {
                 handle_sedp_gap(participant,
                                 NB_RTPS_ENDPOINT_SUBSCRIPTION,
                                 &gap,
-                                &header->guid_prefix);
+                                source_prefix);
             } else {
-                handle_user_gap(participant, &gap, &header->guid_prefix);
+                handle_user_gap(participant, &gap, source_prefix);
             }
         }
     }
@@ -4613,11 +4713,11 @@ static void handle_datagram(nb_rtps_participant_t *participant,
 {
     nb_rtps_header_t header;
     nb_rtps_submessage_view_t view;
-    nb_rtps_time_t source_ts;
-    int has_source_ts = 0;
+    nb_rtps_receiver_state_t state;
     size_t offset = 0;
     int rc;
 
+    memset(&state, 0, sizeof(state));
     if (nb_rtps_message_begin(buf, len, &header, &offset) != NB_OK) {
         participant->stats.parse_errors++;
         return;
@@ -4629,8 +4729,7 @@ static void handle_datagram(nb_rtps_participant_t *participant,
         handle_submessage(participant,
                           &header,
                           &view,
-                          &has_source_ts,
-                          &source_ts,
+                          &state,
                           source_host,
                           source_port);
     }
@@ -4662,8 +4761,7 @@ static void tcp_on_message(void *user,
                            int index,
                            const nb_rtps_header_t *header,
                            const nb_rtps_submessage_view_t *view,
-                           int *has_source_ts,
-                           nb_rtps_time_t *source_ts)
+                           nb_rtps_receiver_state_t *state)
 {
     nb_rtps_participant_t *participant = (nb_rtps_participant_t *)user;
     const char *key = nb_rtps_tcp_key(participant->tcp, index);
@@ -4679,8 +4777,7 @@ static void tcp_on_message(void *user,
     handle_submessage(participant,
                       header,
                       view,
-                      has_source_ts,
-                      source_ts,
+                      state,
                       key,
                       (uint16_t)(index + 1));
 }
@@ -4915,7 +5012,7 @@ static void send_pmd(nb_rtps_participant_t *participant, uint32_t kind)
     nb_cdr_writer_t writer;
     size_t payload_len = 0;
     size_t message_len;
-    uint32_t sn;
+    uint64_t sn;
     uint64_t now;
     size_t i;
 
@@ -4936,8 +5033,7 @@ static void send_pmd(nb_rtps_participant_t *participant, uint32_t kind)
     memset(&data, 0, sizeof(data));
     data.reader_id = nb_rtps_eid_participant_message_reader;
     data.writer_id = nb_rtps_eid_participant_message_writer;
-    data.writer_sn.high = 0;
-    data.writer_sn.low = sn;
+    nb_rtps_sn_from_u64(&data.writer_sn, sn);
     data.payload = payload;
     data.payload_len = payload_len;
     if (nb_rtps_message_init(&writer, message, sizeof(message), &header) != NB_OK ||
@@ -5211,6 +5307,9 @@ static void thread_main(void *user)
         if (rc > 0) {
             drain_socket(participant, participant->rx_sock);
             drain_socket(participant, participant->unicast_sock);
+            if (participant->data_sock) {
+                drain_socket(participant, participant->data_sock);
+            }
         }
         nb_rtps_tcp_service(participant->tcp);
         now = ntk_wall_ms();
@@ -5258,6 +5357,9 @@ static void free_participant(nb_rtps_participant_t *participant)
     if (participant->unicast_sock) {
         ntk_socket_destroy(participant->unicast_sock);
     }
+    if (participant->data_sock) {
+        ntk_socket_destroy(participant->data_sock);
+    }
     if (participant->lock) {
         ntk_mutex_destroy(participant->lock);
     }
@@ -5298,7 +5400,8 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
     nb_rtps_participant_t *participant;
     uint32_t domain;
     uint32_t spdp_port;
-    uint32_t unicast_port;
+    uint32_t unicast_port = 0;
+    uint32_t data_port = 0;
     uint64_t now;
     size_t i;
     char local_ip[NB_RTPS_PEER_HOST_MAX];
@@ -5312,6 +5415,8 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
         return NULL;
     }
     participant->domain_id = config->domain_id;
+    participant->participant_id = config->participant_id;
+    participant->standard_ports = config->standard_ports != 0;
     copy_str(participant->bind_host,
              sizeof(participant->bind_host),
              config->bind_host && config->bind_host[0] ? config->bind_host : "0.0.0.0");
@@ -5406,18 +5511,42 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
             return NULL;
         }
     }
-    if (config->spdp_port) {
+    if (participant->standard_ports) {
+        uint64_t base = (uint64_t)NB_RTPS_SPDP_BASE_PORT +
+                        (uint64_t)NB_RTPS_SPDP_DOMAIN_GAIN * (uint64_t)domain;
+        uint64_t meta = base + NB_RTPS_PORT_OFFSET_D1 +
+                        NB_RTPS_PORT_PARTICIPANT_GAIN *
+                            (uint64_t)participant->participant_id;
+        uint64_t data = base + NB_RTPS_PORT_OFFSET_D3 +
+                        NB_RTPS_PORT_PARTICIPANT_GAIN *
+                            (uint64_t)participant->participant_id;
+
+        /* The standard mapping needs the multicast SPDP socket; a unicast-only
+         * participant must use explicit ports instead. */
+        if (!participant->multicast_enabled || meta > 65535u || data > 65535u) {
+            free_participant(participant);
+            return NULL;
+        }
+        spdp_port = (uint32_t)(base + NB_RTPS_PORT_OFFSET_D0);
+        unicast_port = (uint32_t)meta;
+        data_port = (uint32_t)data;
+    } else if (config->spdp_port) {
         spdp_port = config->spdp_port;
     } else if (participant->multicast_enabled) {
         spdp_port = NB_RTPS_SPDP_BASE_PORT + NB_RTPS_SPDP_DOMAIN_GAIN * domain;
     } else {
         spdp_port = 0;
     }
-    if (spdp_port > 65535u) {
+    if (config->spdp_port) {
+        spdp_port = config->spdp_port;
+    }
+    if (config->unicast_port) {
+        unicast_port = config->unicast_port;
+    }
+    if (spdp_port > 65535u || unicast_port > 65535u) {
         free_participant(participant);
         return NULL;
     }
-    unicast_port = config->unicast_port;
 
     if (!config->advertise_host || !config->advertise_host[0]) {
         if (strcmp(participant->bind_host, "0.0.0.0") != 0) {
@@ -5532,6 +5661,37 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
                          participant->advertise_addr[2],
                          participant->advertise_addr[3],
                          participant->unicast_port);
+    if (participant->standard_ports) {
+        /* User data gets its own unicast socket on d3 + PG*participant_id. The
+         * metatraffic socket keeps SEDP and SPDP unicast; peers learn this
+         * locator from PID_DEFAULT_UNICAST_LOCATOR. */
+        participant->data_sock = ntk_socket_create();
+        if (!participant->data_sock ||
+            ntk_socket_bind_udp(participant->data_sock,
+                                participant->bind_host,
+                                (uint16_t)data_port,
+                                0) != NTK_OK) {
+            free_participant(participant);
+            return NULL;
+        }
+        local_ip[0] = '\0';
+        local_port = 0;
+        if (ntk_socket_get_local(participant->data_sock,
+                                 local_ip,
+                                 sizeof(local_ip),
+                                 &local_port) != NTK_OK ||
+            local_port == 0) {
+            free_participant(participant);
+            return NULL;
+        }
+        participant->data_port = local_port;
+        nb_rtps_locator_ipv4(&participant->default_unicast,
+                             participant->advertise_addr[0],
+                             participant->advertise_addr[1],
+                             participant->advertise_addr[2],
+                             participant->advertise_addr[3],
+                             participant->data_port);
+    }
     if (participant->default_unicast.kind == NB_RTPS_LOCATOR_KIND_INVALID) {
         /* SPDP peers such as Cyclone DDS require a default unicast locator in
          * addition to the metatraffic locator before they create a proxy
@@ -5595,6 +5755,16 @@ int nb_rtps_participant_start(nb_rtps_participant_t *participant)
                        NULL) != NTK_OK ||
         ntk_poller_add(participant->poller,
                        ntk_socket_fd(participant->unicast_sock),
+                       NTK_POLL_IN,
+                       NULL,
+                       NULL) != NTK_OK) {
+        ntk_poller_destroy(participant->poller);
+        participant->poller = NULL;
+        return NB_ERR_IO;
+    }
+    if (participant->data_sock &&
+        ntk_poller_add(participant->poller,
+                       ntk_socket_fd(participant->data_sock),
                        NTK_POLL_IN,
                        NULL,
                        NULL) != NTK_OK) {
@@ -5735,7 +5905,7 @@ int nb_rtps_participant_add_endpoint(nb_rtps_participant_t *participant,
     size_t payload_len = 0;
     size_t slot = 0;
     size_t i;
-    uint32_t sn = 0;
+    uint64_t sn = 0;
     int rc;
 
     if (!participant || !info ||
@@ -5849,7 +6019,7 @@ int nb_rtps_participant_remove_endpoint(nb_rtps_participant_t *participant,
     size_t dispose_count = 0;
     uint8_t payload[NB_RTPS_SEDP_PAYLOAD_MAX];
     size_t payload_len = 0;
-    uint32_t sn = 0;
+    uint64_t sn = 0;
     size_t i;
     int rc;
 
@@ -5969,10 +6139,10 @@ static int publish_internal(nb_rtps_participant_t *participant,
     nb_rtps_local_endpoint_t *local;
     nb_rtps_publish_send_t batch[NB_RTPS_PUBLISH_BATCH];
     size_t batch_count = 0;
-    uint32_t sn = 0;
+    uint64_t sn = 0;
     uint32_t evicted_first = 0;
     uint32_t evicted_last = 0;
-    uint32_t first_sn = 0;
+    uint64_t first_sn = 0;
     size_t i;
     int target_count = 0;
     int sent = 0;
@@ -6204,7 +6374,7 @@ int nb_rtps_participant_publish_instance(
 int nb_rtps_participant_reader_consumed(nb_rtps_participant_t *participant,
                                         const nb_rtps_guid_t *writer_guid,
                                         const nb_rtps_guid_t *reader_guid,
-                                        uint32_t sn)
+                                        uint64_t sn)
 {
     nb_rtps_data_reader_state_t *state;
     int consumed;

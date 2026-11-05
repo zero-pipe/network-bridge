@@ -72,6 +72,20 @@ rtps_writer_write(w, cdr_body, cdr_body_len); /* 自动加 4 字节封装头 */
 rtps_participant_destroy(p); /* 递归销毁 topic/endpoint/waitset */
 ```
 
+需要标准端口映射（多实例同 domain）时：
+
+```c
+pc.standard_ports = 1;
+pc.participant_id = 7; /* SPDP=d0, metatraffic=d1+2*7, 用户单播=d3+2*7 */
+```
+
+`standard_ports` 要求组播可用；纯单播部署仍用显式 `spdp_port` /
+`unicast_port` 或临时端口。未启用时 participant 复用一个 unicast socket，
+locator 通过 SPDP/SEDP 通告，不依赖对端推算端口。
+
+框架的 RTPS provider 在 binding URI 上提供同样的开关：
+`rtps://<domain>?std&pid=<n>`（例如 `rtps://7?std&pid=9`）。
+
 ## 4. QoS 与继承
 
 `rtps_qos_t` 用一个 `present` 位图表示“调用者显式设置了哪些策略”。端点生效的 QoS 按
@@ -147,7 +161,7 @@ RTPS 子消息按 4 字节补齐，而 CDR body 没有长度字段，所以收�
 | `RTPS_INSTANCE_NOT_ALIVE_DISPOSED` | dispose，实例被删除 |
 | `RTPS_INSTANCE_NOT_ALIVE_NO_WRITERS` | unregister，writer 不再负责该实例 |
 
-实例句柄通过 DATA 的内联 QoS `PID_KEY_HASH` 传递；`rtps_sample_info_t` 里的 `instance_state`、`view_state`、`generation_rank`、`has_instance_handle` 与 DDS `SampleInfo` 对应。`valid_data = false` 表示这是一次状态变化而不是新数据。
+实例句柄通过 DATA 的内联 QoS `PID_KEY_HASH` 传递；`rtps_sample_info_t` 里的 `instance_state`、`view_state`、`generation_rank`、`has_instance_handle` 与 DDS `SampleInfo` 对应。`valid_data = false` 表示这是一次状态变化而不是新数据。`writer_sn` 是完整的 64 位 writer 序列号。
 
 ## 6. 线程与生命周期
 

@@ -49,7 +49,7 @@ include/nb/rtps.h       provider 的公开入口
 | 未知实体 ID | `0x00000000` |
 | GUID prefix | 12 字节，每个 participant 生成一次：`01 9a` + ASCII `"NB"` + 当前毫秒时间戳低 32 位 + （时间戳高 32 位 XOR participant 指针）。必须保证同进程内不重复 |
 | 本地用户端点 | 实体 kind `0x03`（writer）或 `0x04`（reader）；key 来自 participant 内单一计数器，从 1 开始，所以第一个端点（无论 writer 还是 reader）是 `0x01000003` 或 `0x01000004` |
-| 序列号 | 线上 32 位：`high = 0`，`low = 1..2^32-1`。回绕是已知限制，见第 13 章 |
+| 序列号 | 线上 64 位（`high:low`），内部统一 `uint64_t`；可跨 2^32 边界 |
 
 RTPS 头的 GUID prefix 等于本 participant 前缀的报文在解析任何子消息之前直接丢弃，因此不存在自发现。
 
@@ -79,13 +79,14 @@ RTPS 头的 GUID prefix 等于本 participant 前缀的报文在解析任何子�
 | `0x07` | HEARTBEAT | 是 | 是 | L 位是 `0x04`；`0x02` 是 FINAL，本实现不据此判断 liveliness |
 | `0x08` | GAP | 是 | 是 | 连续区间形式，见 5.4 |
 | `0x09` | INFO_TS | 是（有效时间戳） | 是 | 不发 invalidate 形式 |
-| `0x0e` | INFO_DST | 是 | 否 | 发送时写，接收侧不据此过滤（见第 13 章） |
+| `0x0c` | INFO_SRC | 是 | 是 | 覆盖后续 Entity Submessage 的源 GUID 前缀 |
+| `0x0e` | INFO_DST | 是 | 是 | 按目标 GUID 前缀过滤后续 Entity Submessage；全零视为广播 |
 | `0x12` | NACK_FRAG | 是 | 是 | |
 | `0x13` | HEARTBEAT_FRAG | 是 | 是 | |
 | `0x15` | DATA | 是 | 是 | |
 | `0x16` | DATA_FRAG | 是 | 是 | |
 
-INFO_SRC、INFO_REPLY、PAD、批处理（batching）和厂商私有子消息不解析，按长度跳过。
+INFO_REPLY、PAD、批处理（batching）和厂商私有子消息不解析，按长度跳过。
 
 ### 3.2 INFO_TS
 
@@ -294,11 +295,26 @@ Resource limits 是本地限制，不是 RxO 策略，不参与匹配。topic/ty
 | SPDP 组播组 | `239.255.0.1` |
 | SPDP 组播端口 | `7400 + 250 * domain_id`（domain > 232 时端口溢出，创建直接失败） |
 | SPDP 单播 | participant 自行选端口并通告，也可通过配置固定 |
-| 端点 metatraffic 单播 | participant 的单播 socket；在 SPDP 里以 `METATRAFFIC_UNICAST_LOCATOR` 通告，用户数据也复用它 |
+| 端点 metatraffic 单播 | 默认 participant 自行选端口并通告；启用 `standard_ports` 时用 `7400 + 250*domain + d1 + 2*participant_id` |
+| 端点用户数据单播 | 默认复用 metatraffic socket；启用 `standard_ports` 时使用独立的 `d3 + 2*participant_id` 端口 |
+| 用户数据组播 | 未分配（RTPS 端口映射里的 `d2`）；端点 unicast locator 已足够互通 |
 | Locator kind | `1` = UDPv4，`4` = TCPv4，`8` = TCPv6 |
 | 地址编码 | IPv4 放在 16 字节地址字段的最后 4 字节 |
 
-本实现不分配 DDSI 规范的独立用户数据端口（`d1`/`d3` 偏移），而是在 SEDP 里把 participant 的单播 locator 通告为端点地址。这是合法的（locator 靠通告，不靠推算），也能互通；但如果防火墙只按“标准用户数据端口”放行，会看不到流量。
+标准端口映射是可选配置：`rtps_participant_config_t.standard_ports = 1`，并用
+`participant_id` 区分同一 domain 内的多个 participant。此时：
+
+```text
+SPDP 组播     = 7400 + 250*domain + d0
+metatraffic   = 7400 + 250*domain + d1 + 2*participant_id
+用户单播      = 7400 + 250*domain + d3 + 2*participant_id
+d0=0, d1=10, d2=1, d3=11
+```
+
+该模式要求组播可用；纯单播部署仍使用显式 `spdp_port`/`unicast_port` 或临时
+端口。未启用时可以复用同一个 unicast socket，locator 通过 SPDP/SEDP 通告，
+因此互通不依赖接收方按标准端口推算。
+
 
 ### 8.2 SPDP
 
@@ -389,14 +405,15 @@ TCP 不在上表中：Cyclone 11 的 TCP 是单一传输模式（发现也走 TC
 
 - **没有 IPv6**：只使用 UDPv4/TCPv4 locator；TCPv6 kind 已定义但没有 socket 路径。
 - **没有安全与 iceoryx**：发现和数据都是明文。
-- **32 位序列号**：`high` 恒为 0；writer 在 2^32-1 个样本后回绕，使用序列号高半区的对端无法服务。
 - **没有类型系统**：载荷是不透明 CDR body 加 type 名；没有 IDL 编译器、XTypes 类型信息和类型对象交换，type 一致性就是名字相等。
-- **接收侧不按 INFO_DST 过滤**：发送时写 INFO_DST，接收时不解析；单播 socket 已保证方向正确，但不符合严格的规范语义。
+- **INFO_SRC / INFO_DST**：接收侧已解析并按目标前缀过滤 Entity Submessage；
+  全零前缀视为广播。TCP 连接按每条 RTPS 消息重置该状态。
+- **64 位序列号**：内部统一用 `uint64_t`，wire 上的 high/low 原样保留；writer
+  历史和 reader 位图都按 64 位推进，可跨 2^32 边界。
 - **Resource limits** 的 writer 侧 `max_samples`/`max_samples_per_instance` 只受历史深度和字节预算间接约束；reader 执行 `max_instances`。
 - **Presentation** 只通告并参与匹配，coherent/ordered access 不提供实际投递保证。
 - **没有 `dds_assert_liveliness()`**；manual liveliness 靠一次写入触发。
 - **Participant 名字**本地记录上限 64 字节、USER_DATA 上限 256 字节；线上更长时截断而不是拒绝。
-- **没有独立的用户数据端口**：端点复用 participant 的单播 socket，见 8.1。
 - **TCP 不与 Cyclone 互通**：本实现的 RTPS over TCP 只覆盖两个本实现实例；Cyclone 的 TCP 选择会替换发现传输，与 RTPS 的 UDP SPDP 不兼容，见 8.4。
 - **不支持 PID_DOMAIN_TAG**：配置了 domain tag 的对端会忽略本 participant。
 

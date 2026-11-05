@@ -8,9 +8,11 @@
  *   rtps://<domain>                           multicast discovery, ephemeral ports
  *   rtps://<domain>:<spdp-port>               unicast only, fixed discovery port
  *   rtps://<domain>:<port>/<host>:<port>,...  explicit unicast peers
+ *   rtps://<domain>?std&pid=<n>                standard PB/DG/PG ports
  *
  * A port or peer list disables multicast, because both pin discovery to
- * explicit endpoints.
+ * explicit endpoints. The ?std&pid=<n> form keeps multicast and selects the
+ * DDSI standard ports (d0/d1/d3 + 2*n); see rtps_participant_config_t.
  *
  * Like the Cyclone provider, the plain "rtps://<domain>" form needs no address
  * configuration: the participant binds 0.0.0.0 and announces the first

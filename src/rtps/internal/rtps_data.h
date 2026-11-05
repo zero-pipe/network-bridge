@@ -45,8 +45,8 @@ typedef struct nb_rtps_dds_message {
     const uint8_t *payload;
     size_t payload_len;
     nb_sample_info_t sample;
-    /* Low 32 bits of the writer sequence number the sample travelled with. */
-    uint32_t writer_sn;
+    /* Writer sequence number the sample travelled with. */
+    uint64_t writer_sn;
 } nb_rtps_dds_message_t;
 
 /* Serialize dds::Message with the CDR_LE encapsulation header. The output

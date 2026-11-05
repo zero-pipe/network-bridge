@@ -153,6 +153,8 @@ int rtps_participant_create(const rtps_participant_config_t *config,
     engine_config.max_remote_participants = config->max_remote_participants;
     engine_config.max_local_endpoints = config->max_local_endpoints;
     engine_config.max_remote_endpoints = config->max_remote_endpoints;
+    engine_config.standard_ports = config->standard_ports;
+    engine_config.participant_id = config->participant_id;
     engine_config.dump_frames = config->dump_frames;
     participant->engine = nb_rtps_participant_create(&engine_config);
     if (!participant->engine) {

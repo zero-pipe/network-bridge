@@ -3,6 +3,7 @@
 #include "rtps_message.h"
 #include "rtps_param.h"
 #include "rtps_participant.h"
+#include "rtps_reliable.h"
 #include "rtps_sedp.h"
 #include "rtps_spdp.h"
 
@@ -875,6 +876,128 @@ static void test_info_ts_roundtrip(void)
     CHECK(nb_rtps_info_ts_decode(0, view.body, view.body_len, &parsed) != NB_OK);
 }
 
+static void test_info_dst_src_roundtrip(void)
+{
+    uint8_t message[128];
+    nb_rtps_header_t header;
+    nb_rtps_guid_prefix_t sent;
+    nb_rtps_guid_prefix_t parsed;
+    nb_cdr_writer_t writer;
+    nb_rtps_submessage_view_t view;
+    size_t offset = 0;
+    size_t i;
+
+    memset(&header, 0, sizeof(header));
+    header.version_major = NB_RTPS_PROTOCOL_VERSION_MAJOR;
+    header.version_minor = NB_RTPS_PROTOCOL_VERSION_MINOR;
+    header.vendor_id[0] = NB_RTPS_VENDOR_ID_0;
+    header.vendor_id[1] = NB_RTPS_VENDOR_ID_1;
+    for (i = 0; i < NB_RTPS_GUID_PREFIX_SIZE; i++) {
+        sent.bytes[i] = (uint8_t)(0x10u + i);
+    }
+
+    CHECK(nb_rtps_message_init(&writer, message, sizeof(message), &header) == NB_OK);
+    CHECK(nb_rtps_info_dst(&writer, &sent) == NB_OK);
+    CHECK(nb_rtps_info_src(&writer, &sent) == NB_OK);
+    CHECK(nb_cdr_writer_ok(&writer));
+
+    CHECK(nb_rtps_message_begin(
+              message, nb_cdr_writer_len(&writer), &header, &offset) == NB_OK);
+    CHECK(nb_rtps_message_next(message, nb_cdr_writer_len(&writer), &offset, &view) == 1);
+    CHECK(view.id == NB_RTPS_SUBMSG_INFO_DST);
+    CHECK(nb_rtps_info_dst_decode(view.flags, view.body, view.body_len, &parsed) == NB_OK);
+    CHECK(memcmp(parsed.bytes, sent.bytes, sizeof(sent.bytes)) == 0);
+
+    CHECK(nb_rtps_message_next(message, nb_cdr_writer_len(&writer), &offset, &view) == 1);
+    CHECK(view.id == NB_RTPS_SUBMSG_INFO_SRC);
+    CHECK(nb_rtps_info_src_decode(view.flags, view.body, view.body_len, &parsed) == NB_OK);
+    CHECK(memcmp(parsed.bytes, sent.bytes, sizeof(sent.bytes)) == 0);
+
+    /* Short bodies and big-endian encoding are rejected. */
+    CHECK(nb_rtps_info_dst_decode(NB_RTPS_FLAG_ENDIAN_LITTLE, view.body, 4, &parsed) !=
+          NB_OK);
+    CHECK(nb_rtps_info_src_decode(NB_RTPS_FLAG_ENDIAN_LITTLE, view.body, 8, &parsed) !=
+          NB_OK);
+    CHECK(nb_rtps_info_dst_decode(0, view.body, view.body_len, &parsed) != NB_OK);
+    CHECK(nb_rtps_info_src_decode(0, view.body, view.body_len, &parsed) != NB_OK);
+}
+
+static void test_sequence_number_64(void)
+{
+    nb_rtps_reliable_writer_t *writer = nb_rtps_reliable_writer_create(8);
+    nb_rtps_reader_state_t reader;
+    nb_rtps_acknack_t acknack;
+    uint64_t sn = 0;
+    uint64_t first = 0;
+    uint64_t last = 0;
+    const uint8_t *payload = NULL;
+    size_t len = 0;
+    int dispose = 0;
+
+    CHECK(writer != NULL);
+    if (!writer) {
+        return;
+    }
+    nb_rtps_reliable_seed(writer, 0xfffffffeull);
+    CHECK(nb_rtps_reliable_add(writer, "a", 1, 0, &sn) == NB_OK);
+    CHECK(sn == 0xffffffffull);
+    CHECK(nb_rtps_reliable_add(writer, "b", 1, 0, &sn) == NB_OK);
+    CHECK(sn == 0x100000000ull);
+    nb_rtps_reliable_state(writer, &first, &last, NULL);
+    CHECK(first == 0xffffffffull);
+    CHECK(last == 0x100000000ull);
+    CHECK(nb_rtps_reliable_get(writer, 0x100000000ull, &payload, &len, &dispose) == NB_OK);
+    CHECK(len == 1 && payload && payload[0] == 'b');
+    nb_rtps_reliable_writer_destroy(writer);
+
+    /* Reader window across the 2^32 boundary. */
+    nb_rtps_reader_state_reset(&reader, 0xffffffffull);
+    CHECK(nb_rtps_reader_on_sample(&reader, 0xffffffffull) == 1);
+    CHECK(reader.next_expected == 0x100000000ull);
+    CHECK(nb_rtps_reader_on_sample(&reader, 0x100000002ull) == 1);
+    CHECK(nb_rtps_reader_on_sample(&reader, 0x100000001ull) == 1);
+    CHECK(nb_rtps_reader_build_acknack(&reader, 0x100000002ull, &acknack) == 1);
+    CHECK(acknack.base.high == 1 && acknack.base.low == 0);
+    CHECK(acknack.num_bits == 3);
+    CHECK((acknack.bitmap[0] & 0x80000000u) != 0);
+    CHECK(nb_rtps_reader_on_sample(&reader, 0x100000000ull) == 1);
+    CHECK(reader.next_expected == 0x100000003ull);
+}
+
+
+static void test_sequence_number_wire(void)
+{
+    uint8_t message[128];
+    nb_rtps_header_t header;
+    nb_rtps_data_t data;
+    nb_rtps_data_view_t view;
+    nb_cdr_writer_t writer;
+    nb_rtps_submessage_view_t sub;
+    size_t offset = 0;
+    static const uint8_t body[4] = {0, 1, 0, 0};
+
+    memset(&header, 0, sizeof(header));
+    header.version_major = NB_RTPS_PROTOCOL_VERSION_MAJOR;
+    header.version_minor = NB_RTPS_PROTOCOL_VERSION_MINOR;
+    header.vendor_id[0] = NB_RTPS_VENDOR_ID_0;
+    header.vendor_id[1] = NB_RTPS_VENDOR_ID_1;
+    memset(&data, 0, sizeof(data));
+    data.writer_sn.high = 1;
+    data.writer_sn.low = 2;
+    data.payload = body;
+    data.payload_len = sizeof(body);
+
+    CHECK(nb_rtps_message_init(&writer, message, sizeof(message), &header) == NB_OK);
+    CHECK(nb_rtps_data(&writer, &data) == NB_OK);
+    CHECK(nb_cdr_writer_ok(&writer));
+    CHECK(nb_rtps_message_begin(
+              message, nb_cdr_writer_len(&writer), &header, &offset) == NB_OK);
+    CHECK(nb_rtps_message_next(message, nb_cdr_writer_len(&writer), &offset, &sub) == 1);
+    CHECK(sub.id == NB_RTPS_SUBMSG_DATA);
+    CHECK(nb_rtps_data_decode(sub.flags, sub.body, sub.body_len, &view) == NB_OK);
+    CHECK(nb_rtps_sn_to_u64(&view.writer_sn) == 0x100000002ull);
+}
+
 int main(void)
 {
     test_cdr_roundtrip();
@@ -887,6 +1010,9 @@ int main(void)
     test_participant_message_data();
     test_inline_qos_status();
     test_info_ts_roundtrip();
+    test_info_dst_src_roundtrip();
+    test_sequence_number_64();
+    test_sequence_number_wire();
     test_sedp_payload_bound();
     test_gap();
     test_spdp_roundtrip();

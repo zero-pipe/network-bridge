@@ -171,6 +171,37 @@ int nb_rtps_info_ts_decode(uint8_t flags, const uint8_t *body, size_t body_len,
     return NB_OK;
 }
 
+int nb_rtps_info_dst_decode(uint8_t flags,
+                            const uint8_t *body,
+                            size_t body_len,
+                            nb_rtps_guid_prefix_t *out)
+{
+    if (!body || !out || body_len < NB_RTPS_GUID_PREFIX_SIZE) {
+        return NB_ERR_BAD_MESSAGE;
+    }
+    if ((flags & NB_RTPS_FLAG_ENDIAN_LITTLE) == 0) {
+        return NB_ERR_NOT_SUPPORTED;
+    }
+    memcpy(out->bytes, body, NB_RTPS_GUID_PREFIX_SIZE);
+    return NB_OK;
+}
+
+int nb_rtps_info_src_decode(uint8_t flags,
+                            const uint8_t *body,
+                            size_t body_len,
+                            nb_rtps_guid_prefix_t *out)
+{
+    /* INFO_SRC: unused(4) + GuidPrefix(12). */
+    if (!body || !out || body_len < 4u + NB_RTPS_GUID_PREFIX_SIZE) {
+        return NB_ERR_BAD_MESSAGE;
+    }
+    if ((flags & NB_RTPS_FLAG_ENDIAN_LITTLE) == 0) {
+        return NB_ERR_NOT_SUPPORTED;
+    }
+    memcpy(out->bytes, body + 4, NB_RTPS_GUID_PREFIX_SIZE);
+    return NB_OK;
+}
+
 int nb_rtps_info_dst(nb_cdr_writer_t *writer, const nb_rtps_guid_prefix_t *prefix)
 {
     size_t start;
@@ -183,6 +214,23 @@ int nb_rtps_info_dst(nb_cdr_writer_t *writer, const nb_rtps_guid_prefix_t *prefi
     if (start == SIZE_MAX) {
         return NB_ERR_TOOBIG;
     }
+    nb_cdr_put_bytes(writer, prefix->bytes, NB_RTPS_GUID_PREFIX_SIZE);
+    return nb_rtps_submessage_end(writer, start);
+}
+
+int nb_rtps_info_src(nb_cdr_writer_t *writer, const nb_rtps_guid_prefix_t *prefix)
+{
+    size_t start;
+
+    if (!writer || !prefix) {
+        return NB_ERR_INVALID;
+    }
+    start = nb_rtps_submessage_begin(writer, NB_RTPS_SUBMSG_INFO_SRC,
+                                     NB_RTPS_FLAG_ENDIAN_LITTLE);
+    if (start == SIZE_MAX) {
+        return NB_ERR_TOOBIG;
+    }
+    nb_cdr_put_u32(writer, 0); /* unused */
     nb_cdr_put_bytes(writer, prefix->bytes, NB_RTPS_GUID_PREFIX_SIZE);
     return nb_rtps_submessage_end(writer, start);
 }

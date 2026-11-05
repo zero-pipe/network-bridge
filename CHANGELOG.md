@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- RTPS standard-alignment work: the receive path now parses INFO_SRC and
+  INFO_DST and drops Entity Submessages addressed to another participant
+  (an all-zero destination prefix is treated as broadcast); sequence numbers
+  are 64-bit end to end internally while the wire keeps the standard high/low
+  halves; and `rtps_participant_config_t.standard_ports` / `participant_id`
+  select the DDSI PB/DG/PG port mapping (d0/d1/d3) with a separate user-data
+  unicast socket. The user-data multicast port (d2) is not allocated yet.
+  Unit tests cover INFO_DST/SRC round trips, sequence numbers crossing 2^32,
+  and the standard port formulas. The framework provider selects the same mode
+  with `rtps://<domain>?std&pid=<n>`. The Fast DDS probe also passes with
+  `standard_ports=1` (participant_id=10) in both directions.
+- `docs/rtps-standard-alignment.md` compares the in-tree RTPS implementation
+  against OMG DDSI-RTPS 2.5, section by section, and records the verified
+  Cyclone DDS matrix. Fast DDS 3.6.2 basic interoperability was verified
+  separately in both directions over UDPv4: default/best-effort and explicit
+  reliable QoS, 16 B, 1 KiB and 200 KiB payloads, DATA_FRAG reassembly,
+  TRANSIENT_LOCAL late join in both directions, publisher restart, and a
+  two-Fast-DDS-participant plus one-nb-participant case (the publisher waits
+  for `--matched 2`; the nb participant uses explicit unicast peers).
+  The remaining gaps (INFO_DST receive filtering, XTypes/TypeObject, IPv6
+  locators, multi-participant port mapping, content filters and group ordering)
+  are listed there. Fast DDS omits `PID_RELIABILITY` for its default reliable
+  writer; the project keeps the standard behavior (missing PID means
+  BEST_EFFORT) rather than adding a vendor-specific heuristic, so a Fast DDS
+  writer must announce a non-default max_blocking_time to match a reliable
+  reader. `tools/fastdds_interop/` keeps the manual probe sources and notes.
 - A standalone discovery library, `libntk_discovery`, that depends only on ntk.
   It exchanges opaque key/value pairs over UDP broadcast on one hop; the RPC
   framework uses service names as keys and peer endpoints as the value's

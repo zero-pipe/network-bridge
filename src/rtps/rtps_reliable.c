@@ -6,7 +6,7 @@
 #include <ntk.h>
 
 typedef struct nb_rtps_reliable_sample {
-    uint32_t sn;
+    uint64_t sn;
     uint8_t *payload;
     size_t len;
     int dispose;
@@ -28,7 +28,7 @@ struct nb_rtps_reliable_writer {
     size_t count;
     size_t head;
     size_t bytes;
-    uint32_t next_sn;
+    uint64_t next_sn;
 };
 
 /* Drop the oldest sample. The caller holds the writer lock. */
@@ -44,7 +44,7 @@ static void drop_oldest(nb_rtps_reliable_writer_t *writer)
     writer->count--;
 }
 
-static nb_rtps_reliable_sample_t *find_sample(nb_rtps_reliable_writer_t *writer, uint32_t sn)
+static nb_rtps_reliable_sample_t *find_sample(nb_rtps_reliable_writer_t *writer, uint64_t sn)
 {
     size_t i;
 
@@ -87,6 +87,16 @@ nb_rtps_reliable_writer_t *nb_rtps_reliable_writer_create(size_t capacity)
     return writer;
 }
 
+void nb_rtps_reliable_seed(nb_rtps_reliable_writer_t *writer, uint64_t next_sn)
+{
+    if (!writer) {
+        return;
+    }
+    ntk_mutex_lock(writer->lock);
+    writer->next_sn = next_sn;
+    ntk_mutex_unlock(writer->lock);
+}
+
 void nb_rtps_reliable_writer_destroy(nb_rtps_reliable_writer_t *writer)
 {
     size_t i;
@@ -108,7 +118,7 @@ int nb_rtps_reliable_add(nb_rtps_reliable_writer_t *writer,
                          const void *payload,
                          size_t len,
                          int dispose,
-                         uint32_t *out_sn)
+                         uint64_t *out_sn)
 {
     return nb_rtps_reliable_add_at(writer, payload, len, dispose, 0, out_sn);
 }
@@ -118,7 +128,7 @@ int nb_rtps_reliable_add_at(nb_rtps_reliable_writer_t *writer,
                             size_t len,
                             int dispose,
                             uint64_t source_ns,
-                            uint32_t *out_sn)
+                            uint64_t *out_sn)
 {
     return nb_rtps_reliable_add_instance(
         writer, payload, len, dispose, source_ns, NULL, 0, out_sn);
@@ -131,7 +141,7 @@ int nb_rtps_reliable_add_instance(nb_rtps_reliable_writer_t *writer,
                                   uint64_t source_ns,
                                   const uint8_t *handle,
                                   uint32_t status,
-                                  uint32_t *out_sn)
+                                  uint64_t *out_sn)
 {
     nb_rtps_reliable_sample_t *sample;
     uint8_t *copy = NULL;
@@ -177,7 +187,7 @@ int nb_rtps_reliable_add_instance(nb_rtps_reliable_writer_t *writer,
 }
 
 int nb_rtps_reliable_get(const nb_rtps_reliable_writer_t *writer,
-                         uint32_t sn,
+                         uint64_t sn,
                          const uint8_t **payload,
                          size_t *len,
                          int *dispose)
@@ -187,7 +197,7 @@ int nb_rtps_reliable_get(const nb_rtps_reliable_writer_t *writer,
 }
 
 int nb_rtps_reliable_get_instance(const nb_rtps_reliable_writer_t *writer,
-                                  uint32_t sn,
+                                  uint64_t sn,
                                   const uint8_t **payload,
                                   size_t *len,
                                   int *dispose,
@@ -229,7 +239,7 @@ int nb_rtps_reliable_get_instance(const nb_rtps_reliable_writer_t *writer,
 }
 
 int nb_rtps_reliable_sample_ms(const nb_rtps_reliable_writer_t *writer,
-                               uint32_t sn,
+                               uint64_t sn,
                                uint64_t *out_ms)
 {
     nb_rtps_reliable_sample_t *sample;
@@ -249,7 +259,7 @@ int nb_rtps_reliable_sample_ms(const nb_rtps_reliable_writer_t *writer,
 }
 
 int nb_rtps_reliable_source_ns(const nb_rtps_reliable_writer_t *writer,
-                               uint32_t sn,
+                               uint64_t sn,
                                uint64_t *out_ns)
 {
     nb_rtps_reliable_sample_t *sample;
@@ -269,12 +279,12 @@ int nb_rtps_reliable_source_ns(const nb_rtps_reliable_writer_t *writer,
 }
 
 void nb_rtps_reliable_state(const nb_rtps_reliable_writer_t *writer,
-                            uint32_t *first_sn,
-                            uint32_t *last_sn,
+                            uint64_t *first_sn,
+                            uint64_t *last_sn,
                             size_t *sample_count)
 {
-    uint32_t first;
-    uint32_t last;
+    uint64_t first;
+    uint64_t last;
     size_t count;
 
     if (!writer) {
@@ -315,20 +325,20 @@ int nb_rtps_reliable_process_acknack(nb_rtps_reliable_writer_t *writer,
     if (!writer || !acknack || !resend) {
         return NB_ERR_INVALID;
     }
-    if (acknack->num_bits > NB_RTPS_ACKNACK_MAX_BITS ||
-        acknack->base.high != 0) {
+    if (acknack->num_bits > NB_RTPS_ACKNACK_MAX_BITS) {
         return NB_ERR_NOT_SUPPORTED;
     }
+    uint64_t base = nb_rtps_sn_to_u64(&acknack->base);
 
     ntk_mutex_lock(writer->lock);
     for (i = 0; i < acknack->num_bits; i++) {
         nb_rtps_reliable_sample_t *sample;
-        uint32_t sn;
+        uint64_t sn;
 
         if ((acknack->bitmap[i / 32u] & (1u << (31u - (i % 32u)))) == 0) {
             continue;
         }
-        sn = acknack->base.low + i;
+        sn = base + i;
         sample = find_sample(writer, sn);
         if (!sample) {
             continue;
@@ -346,7 +356,7 @@ int nb_rtps_reliable_process_acknack(nb_rtps_reliable_writer_t *writer,
     return rc;
 }
 
-void nb_rtps_reader_state_reset(nb_rtps_reader_state_t *state, uint32_t first_sn)
+void nb_rtps_reader_state_reset(nb_rtps_reader_state_t *state, uint64_t first_sn)
 {
     if (!state) {
         return;
@@ -356,9 +366,9 @@ void nb_rtps_reader_state_reset(nb_rtps_reader_state_t *state, uint32_t first_sn
     state->ack_count = 0;
 }
 
-static void reader_mark_received(nb_rtps_reader_state_t *state, uint32_t sn)
+static void reader_mark_received(nb_rtps_reader_state_t *state, uint64_t sn)
 {
-    uint32_t offset;
+    uint64_t offset;
     uint32_t i;
 
     if (sn < state->next_expected) {
@@ -368,7 +378,7 @@ static void reader_mark_received(nb_rtps_reader_state_t *state, uint32_t sn)
     if (offset >= NB_RTPS_ACKNACK_MAX_BITS) {
         return;
     }
-    state->received[offset / 32u] |= 1u << (offset % 32u);
+    state->received[(size_t)(offset / 32u)] |= 1u << (offset % 32u);
     while ((state->received[0] & 1u) != 0) {
         for (i = 0; i + 1u < NB_RTPS_ACKNACK_MAX_WORDS; i++) {
             state->received[i] =
@@ -379,7 +389,7 @@ static void reader_mark_received(nb_rtps_reader_state_t *state, uint32_t sn)
     }
 }
 
-int nb_rtps_reader_on_sample(nb_rtps_reader_state_t *state, uint32_t sn)
+int nb_rtps_reader_on_sample(nb_rtps_reader_state_t *state, uint64_t sn)
 {
     uint32_t offset;
 
@@ -394,7 +404,7 @@ int nb_rtps_reader_on_sample(nb_rtps_reader_state_t *state, uint32_t sn)
         /* Too far ahead to track: deliver, but ask again on the next ACKNACK. */
         return 1;
     }
-    if ((state->received[offset / 32u] & (1u << (offset % 32u))) != 0) {
+    if ((state->received[(size_t)(offset / 32u)] & (1u << (offset % 32u))) != 0) {
         return 0;
     }
     reader_mark_received(state, sn);
@@ -404,38 +414,39 @@ int nb_rtps_reader_on_sample(nb_rtps_reader_state_t *state, uint32_t sn)
 void nb_rtps_reader_on_gap(nb_rtps_reader_state_t *state, const nb_rtps_gap_t *gap)
 {
     uint32_t i;
+    uint64_t gap_start;
+    uint64_t base;
 
     if (!state || !gap) {
         return;
     }
-    if (gap->gap_start.high != 0 || gap->base.high != 0) {
-        return;
-    }
+    gap_start = nb_rtps_sn_to_u64(&gap->gap_start);
+    base = nb_rtps_sn_to_u64(&gap->base);
     /* [gapStart, bitmapBase) is unavailable, as are the set bitmap bits
      * (RTPS 2.5 8.3.7.4). A writer that withdrew a contiguous range sends an
      * empty bitmap, which is the common case for our own writers. */
-    if (gap->base.low > gap->gap_start.low) {
-        uint32_t end = gap->base.low;
-        uint32_t sn;
+    if (base > gap_start) {
+        uint64_t end = base;
+        uint64_t sn;
 
-        if (end - gap->gap_start.low > NB_RTPS_ACKNACK_MAX_BITS) {
-            end = gap->gap_start.low + NB_RTPS_ACKNACK_MAX_BITS;
+        if (end - gap_start > NB_RTPS_ACKNACK_MAX_BITS) {
+            end = gap_start + NB_RTPS_ACKNACK_MAX_BITS;
         }
-        for (sn = gap->gap_start.low; sn < end; sn++) {
+        for (sn = gap_start; sn < end; sn++) {
             reader_mark_received(state, sn);
         }
     } else {
-        reader_mark_received(state, gap->gap_start.low);
+        reader_mark_received(state, gap_start);
     }
     for (i = 0; i < gap->num_bits; i++) {
         if ((gap->bitmap[i / 32u] & (1u << (31u - (i % 32u)))) == 0) {
             continue;
         }
-        reader_mark_received(state, gap->base.low + i);
+        reader_mark_received(state, base + i);
     }
 }
 
-int nb_rtps_reader_has_sample(const nb_rtps_reader_state_t *state, uint32_t sn)
+int nb_rtps_reader_has_sample(const nb_rtps_reader_state_t *state, uint64_t sn)
 {
     uint32_t offset;
 
@@ -449,15 +460,15 @@ int nb_rtps_reader_has_sample(const nb_rtps_reader_state_t *state, uint32_t sn)
     if (offset >= NB_RTPS_ACKNACK_MAX_BITS) {
         return 0;
     }
-    return (state->received[offset / 32u] & (1u << (offset % 32u))) != 0;
+    return (state->received[(size_t)(offset / 32u)] & (1u << (offset % 32u))) != 0;
 }
 
 uint32_t nb_rtps_reader_build_acknack(nb_rtps_reader_state_t *state,
-                                      uint32_t last_sn,
+                                      uint64_t last_sn,
                                       nb_rtps_acknack_t *acknack)
 {
     uint32_t missing = 0;
-    uint32_t base;
+    uint64_t base;
     uint32_t num_bits = 0;
     uint32_t i;
 
@@ -466,8 +477,7 @@ uint32_t nb_rtps_reader_build_acknack(nb_rtps_reader_state_t *state,
     }
     memset(acknack, 0, sizeof(*acknack));
     base = state->next_expected;
-    acknack->base.high = 0;
-    acknack->base.low = base;
+    nb_rtps_sn_from_u64(&acknack->base, base);
     if (last_sn >= base) {
         uint64_t span = (uint64_t)last_sn - (uint64_t)base + 1u;
 

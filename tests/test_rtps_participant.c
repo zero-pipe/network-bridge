@@ -217,6 +217,7 @@ static int send_gap_datagram(const nb_rtps_guid_prefix_t *dst_prefix,
 {
     ntk_socket *sock;
     uint8_t message[256];
+    (void)dst_prefix;
     nb_rtps_header_t header;
     nb_rtps_gap_t gap;
     nb_cdr_writer_t cdr;
@@ -247,7 +248,7 @@ static int send_gap_datagram(const nb_rtps_guid_prefix_t *dst_prefix,
     gap.num_bits = gap_bits;
     gap.bitmap[0] = gap_bitmap;
     if (nb_rtps_message_init(&cdr, message, sizeof(message), &header) == NB_OK &&
-        nb_rtps_info_dst(&cdr, dst_prefix) == NB_OK &&
+        nb_rtps_info_dst(&cdr, &reader->prefix) == NB_OK &&
         nb_rtps_gap(&cdr, &gap) == NB_OK && nb_cdr_writer_ok(&cdr)) {
         message_len = nb_cdr_writer_len(&cdr);
         if (ntk_socket_sendto(sock, message, message_len, "127.0.0.1", port) > 0) {
@@ -280,6 +281,7 @@ static int send_instance_datagram(const nb_rtps_guid_prefix_t *dst_prefix,
 {
     ntk_socket *sock;
     uint8_t message[256];
+    (void)dst_prefix;
     uint8_t key[4] = {0x00, 0x01, 0x00, 0x00};
     /* Encapsulated dds::Message with a one-byte payload. */
     uint8_t value[9] = {0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x42};
@@ -336,7 +338,7 @@ static int send_instance_datagram(const nb_rtps_guid_prefix_t *dst_prefix,
     data.dispose = status == 1;
     data.key = status != 0;
     if (nb_rtps_message_init(&cdr, message, sizeof(message), &header) == NB_OK &&
-        nb_rtps_info_dst(&cdr, dst_prefix) == NB_OK && nb_rtps_data(&cdr, &data) == NB_OK &&
+        nb_rtps_info_dst(&cdr, &reader->prefix) == NB_OK && nb_rtps_data(&cdr, &data) == NB_OK &&
         nb_cdr_writer_ok(&cdr)) {
         message_len = nb_cdr_writer_len(&cdr);
         if (ntk_socket_sendto(sock, message, message_len, "127.0.0.1", port) > 0) {
@@ -4413,6 +4415,43 @@ static void test_tcp_transport(void)
     ntk_mutex_destroy(data_state.lock);
 }
 
+static void test_standard_ports(void)
+{
+    nb_rtps_participant_config_t config;
+    nb_rtps_participant_t *participant;
+    nb_rtps_participant_info_t info;
+
+    memset(&config, 0, sizeof(config));
+    config.domain_id = 200;
+    config.bind_host = "0.0.0.0";
+    config.advertise_host = "127.0.0.1";
+    config.multicast_group = "239.255.0.1";
+    config.standard_ports = 1;
+    config.participant_id = 5;
+    config.announce_interval_ms = 100;
+    config.lease_ms = 1200;
+    config.name = "standard-ports";
+    config.max_remote_participants = 8;
+
+    participant = nb_rtps_participant_create(&config);
+    CHECK(participant != NULL);
+    if (!participant) {
+        return;
+    }
+    CHECK(nb_rtps_participant_start(participant) == NB_OK);
+    CHECK(nb_rtps_participant_local_info(participant, &info) == NB_OK);
+    /* PB=7400, DG=250, PG=2, d0=0, d1=10, d3=11:
+     *   SPDP multicast = 7400 + 250*200 + 0       = 57400
+     *   metatraffic    = 7400 + 250*200 + 10 + 10 = 57420
+     *   user unicast   = 7400 + 250*200 + 11 + 10 = 57421
+     */
+    CHECK(nb_rtps_participant_spdp_port(participant) == 57400);
+    CHECK(info.metatraffic_unicast.port == 57420);
+    CHECK(info.default_unicast.port == 57421);
+    nb_rtps_participant_stop(participant);
+    nb_rtps_participant_destroy(participant);
+}
+
 int main(void)
 {
     test_create_destroy();
@@ -4445,6 +4484,7 @@ int main(void)
     test_reliable_gap();
     test_reliable_reader_capacity();
     test_multicast();
+    test_standard_ports();
     if (g_fail) {
         nb_log_error("rtps participant tests failed");
         return 1;

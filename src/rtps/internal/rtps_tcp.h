@@ -44,8 +44,7 @@ typedef void (*nb_rtps_tcp_message_fn)(void *user,
                                        int index,
                                        const nb_rtps_header_t *header,
                                        const nb_rtps_submessage_view_t *view,
-                                       int *has_source_ts,
-                                       nb_rtps_time_t *source_ts);
+                                       nb_rtps_receiver_state_t *state);
 
 /* A connection became usable / went away. */
 typedef void (*nb_rtps_tcp_link_fn)(void *user, int index);

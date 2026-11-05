@@ -210,6 +210,34 @@ int nb_rtps_info_ts(nb_cdr_writer_t *writer, const nb_rtps_time_t *ts, bool inva
 int nb_rtps_info_ts_decode(uint8_t flags, const uint8_t *body, size_t body_len,
                            nb_rtps_time_t *out);
 int nb_rtps_info_dst(nb_cdr_writer_t *writer, const nb_rtps_guid_prefix_t *prefix);
+/* Write INFO_SRC (four unused octets followed by the GuidPrefix). */
+int nb_rtps_info_src(nb_cdr_writer_t *writer, const nb_rtps_guid_prefix_t *prefix);
+/* Decode INFO_DST / INFO_SRC. INFO_DST carries a 12-octet GuidPrefix;
+ * INFO_SRC carries four unused octets followed by the prefix. */
+int nb_rtps_info_dst_decode(uint8_t flags,
+                            const uint8_t *body,
+                            size_t body_len,
+                            nb_rtps_guid_prefix_t *out);
+int nb_rtps_info_src_decode(uint8_t flags,
+                            const uint8_t *body,
+                            size_t body_len,
+                            nb_rtps_guid_prefix_t *out);
+
+/*
+ * Per-message interpreter state. INFO_SRC / INFO_DST / INFO_TS apply to the
+ * Entity Submessages that follow them until the next one of the same kind (or
+ * the end of the RTPS message). The UDP and TCP receive paths both use this
+ * struct so their interpretation is identical.
+ */
+typedef struct nb_rtps_receiver_state {
+    int has_source_ts;
+    nb_rtps_time_t source_ts;
+    int has_source_prefix;
+    nb_rtps_guid_prefix_t source_prefix;
+    int has_dst_prefix;
+    nb_rtps_guid_prefix_t dst_prefix;
+} nb_rtps_receiver_state_t;
+
 
 int nb_rtps_data(nb_cdr_writer_t *writer, const nb_rtps_data_t *data);
 int nb_rtps_data_decode(uint8_t flags,

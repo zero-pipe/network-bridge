@@ -836,6 +836,8 @@ static int nb_rtps_op_create(const nb_transport_provider_options_t *options,
     uint16_t spdp_port = 0;
     uint16_t tcp_port = 0;
     int tcp_enabled = 0;
+    int standard_ports = 0;
+    uint32_t participant_id = 0;
     int domain = 0;
     size_t i;
 
@@ -895,7 +897,20 @@ static int nb_rtps_op_create(const nb_transport_provider_options_t *options,
             const char *separator = strchr(token, '&');
             size_t token_len = separator ? (size_t)(separator - token) : strlen(token);
 
-            if (token_len >= 3 && strncmp(token, "tcp", 3) == 0 &&
+            if (token_len == 3 && strncmp(token, "std", 3) == 0) {
+                standard_ports = 1;
+            } else if (token_len >= 4 && strncmp(token, "pid=", 4) == 0) {
+                char pid_text[12];
+                size_t digits = token_len - 4;
+
+                if (digits >= sizeof(pid_text)) {
+                    digits = sizeof(pid_text) - 1;
+                }
+                memcpy(pid_text, token + 4, digits);
+                pid_text[digits] = '\0';
+                participant_id = (uint32_t)strtoul(pid_text, NULL, 10);
+                standard_ports = 1;
+            } else if (token_len >= 3 && strncmp(token, "tcp", 3) == 0 &&
                 (token_len == 3 || token[3] == '=')) {
                 tcp_enabled = 1;
                 if (token_len > 4) {
@@ -934,6 +949,8 @@ static int nb_rtps_op_create(const nb_transport_provider_options_t *options,
     config.name = "nb-rtps";
     config.enable_tcp = tcp_enabled;
     config.tcp_port = tcp_port;
+    config.standard_ports = standard_ports;
+    config.participant_id = participant_id;
 
     if (rtps_participant_create(&config, &inst->participant) != RTPS_OK) {
         nb_log_error("rtps participant create failed for endpoint %s",

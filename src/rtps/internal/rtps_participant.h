@@ -105,6 +105,9 @@ typedef struct nb_rtps_participant_config {
      * the stream once the two sides have discovered each other. */
     int enable_tcp;
     uint16_t tcp_port;
+    /* Standard PB/DG/PG port mapping, see the public config. */
+    int standard_ports;
+    uint32_t participant_id;
 } nb_rtps_participant_config_t;
 
 /* Cumulative RTPS counters. They are also surfaced through nb_node_metrics()
@@ -249,7 +252,7 @@ int nb_rtps_participant_publish_instance(
 int nb_rtps_participant_reader_consumed(nb_rtps_participant_t *participant,
                                         const nb_rtps_guid_t *writer_guid,
                                         const nb_rtps_guid_t *reader_guid,
-                                        uint32_t sn);
+                                        uint64_t sn);
 
 /* Serialize dds::Message (sequence<octet> payload) with CDR_LE and publish it. */
 int nb_rtps_participant_publish_dds_message(

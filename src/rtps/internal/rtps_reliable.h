@@ -28,13 +28,16 @@ typedef struct nb_rtps_reliable_writer nb_rtps_reliable_writer_t;
 
 /* Called while the writer lock is held. Return NB_OK to continue. */
 typedef int (*nb_rtps_reliable_resend_fn)(void *user,
-                                          uint32_t sn,
+                                          uint64_t sn,
                                           const uint8_t *payload,
                                           size_t len,
                                           int dispose);
 
 nb_rtps_reliable_writer_t *nb_rtps_reliable_writer_create(size_t capacity);
 void nb_rtps_reliable_writer_destroy(nb_rtps_reliable_writer_t *writer);
+
+/* Test / restart helper: start the next add at next_sn + 1. Internal. */
+void nb_rtps_reliable_seed(nb_rtps_reliable_writer_t *writer, uint64_t next_sn);
 
 /* Append a sample. The sequence number starts at 1. When the history is full,
  * or when adding the sample would exceed NB_RTPS_RELIABLE_MAX_BYTES, the
@@ -45,7 +48,7 @@ int nb_rtps_reliable_add(nb_rtps_reliable_writer_t *writer,
                          const void *payload,
                          size_t len,
                          int dispose,
-                         uint32_t *out_sn);
+                         uint64_t *out_sn);
 
 /* Same, with the source timestamp to put on the wire. A retransmission must
  * carry the timestamp the sample was written with, otherwise a BY_SOURCE
@@ -56,7 +59,7 @@ int nb_rtps_reliable_add_at(nb_rtps_reliable_writer_t *writer,
                             size_t len,
                             int dispose,
                             uint64_t source_ns,
-                            uint32_t *out_sn);
+                            uint64_t *out_sn);
 
 /*
  * Same as nb_rtps_reliable_add_at, for a keyed sample: `handle` is the DDS
@@ -71,18 +74,18 @@ int nb_rtps_reliable_add_instance(nb_rtps_reliable_writer_t *writer,
                                   uint64_t source_ns,
                                   const uint8_t *handle,
                                   uint32_t status,
-                                  uint32_t *out_sn);
+                                  uint64_t *out_sn);
 
 /* Return a sample. The pointer is valid until the next add or destroy. */
 int nb_rtps_reliable_get(const nb_rtps_reliable_writer_t *writer,
-                         uint32_t sn,
+                         uint64_t sn,
                          const uint8_t **payload,
                          size_t *len,
                          int *dispose);
 
 /* Instance metadata stored with a sample by nb_rtps_reliable_add_instance. */
 int nb_rtps_reliable_get_instance(const nb_rtps_reliable_writer_t *writer,
-                                  uint32_t sn,
+                                  uint64_t sn,
                                   const uint8_t **payload,
                                   size_t *len,
                                   int *dispose,
@@ -92,18 +95,18 @@ int nb_rtps_reliable_get_instance(const nb_rtps_reliable_writer_t *writer,
 
 /* Wall-clock time at which a sample was added, for lifespan enforcement. */
 int nb_rtps_reliable_sample_ms(const nb_rtps_reliable_writer_t *writer,
-                               uint32_t sn,
+                               uint64_t sn,
                                uint64_t *out_ms);
 
 /* Source timestamp in nanoseconds, as recorded by nb_rtps_reliable_add_at. */
 int nb_rtps_reliable_source_ns(const nb_rtps_reliable_writer_t *writer,
-                               uint32_t sn,
+                               uint64_t sn,
                                uint64_t *out_ns);
 
 /* first_sn > last_sn when the history is empty. */
 void nb_rtps_reliable_state(const nb_rtps_reliable_writer_t *writer,
-                            uint32_t *first_sn,
-                            uint32_t *last_sn,
+                            uint64_t *first_sn,
+                            uint64_t *last_sn,
                             size_t *sample_count);
 
 /* Retransmit each sequence number whose bitmap bit is set. Sequence numbers
@@ -123,13 +126,13 @@ int nb_rtps_reliable_process_acknack(nb_rtps_reliable_writer_t *writer,
  * the samples that are still missing.
  */
 typedef struct nb_rtps_reader_state {
-    uint32_t next_expected;
+    uint64_t next_expected;
     uint32_t received[NB_RTPS_ACKNACK_MAX_WORDS];
     uint32_t ack_count;
 } nb_rtps_reader_state_t;
 
 /* Restart the window at first_sn (normally 1). */
-void nb_rtps_reader_state_reset(nb_rtps_reader_state_t *state, uint32_t first_sn);
+void nb_rtps_reader_state_reset(nb_rtps_reader_state_t *state, uint64_t first_sn);
 
 /*
  * Record a received sample. Returns 1 when the caller should deliver it, and 0
@@ -137,14 +140,14 @@ void nb_rtps_reader_state_reset(nb_rtps_reader_state_t *state, uint32_t first_sn
  * track. A sample too far ahead is reported as new but is not recorded; the
  * reader falls back to asking for it again through the next ACKNACK.
  */
-int nb_rtps_reader_on_sample(nb_rtps_reader_state_t *state, uint32_t sn);
+int nb_rtps_reader_on_sample(nb_rtps_reader_state_t *state, uint64_t sn);
 
 /* Mark the samples announced by a GAP as received without delivering them. */
 void nb_rtps_reader_on_gap(nb_rtps_reader_state_t *state, const nb_rtps_gap_t *gap);
 
 /* Whether sn has already been recorded, or lies below the window. Non-mutating;
  * used to observe that a sample was consumed without being delivered. */
-int nb_rtps_reader_has_sample(const nb_rtps_reader_state_t *state, uint32_t sn);
+int nb_rtps_reader_has_sample(const nb_rtps_reader_state_t *state, uint64_t sn);
 
 /*
  * Fill base, bitmap and count for an ACKNACK covering up to last_sn. Bits are
@@ -152,7 +155,7 @@ int nb_rtps_reader_has_sample(const nb_rtps_reader_state_t *state, uint32_t sn);
  * samples; a zero return still carries a valid, empty ACKNACK.
  */
 uint32_t nb_rtps_reader_build_acknack(nb_rtps_reader_state_t *state,
-                                      uint32_t last_sn,
+                                      uint64_t last_sn,
                                       nb_rtps_acknack_t *acknack);
 
 #endif /* NB_RTPS_RELIABLE_H */

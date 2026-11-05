@@ -49,6 +49,20 @@ typedef struct nb_rtps_sequence_number {
     uint32_t low;
 } nb_rtps_sequence_number_t;
 
+/* Canonical internal representation. The wire keeps the 64-bit RTPS
+ * SequenceNumber as two 32-bit halves; internally a single unsigned value is
+ * easier to compare and to advance across the 2^32 boundary. */
+static inline uint64_t nb_rtps_sn_to_u64(const nb_rtps_sequence_number_t *sn)
+{
+    return ((uint64_t)(uint32_t)sn->high << 32) | (uint64_t)sn->low;
+}
+
+static inline void nb_rtps_sn_from_u64(nb_rtps_sequence_number_t *sn, uint64_t value)
+{
+    sn->high = (int32_t)(uint32_t)(value >> 32);
+    sn->low = (uint32_t)value;
+}
+
 typedef struct nb_rtps_locator {
     int32_t kind;
     uint32_t port;

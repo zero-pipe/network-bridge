@@ -103,8 +103,8 @@ typedef struct rtps_sample_info {
     int64_t reception_timestamp_ns;
     /* DDS generationRank: how often the instance came back alive. */
     uint32_t generation_rank;
-    /* Low 32 bits of the writer sequence number. */
-    uint32_t writer_sn;
+    /* Writer sequence number (64-bit). */
+    uint64_t writer_sn;
 } rtps_sample_info_t;
 
 /*

@@ -316,12 +316,12 @@ RTPS（Real-Time Publish-Subscribe）说白了就是一套“在 UDP 上互相�
 <tr>
   <td>User traffic</td>
   <td>业务数据流量。</td>
-  <td>复用 metatraffic 的单播端口（不区分 d1/d3）</td>
+  <td>默认复用 metatraffic 单播端口；<code>standard_ports</code> 启用时用独立 d3 端口</td>
 </tr>
 <tr>
   <td>SequenceNumber</td>
   <td>每个 writer 自己的流水号，从 1 开始。</td>
-  <td>两个 32 位：high 恒 0，low 递增</td>
+  <td>线上 64 位（high/low）；内部按 64 位递增，可跨 2^32</td>
 </tr>
 <tr>
   <td>Lease</td>
@@ -535,9 +535,8 @@ INFO_TS 对它<strong>后面所有</strong>子消息生效，直到下一个 INF
 <p>
 单播 SEDP、用户数据、ACKNACK、HEARTBEAT 发送时都会带 INFO_DST，明确写给某个 participant；
 组播 SPDP 不带（它本来就是喊给所有人听的）。
-接收侧目前<strong>不按 INFO_DST 过滤</strong>：单播 socket 已经保证只收到发给本 participant 的包，
-组播 SPDP 永远不带该子消息。看到“写给别人”的 INFO_DST 时，本实现不会因此丢包——
-这是与规范的一处已知偏差，见第 11 章。
+接收侧会<strong>按 INFO_DST 过滤</strong>：目标前缀不是本 participant 的 Entity Submessage
+直接丢弃，全 0 前缀视为广播。TCP 连接在每条 RTPS 消息开始时重置该状态。
 </p>
 
 <h4>INFO_SRC（0x0c）/ INFO_REPLY（0x0f）</h4>
@@ -700,8 +699,8 @@ bitmapBase 绝不能为 0——Cyclone 会把整个 GAP 判为非法报文。</p
 
 <p>
 规范里它是 64 位有符号数，线上拆成 high（int32）+ low（uint32）。
-本实现永远只用到低 32 位，high 写 0，low 从 1 开始递增。
-解析时如果 high 不为 0，本实现会当成非法报文丢掉——因为它的历史里不可能有那么大的号。
+本实现内部统一用 <code>uint64_t</code> 表示，wire 上的 high/low 原样保留；
+writer 历史、reader 窗口和位图都能跨 2^32 边界推进。
 </p>
 
 <h4>时间与时长：秒 + 2⁻³² 秒</h4>
@@ -886,16 +885,17 @@ bitmap = 0xE0000000  ->  三个都收到了
 <tr><td>域 ID 范围</td><td>0 – 232</td><td>超过直接创建失败（端口会超过 65535）</td></tr>
 <tr><td>SPDP 组播端口</td><td><code>7400 + 250 × domain_id</code></td><td>规范里的 d0 偏移；domain 0 → 7400</td></tr>
 <tr><td>SPDP 组播地址</td><td><code>239.255.0.1</code></td><td>可通过配置改；置空字符串则关闭组播</td></tr>
-<tr><td>Metatraffic 单播端口</td><td>绑定端口 0 → 系统分配</td><td>实际值通过 SPDP 的 locator 通告出去</td></tr>
-<tr><td>User traffic 端口</td><td>复用上面那个单播端口</td><td>没有单独的 d1/d3，这一点和 Cyclone DDS 不同</td></tr>
+<tr><td>Metatraffic 单播端口</td><td>绑定端口 0 → 系统分配；<code>standard_ports</code> 时为 d1 + 2×participant_id</td><td>实际值通过 SPDP 的 locator 通告出去</td></tr>
+<tr><td>User traffic 端口</td><td>默认复用 metatraffic；<code>standard_ports</code> 时为独立 d3 + 2×participant_id</td><td>d2 用户组播端口尚未分配</td></tr>
 </tbody>
 </table>
 
 <div class="warn">
-<b>和“标准实现”的差异</b>
-RTPS 规范建议参与者使用 <code>d1 = 7400 + 250×d + 10</code> 这类固定偏移给用户数据。
-本实现<strong>不这么做</strong>：单播端口是临时的，靠发现报文互相告知。
-所以如果你拿 Wireshark 的“标准端口”过滤器去抓，很可能会漏包。
+<b>标准端口是可选模式</b>
+默认单播端口是临时的，靠发现报文互相告知；设置
+<code>standard_ports=1</code> 后按规范使用
+<code>d1 = 7400 + 250×domain + 10 + 2×participant_id</code> 和
+<code>d3 = ... + 11 + 2×participant_id</code>。Wireshark 按标准端口过滤时请开启该模式。
 </div>
 
 <h3>4.2 组播的细节</h3>
@@ -1513,7 +1513,7 @@ has_peer  = 1</code></pre>
 <ol>
   <li>拆消息头，逐个子消息走。</li>
   <li>INFO_TS：记住时间戳，给后面的 DATA 用。</li>
-  <li>INFO_DST：本实现发送时会写，但接收侧目前不据此过滤（单播 socket 已保证包是给自己的）。</li>
+  <li>INFO_DST：记录目标前缀；后续 Entity Submessage 不是发给本 participant 就丢弃，全 0 视为广播。</li>
   <li>DATA：看 <code>readerId</code>，是全 0 或自己的实体才处理。</li>
   <li>找匹配的本地 reader：topic、type、QoS 都要过（和 SEDP 匹配用的是同一套规则）。</li>
   <li>可靠 reader 用 256 位窗口去重；样本按到达顺序交付（不做全局重排），best effort 直接交付。</li>

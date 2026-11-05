@@ -49,6 +49,15 @@ typedef struct rtps_participant_config {
     uint32_t max_remote_participants; /* 0 = 1024 */
     uint32_t max_local_endpoints;     /* 0 = 1024 */
     uint32_t max_remote_endpoints;    /* 0 = 4096 */
+    /* Standard RTPS port mapping (RTPS 2.5 9.6.1.4): PB=7400, DG=250, PG=2,
+     * d0=0, d1=10, d2=1, d3=11. When non-zero and multicast is enabled, the
+     * SPDP multicast port is PB + DG*domain + d0, metatraffic unicast is
+     * PB + DG*domain + d1 + PG*participant_id, and user unicast is
+     * PB + DG*domain + d3 + PG*participant_id. Explicit spdp_port /
+     * unicast_port still override the corresponding value. Requires multicast;
+     * unicast-only participants keep using explicit or ephemeral ports. */
+    int standard_ports;
+    uint32_t participant_id; /* 0..N; used only with standard_ports */
     /* Log every datagram (first 48 octets) at debug level. */
     int dump_frames;
 } rtps_participant_config_t;

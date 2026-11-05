@@ -88,6 +88,7 @@ int main(void)
 | [示例](docs/examples.md) | 按场景索引 |
 | [测试](docs/testing.md) | unit / e2e / perf / stability / fuzz 门禁 |
 | [性能](docs/performance.md) | 延迟测量方法与尖峰分析 |
+| [RTPS 标准对照](docs/rtps-standard-alignment.md) | 对照 RTPS 2.5 的实现程度与 Cyclone/Fast DDS 互通评估 |
 
 ### 头文件
 
