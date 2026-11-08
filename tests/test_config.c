@@ -1,4 +1,5 @@
 #include <nb/config.h>
+#include <nb/transport_provider.h>
 
 #define NB_LOG_TAG "test"
 #include <nb/log.h>
@@ -11,7 +12,7 @@ static int g_fail;
 #define CHECK(cond)                                                     \
     do {                                                                \
         if (!(cond)) {                                                  \
-            nb_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond); \
+            nb_log_error("FAIL %s:%d: %s", __FILE__, __LINE__, #cond);  \
             g_fail = 1;                                                 \
         }                                                               \
     } while (0)
@@ -19,21 +20,21 @@ static int g_fail;
 static void test_nested(void)
 {
     const char *json = "{"
-                       "\"name\":\"nested\",\"mode\":\"static\","
+                       "\"name\":\"nested\","
                        "\"runtime\":{\"io_threads\":2,\"handler_threads\":3,"
                        "\"handler_max_concurrency\":64,\"max_inflight\":100,"
                        "\"max_streams\":8,\"peer_rate_limit_pps\":10,\"send_lanes\":1},"
-                       "\"transport\":{\"kind\":\"tcp\",\"bind_host\":\"127.0.0.1\","
+                       "\"rpc\":{\"mode\":\"static\",\"kind\":\"tcp\",\"bind_host\":\"127.0.0.1\","
                        "\"data_port\":9000,\"frag_bytes\":1024,\"max_msg_bytes\":4194304,"
                        "\"backpressure_bytes\":8192,\"rtcp_interval_ms\":2000,\"disable_rtcp\":true,"
-                       "\"bindings\":[\"tcp://127.0.0.1:9000\"]},"
-                       "\"discovery\":{\"mode\":\"static\",\"broadcast\":\"127.0.0.1:41953\","
+                       "\"discovery\":{\"broadcast\":\"127.0.0.1:41953\","
                        "\"hello_interval_ms\":500,\"node_ttl_ms\":9000,"
                        "\"peers\":[\"10.0.0.1:41953\"]},"
+                       "\"routes\":[{\"service\":\"echo\",\"endpoint\":\"tcp://10.0.0.2:9001\"}]},"
+                       "\"bindings\":[\"tcp://127.0.0.1:9000\"],"
                        "\"metrics\":{\"disable\":true,\"disable_latency_histogram\":true,"
                        "\"sample_every\":5},"
-                       "\"log\":{\"disable\":true,\"level\":\"debug\"},"
-                       "\"routes\":[{\"service\":\"echo\",\"endpoint\":\"tcp://10.0.0.2:9001\"}]"
+                       "\"log\":{\"disable\":true,\"level\":\"debug\"}"
                        "}";
     nb_config_doc_t *cfg = NULL;
     const nb_node_config_t *n;
@@ -46,15 +47,15 @@ static void test_nested(void)
         return;
     }
     CHECK(strcmp(n->name, "nested") == 0);
-    CHECK(n->transport.kind == NB_TRANSPORT_KIND_TCP);
-    CHECK(n->mode == NB_NODE_MODE_STATIC);
-    CHECK(strcmp(n->transport.bind_host, "127.0.0.1") == 0);
-    CHECK(n->transport.data_port == 9000);
-    CHECK(n->transport.frag_bytes == 1024);
-    CHECK(n->transport.max_msg_bytes == 4194304);
-    CHECK(n->transport.backpressure_bytes == 8192);
-    CHECK(n->transport.rtcp_interval_ms == 2000);
-    CHECK(n->transport.disable_rtcp == 1);
+    CHECK(n->rpc.kind == NB_TRANSPORT_KIND_TCP);
+    CHECK(n->rpc.mode == NB_NODE_MODE_STATIC);
+    CHECK(strcmp(n->rpc.bind_host, "127.0.0.1") == 0);
+    CHECK(n->rpc.data_port == 9000);
+    CHECK(n->rpc.frag_bytes == 1024);
+    CHECK(n->rpc.max_msg_bytes == 4194304);
+    CHECK(n->rpc.backpressure_bytes == 8192);
+    CHECK(n->rpc.rtcp_interval_ms == 2000);
+    CHECK(n->rpc.disable_rtcp == 1);
     CHECK(n->runtime.io_threads == 2);
     CHECK(n->runtime.handler_threads == 3);
     CHECK(n->runtime.handler_max_concurrency == 64);
@@ -62,22 +63,24 @@ static void test_nested(void)
     CHECK(n->runtime.max_streams == 8);
     CHECK(n->runtime.peer_rate_limit_pps == 10);
     CHECK(n->runtime.send_lanes == 1);
-    CHECK(n->discovery.disable == 1);
-    CHECK(strcmp(n->discovery.broadcast_host, "127.0.0.1") == 0);
-    CHECK(n->discovery.port == 41953);
-    CHECK(n->discovery.hello_interval_ms == 500);
-    CHECK(n->discovery.node_ttl_ms == 9000);
-    CHECK(n->peer_count == 1);
-    CHECK(strcmp(n->peers[0].host, "10.0.0.1") == 0);
-    CHECK(n->peers[0].port == 41953);
+    CHECK(n->rpc.discovery.disable == 1);
+    CHECK(strcmp(n->rpc.discovery.broadcast_host, "127.0.0.1") == 0);
+    CHECK(n->rpc.discovery.port == 41953);
+    CHECK(n->rpc.discovery.hello_interval_ms == 500);
+    CHECK(n->rpc.discovery.node_ttl_ms == 9000);
+    CHECK(n->rpc.peer_count == 1);
+    CHECK(strcmp(n->rpc.peers[0].host, "10.0.0.1") == 0);
+    CHECK(n->rpc.peers[0].port == 41953);
     CHECK(n->metrics.disable == 1);
     CHECK(n->metrics.disable_latency_histogram == 1);
     CHECK(n->metrics.sample_every == 5);
     CHECK(n->log.disable == 1);
     CHECK(n->log.level == NB_LOG_LEVEL_DEBUG);
-    CHECK(n->route_count == 1);
-    CHECK(strcmp(n->routes[0].service, "echo") == 0);
-    CHECK(strcmp(n->routes[0].endpoint, "tcp://10.0.0.2:9001") == 0);
+    CHECK(n->rpc.route_count == 1);
+    CHECK(strcmp(n->rpc.routes[0].service, "echo") == 0);
+    CHECK(strcmp(n->rpc.routes[0].endpoint, "tcp://10.0.0.2:9001") == 0);
+    CHECK(n->binding_count == 1);
+    CHECK(strcmp(n->bindings[0].endpoint, "tcp://127.0.0.1:9000") == 0);
     nb_config_doc_destroy(cfg);
 }
 
@@ -93,22 +96,22 @@ static void test_defaults(void)
         nb_config_doc_destroy(cfg);
         return;
     }
-    CHECK(n->transport.kind == NB_TRANSPORT_KIND_UDP);
-    CHECK(n->transport.frag_bytes == 1440);
-    CHECK(n->mode == NB_NODE_MODE_MESH);
-    CHECK(n->discovery.disable == 0);
+    CHECK(n->rpc.kind == NB_TRANSPORT_KIND_UDP);
+    CHECK(n->rpc.frag_bytes == 1440);
+    CHECK(n->rpc.mode == NB_NODE_MODE_MESH);
+    CHECK(n->rpc.discovery.disable == 0);
     CHECK(strcmp(n->name, "nb") == 0);
-    CHECK(strcmp(n->transport.bind_host, "0.0.0.0") == 0);
-    CHECK(strcmp(n->discovery.broadcast_host, "255.255.255.255") == 0);
-    CHECK(n->discovery.port == NB_DISCOVERY_PORT);
+    CHECK(strcmp(n->rpc.bind_host, "0.0.0.0") == 0);
+    CHECK(strcmp(n->rpc.discovery.broadcast_host, "255.255.255.255") == 0);
+    CHECK(n->rpc.discovery.port == NB_DISCOVERY_PORT);
     CHECK(n->metrics.sample_every == 1);
     CHECK(n->log.level == NB_LOG_LEVEL_INFO);
-    CHECK(n->transport.binding_count == 0);
-    CHECK(n->transport.bindings == NULL);
-    CHECK(n->peer_count == 0);
-    CHECK(n->route_count == 0);
-    CHECK(n->routes == NULL);
-    CHECK(n->peers == NULL);
+    CHECK(n->binding_count == 0);
+    CHECK(n->bindings == NULL);
+    CHECK(n->rpc.peer_count == 0);
+    CHECK(n->rpc.route_count == 0);
+    CHECK(n->rpc.routes == NULL);
+    CHECK(n->rpc.peers == NULL);
     nb_config_doc_destroy(cfg);
 }
 
@@ -126,16 +129,14 @@ static void test_bad_json(void)
 static void test_strict_validation(void)
 {
     static const char *bad[] = {
-        "{\"mode\":\"foo\"}",
-        "{\"mode\":\"STATIC\"}",
+        "{\"rpc\":{\"mode\":\"foo\"}}",
+        "{\"rpc\":{\"mode\":\"STATIC\"}}",
+        "{\"rpc\":{\"discovery\":[]}}",
+        "{\"rpc\":{\"discovery\":{\"broadcast\":\"bad\"}}}",
+        "{\"rpc\":{\"discovery\":{\"peers\":[\"bad\"]}}}",
+        "{\"rpc\":{\"routes\":[{\"service\":\"x\"}]}}",
+        "{\"rpc\":{\"routes\":[{\"service\":\"x\",\"endpoint\":\"bad\"}]}}",
         "{\"name\":42}",
-        "{\"routes\":[{\"service\":\"x\"}]}",
-        "{\"routes\":[{\"service\":\"x\",\"endpoint\":\"bad\"}]}",
-        "{\"discovery\":[]}",
-        "{\"discovery\":{\"broadcast\":\"bad\"}}",
-        "{\"discovery\":{\"peers\":[\"bad\"]}}",
-        "{\"discovery\":{\"mode\":\"foo\"}}",
-        "{\"discovery\":{\"mode\":\"on\"}}",
         "{\"runtime\":[]}",
         "{\"runtime\":{\"io_threads\":\"2\"}}",
         "{\"runtime\":{\"io_threads\":2000}}",
@@ -143,23 +144,25 @@ static void test_strict_validation(void)
         "{\"runtime\":{\"handler_threads\":1025}}",
         "{\"runtime\":{\"send_lanes\":65}}",
         "{\"runtime\":{\"max_streams\":65}}",
-        "{\"transport\":[]}",
-        "{\"transport\":{\"kind\":\"sctp\"}}",
-        "{\"transport\":{\"kind\":\"TCP\"}}",
-        "{\"transport\":{\"data_port\":70000}}",
-        "{\"transport\":{\"frag_bytes\":70000}}",
-        "{\"transport\":{\"frag_bytes\":255}}",
-        "{\"transport\":{\"frag_bytes\":8193}}",
-        "{\"transport\":{\"max_msg_bytes\":67108865}}",
-        "{\"transport\":{\"max_msg_bytes\":1000}}",
-        "{\"transport\":{\"max_msg_bytes\":512,\"frag_bytes\":1024}}",
-        "{\"transport\":{\"disable_rtcp\":\"no\"}}",
-        "{\"transport\":{\"bindings\":\"tcp://127.0.0.1:1\"}}",
-        "{\"transport\":{\"bindings\":[\"not-a-uri\"]}}",
-        "{\"transport\":{\"bindings\":[{\"uri\":\"tcp://127.0.0.1:1\"}]}}",
-        "{\"transport\":{\"bindings\":[{\"name\":\"0123456789abcdef\","
-        "\"endpoint\":\"tcp://127.0.0.1:1\"}]}}",
-        "{\"transport\":{\"qos\":{\"depth\":1.5}}}",
+        "{\"rpc\":[]}",
+        "{\"rpc\":{\"kind\":\"sctp\"}}",
+        "{\"rpc\":{\"kind\":\"TCP\"}}",
+        "{\"rpc\":{\"data_port\":70000}}",
+        "{\"rpc\":{\"frag_bytes\":70000}}",
+        "{\"rpc\":{\"frag_bytes\":255}}",
+        "{\"rpc\":{\"frag_bytes\":8193}}",
+        "{\"rpc\":{\"max_msg_bytes\":67108865}}",
+        "{\"rpc\":{\"max_msg_bytes\":1000}}",
+        "{\"rpc\":{\"max_msg_bytes\":512,\"frag_bytes\":1024}}",
+        "{\"rpc\":{\"disable_rtcp\":\"no\"}}",
+        "{\"bindings\":\"tcp://127.0.0.1:1\"}",
+        "{\"bindings\":[\"not-a-uri\"]}",
+        "{\"bindings\":[{\"endpoint\":\"tcp://127.0.0.1:1\",\"roles\":[\"nope\"]}]}",
+        "{\"bindings\":[{\"endpoint\":\"tcp://127.0.0.1:1\",\"roles\":\"ps\"}]}",
+        "{\"bindings\":[{\"uri\":\"tcp://127.0.0.1:1\"}]}",
+        "{\"bindings\":[{\"name\":\"0123456789abcdef\",\"endpoint\":\"tcp://127.0.0.1:1\"}]}",
+        "{\"bindings\":[{\"endpoint\":\"tcp://127.0.0.1:1\",\"ps_qos\":{\"depth\":1.5}}]}",
+        "{\"pubsub\":{\"default_qos\":{\"depth\":1.5}}}",
         "{\"metrics\":\"off\"}",
         "{\"log\":{\"level\":\"nope\"}}",
     };
@@ -201,34 +204,15 @@ static void test_discovery_mode(void)
     nb_config_doc_t *cfg = NULL;
     const nb_node_config_t *n;
 
-    CHECK(nb_config_parse("{\"mode\":\"static\"}", &cfg, NULL) == NB_OK);
+    CHECK(nb_config_parse("{\"rpc\":{\"mode\":\"static\"}}", &cfg, NULL) == NB_OK);
     n = nb_config_node(cfg);
-    CHECK(n != NULL && n->mode == NB_NODE_MODE_STATIC && n->discovery.disable == 1);
+    CHECK(n != NULL && n->rpc.mode == NB_NODE_MODE_STATIC && n->rpc.discovery.disable == 1);
     nb_config_doc_destroy(cfg);
 
     cfg = NULL;
-    CHECK(nb_config_parse("{\"discovery\":{\"mode\":\"off\"}}", &cfg, NULL) == NB_OK);
+    CHECK(nb_config_parse("{\"rpc\":{\"mode\":\"mesh\"}}", &cfg, NULL) == NB_OK);
     n = nb_config_node(cfg);
-    CHECK(n != NULL && n->mode == NB_NODE_MODE_STATIC && n->discovery.disable == 1);
-    nb_config_doc_destroy(cfg);
-
-    cfg = NULL;
-    CHECK(nb_config_parse("{\"discovery\":{\"mode\":\"none\"}}", &cfg, NULL) == NB_OK);
-    n = nb_config_node(cfg);
-    CHECK(n != NULL && n->mode == NB_NODE_MODE_STATIC);
-    nb_config_doc_destroy(cfg);
-
-    cfg = NULL;
-    CHECK(nb_config_parse("{\"discovery\":{\"mode\":\"mesh\"}}", &cfg, NULL) == NB_OK);
-    n = nb_config_node(cfg);
-    CHECK(n != NULL && n->mode == NB_NODE_MODE_MESH && n->discovery.disable == 0);
-    nb_config_doc_destroy(cfg);
-
-    cfg = NULL;
-    CHECK(nb_config_parse("{\"mode\":\"static\",\"discovery\":{\"mode\":\"mesh\"}}", &cfg, NULL) ==
-          NB_OK);
-    n = nb_config_node(cfg);
-    CHECK(n != NULL && n->mode == NB_NODE_MODE_STATIC && n->discovery.disable == 1);
+    CHECK(n != NULL && n->rpc.mode == NB_NODE_MODE_MESH && n->rpc.discovery.disable == 0);
     nb_config_doc_destroy(cfg);
 }
 
@@ -258,15 +242,14 @@ static void test_endpoint_model(void)
 static void test_qos_config(void)
 {
     const char *json = "{"
-                       "\"transport\":{"
-                       "\"qos\":{\"reliability\":\"reliable\",\"durability\":\"transient_local\","
+                       "\"pubsub\":{\"default_qos\":{"
+                       "\"reliability\":\"reliable\",\"durability\":\"transient_local\","
                        "\"history\":\"keep_last\",\"depth\":8,\"deadline_ms\":250,"
                        "\"lifespan_ms\":1000,\"liveliness\":\"manual_by_topic\","
                        "\"lease_duration_ms\":2000,\"ownership\":\"exclusive\","
-                       "\"partition\":\"orders\"},"
+                       "\"partition\":\"orders\"}},"
                        "\"bindings\":[{\"name\":\"dds\",\"endpoint\":\"dds://0:1\","
-                       "\"qos\":{\"reliability\":\"best_effort\",\"history\":\"keep_all\"}}]"
-                       "}"
+                       "\"ps_qos\":{\"reliability\":\"best_effort\",\"history\":\"keep_all\"}}]"
                        "}";
     nb_config_doc_t *cfg = NULL;
     nb_config_error_t err;
@@ -276,53 +259,54 @@ static void test_qos_config(void)
     n = nb_config_node(cfg);
     CHECK(n != NULL);
     if (n) {
-        CHECK(n->transport.qos.reliability == NB_QOS_RELIABILITY_RELIABLE);
-        CHECK(n->transport.qos.durability == NB_QOS_DURABILITY_TRANSIENT_LOCAL);
-        CHECK(n->transport.qos.history == NB_QOS_HISTORY_KEEP_LAST);
-        CHECK(n->transport.qos.depth == 8);
-        CHECK(n->transport.qos.deadline_ms == 250);
-        CHECK(n->transport.qos.lifespan_ms == 1000);
-        CHECK(n->transport.qos.liveliness == NB_QOS_LIVELINESS_MANUAL_BY_TOPIC);
-        CHECK(n->transport.qos.lease_duration_ms == 2000);
-        CHECK(n->transport.qos.ownership == NB_QOS_OWNERSHIP_EXCLUSIVE);
-        CHECK(strcmp(n->transport.qos.partition, "orders") == 0);
-        CHECK(n->transport.binding_count == 1);
-        CHECK(n->transport.bindings[0].qos.reliability == NB_QOS_RELIABILITY_BEST_EFFORT);
-        CHECK(n->transport.bindings[0].qos.history == NB_QOS_HISTORY_KEEP_ALL);
+        CHECK(n->pubsub.default_qos.reliability == NB_QOS_RELIABILITY_RELIABLE);
+        CHECK(n->pubsub.default_qos.durability == NB_QOS_DURABILITY_TRANSIENT_LOCAL);
+        CHECK(n->pubsub.default_qos.history == NB_QOS_HISTORY_KEEP_LAST);
+        CHECK(n->pubsub.default_qos.depth == 8);
+        CHECK(n->pubsub.default_qos.deadline_ms == 250);
+        CHECK(n->pubsub.default_qos.lifespan_ms == 1000);
+        CHECK(n->pubsub.default_qos.liveliness == NB_QOS_LIVELINESS_MANUAL_BY_TOPIC);
+        CHECK(n->pubsub.default_qos.lease_duration_ms == 2000);
+        CHECK(n->pubsub.default_qos.ownership == NB_QOS_OWNERSHIP_EXCLUSIVE);
+        CHECK(strcmp(n->pubsub.default_qos.partition, "orders") == 0);
+        CHECK(n->binding_count == 1);
+        CHECK(n->bindings[0].ps_qos.reliability == NB_QOS_RELIABILITY_BEST_EFFORT);
+        CHECK(n->bindings[0].ps_qos.history == NB_QOS_HISTORY_KEEP_ALL);
     }
     nb_config_doc_destroy(cfg);
 
     cfg = NULL;
     memset(&err, 0, sizeof(err));
-    CHECK(nb_config_parse("{\"transport\":{\"qos\":{\"reliability\":\"sometimes\"}}}",
+    CHECK(nb_config_parse("{\"pubsub\":{\"default_qos\":{\"reliability\":\"sometimes\"}}}",
                           &cfg,
                           &err) == NB_ERR_INVALID);
-    CHECK(strcmp(err.path, "transport.qos.reliability") == 0);
+    CHECK(strcmp(err.path, "pubsub.default_qos.reliability") == 0);
 
     cfg = NULL;
     memset(&err, 0, sizeof(err));
-    CHECK(nb_config_parse("{\"transport\":{\"qos\":{\"depth\":1.5}}}", &cfg, &err) ==
+    CHECK(nb_config_parse("{\"pubsub\":{\"default_qos\":{\"depth\":1.5}}}", &cfg, &err) ==
           NB_ERR_INVALID);
-    CHECK(strcmp(err.path, "transport.qos.depth") == 0);
+    CHECK(strcmp(err.path, "pubsub.default_qos.depth") == 0);
 
     cfg = NULL;
     memset(&err, 0, sizeof(err));
-    CHECK(nb_config_parse("{\"transport\":{\"bindings\":[{\"endpoint\":\"tcp://127.0.0.1:1\","
-                          "\"qos\":{\"history\":\"nope\"}}]}}",
+    CHECK(nb_config_parse("{\"bindings\":[{\"endpoint\":\"tcp://127.0.0.1:1\","
+                          "\"ps_qos\":{\"history\":\"nope\"}}]}",
                           &cfg,
                           &err) == NB_ERR_INVALID);
-    CHECK(strcmp(err.path, "transport.bindings[0].qos.history") == 0);
+    CHECK(strcmp(err.path, "bindings[0].ps_qos.history") == 0);
 }
 
 static void test_binding_config(void)
 {
-    const char *json = "{\"name\":\"dual\",\"mode\":\"static\","
-                       "\"transport\":{\"bindings\":["
+    const char *json = "{\"name\":\"dual\","
+                       "\"bindings\":["
                        "{\"name\":\"tcp\",\"endpoint\":\"tcp://127.0.0.1:8080\"},"
                        "{\"name\":\"udp\",\"endpoint\":\"udp://127.0.0.1:8081\","
-                       "\"poll_us\":250}]},"
+                       "\"roles\":[\"rpc\"],\"poll_us\":250}],"
+                       "\"rpc\":{\"mode\":\"static\","
                        "\"routes\":[{\"service\":\"order\","
-                       "\"endpoint\":\"tcp://127.0.0.1:9000\"}]}";
+                       "\"endpoint\":\"tcp://127.0.0.1:9000\"}]}}";
     nb_config_doc_t *cfg = NULL;
     const nb_node_config_t *n;
 
@@ -330,22 +314,23 @@ static void test_binding_config(void)
     n = nb_config_node(cfg);
     CHECK(n != NULL);
     if (n) {
-        CHECK(n->transport.binding_count == 2);
-        CHECK(strcmp(n->transport.bindings[0].name, "tcp") == 0);
-        CHECK(strcmp(n->transport.bindings[1].endpoint, "udp://127.0.0.1:8081") == 0);
-        CHECK(n->transport.bindings[0].poll_us == 0);
-        CHECK(n->transport.bindings[1].poll_us == 250);
-        CHECK(n->route_count == 1);
-        CHECK(strcmp(n->routes[0].endpoint, "tcp://127.0.0.1:9000") == 0);
+        CHECK(n->binding_count == 2);
+        CHECK(strcmp(n->bindings[0].name, "tcp") == 0);
+        CHECK(strcmp(n->bindings[1].endpoint, "udp://127.0.0.1:8081") == 0);
+        CHECK(n->bindings[0].poll_us == 0);
+        CHECK(n->bindings[1].poll_us == 250);
+        CHECK(n->bindings[1].roles == NB_PROVIDER_ROLE_RPC);
+        CHECK(n->rpc.route_count == 1);
+        CHECK(strcmp(n->rpc.routes[0].endpoint, "tcp://127.0.0.1:9000") == 0);
     }
     nb_config_doc_destroy(cfg);
 }
 
 static void test_nested_bindings(void)
 {
-    const char *json = "{\"transport\":{\"bindings\":["
+    const char *json = "{\"bindings\":["
                        "{\"name\":\"tcp\",\"endpoint\":\"tcp://127.0.0.1:8080\"},"
-                       "\"udp://127.0.0.1:8081\"]}}";
+                       "\"udp://127.0.0.1:8081\"]}";
     nb_config_doc_t *cfg = NULL;
     const nb_node_config_t *n;
 
@@ -353,10 +338,11 @@ static void test_nested_bindings(void)
     n = nb_config_node(cfg);
     CHECK(n != NULL);
     if (n) {
-        CHECK(n->transport.binding_count == 2);
-        CHECK(strcmp(n->transport.bindings[0].name, "tcp") == 0);
-        CHECK(strcmp(n->transport.bindings[1].name, "udp") == 0);
-        CHECK(strcmp(n->transport.bindings[1].endpoint, "udp://127.0.0.1:8081") == 0);
+        CHECK(n->binding_count == 2);
+        CHECK(strcmp(n->bindings[0].name, "tcp") == 0);
+        CHECK(strcmp(n->bindings[1].name, "udp") == 0);
+        CHECK(strcmp(n->bindings[1].endpoint, "udp://127.0.0.1:8081") == 0);
+        CHECK(n->bindings[1].roles == 0);
     }
     nb_config_doc_destroy(cfg);
 }
@@ -366,24 +352,24 @@ static void test_rtcp_config(void)
     nb_config_doc_t *cfg = NULL;
     const nb_node_config_t *n;
 
-    CHECK(nb_config_parse("{\"name\":\"r\",\"transport\":{\"rtcp_interval_ms\":2000}}", &cfg, NULL) ==
+    CHECK(nb_config_parse("{\"name\":\"r\",\"rpc\":{\"rtcp_interval_ms\":2000}}", &cfg, NULL) ==
           NB_OK);
     n = nb_config_node(cfg);
-    CHECK(n != NULL && n->transport.rtcp_interval_ms == 2000 && n->transport.disable_rtcp == 0);
+    CHECK(n != NULL && n->rpc.rtcp_interval_ms == 2000 && n->rpc.disable_rtcp == 0);
     nb_config_doc_destroy(cfg);
 
     cfg = NULL;
-    CHECK(nb_config_parse("{\"name\":\"r\",\"transport\":{\"disable_rtcp\":false}}", &cfg, NULL) ==
+    CHECK(nb_config_parse("{\"name\":\"r\",\"rpc\":{\"disable_rtcp\":false}}", &cfg, NULL) ==
           NB_OK);
     n = nb_config_node(cfg);
-    CHECK(n != NULL && n->transport.disable_rtcp == 0);
+    CHECK(n != NULL && n->rpc.disable_rtcp == 0);
     nb_config_doc_destroy(cfg);
 
     cfg = NULL;
-    CHECK(nb_config_parse("{\"name\":\"r\",\"transport\":{\"disable_rtcp\":true}}", &cfg, NULL) ==
+    CHECK(nb_config_parse("{\"name\":\"r\",\"rpc\":{\"disable_rtcp\":true}}", &cfg, NULL) ==
           NB_OK);
     n = nb_config_node(cfg);
-    CHECK(n != NULL && n->transport.disable_rtcp == 1);
+    CHECK(n != NULL && n->rpc.disable_rtcp == 1);
     nb_config_doc_destroy(cfg);
 }
 
@@ -398,22 +384,24 @@ static void test_structured_errors(void)
     CHECK(err.reason[0] != '\0');
 
     memset(&err, 0, sizeof(err));
-    CHECK(nb_config_parse("{\"transport\":{\"frag_bytes\":70000}}", &cfg, &err) == NB_ERR_INVALID);
-    CHECK(strcmp(err.path, "transport.frag_bytes") == 0);
+    CHECK(nb_config_parse("{\"rpc\":{\"frag_bytes\":70000}}", &cfg, &err) == NB_ERR_INVALID);
+    CHECK(strcmp(err.path, "rpc.frag_bytes") == 0);
     CHECK(err.reason[0] != '\0');
 
     memset(&err, 0, sizeof(err));
-    CHECK(nb_config_parse("{\"mode\":\"nope\"}", &cfg, &err) == NB_ERR_INVALID);
-    CHECK(strcmp(err.path, "mode") == 0);
+    CHECK(nb_config_parse("{\"rpc\":{\"mode\":\"nope\"}}", &cfg, &err) == NB_ERR_INVALID);
+    CHECK(strcmp(err.path, "rpc.mode") == 0);
 
     memset(&err, 0, sizeof(err));
-    CHECK(nb_config_parse("{\"routes\":[{\"service\":\"x\",\"endpoint\":\"bad\"}]}", &cfg, &err) ==
+    CHECK(nb_config_parse("{\"rpc\":{\"routes\":[{\"service\":\"x\",\"endpoint\":\"bad\"}]}}",
+                          &cfg,
+                          &err) == NB_ERR_INVALID);
+    CHECK(strcmp(err.path, "rpc.routes[0].endpoint") == 0);
+
+    memset(&err, 0, sizeof(err));
+    CHECK(nb_config_parse("{\"rpc\":{\"discovery\":{\"peers\":[\"bad\"]}}}", &cfg, &err) ==
           NB_ERR_INVALID);
-    CHECK(strcmp(err.path, "routes[0].endpoint") == 0);
-
-    memset(&err, 0, sizeof(err));
-    CHECK(nb_config_parse("{\"discovery\":{\"peers\":[\"bad\"]}}", &cfg, &err) == NB_ERR_INVALID);
-    CHECK(strcmp(err.path, "discovery.peers[0]") == 0);
+    CHECK(strcmp(err.path, "rpc.discovery.peers[0]") == 0);
 
     memset(&err, 0, sizeof(err));
     CHECK(nb_config_parse("{ not json", &cfg, &err) == NB_ERR_INVALID);
@@ -425,14 +413,16 @@ static void test_defaults_api(void)
     nb_node_config_t cfg;
     nb_node_config_default(&cfg);
     CHECK(strcmp(cfg.name, "nb") == 0);
-    CHECK(cfg.mode == NB_NODE_MODE_MESH);
-    CHECK(cfg.transport.kind == NB_TRANSPORT_KIND_UDP);
-    CHECK(strcmp(cfg.transport.bind_host, "0.0.0.0") == 0);
-    CHECK(strcmp(cfg.discovery.broadcast_host, "255.255.255.255") == 0);
+    CHECK(cfg.rpc.mode == NB_NODE_MODE_MESH);
+    CHECK(cfg.rpc.kind == NB_TRANSPORT_KIND_UDP);
+    CHECK(strcmp(cfg.rpc.bind_host, "0.0.0.0") == 0);
+    CHECK(strcmp(cfg.rpc.discovery.broadcast_host, "255.255.255.255") == 0);
     CHECK(cfg.metrics.sample_every == 1);
     CHECK(cfg.log.level == NB_LOG_LEVEL_INFO);
-    CHECK(cfg.routes == NULL && cfg.route_count == 0);
-    CHECK(cfg.peers == NULL && cfg.peer_count == 0);
+    CHECK(cfg.rpc.routes == NULL && cfg.rpc.route_count == 0);
+    CHECK(cfg.rpc.peers == NULL && cfg.rpc.peer_count == 0);
+    CHECK(cfg.bindings == NULL && cfg.binding_count == 0);
+    CHECK(nb_ps_qos_is_default(&cfg.pubsub.default_qos));
 }
 
 static void test_normalize(void)
@@ -442,26 +432,26 @@ static void test_normalize(void)
     nb_node_config_default(&cfg);
     cfg.runtime.handler_threads = 5000;
     cfg.runtime.send_lanes = 5000;
-    cfg.transport.frag_bytes = 100;
-    cfg.transport.max_msg_bytes = 64;
+    cfg.rpc.frag_bytes = 100;
+    cfg.rpc.max_msg_bytes = 64;
     cfg.runtime.max_streams = 5000;
     CHECK(nb_node_config_validate(&cfg) == NB_ERR_INVALID);
     nb_node_config_normalize(&cfg);
     CHECK(cfg.runtime.handler_threads <= NB_MAX_HANDLER_THREADS);
     CHECK(cfg.runtime.send_lanes <= NB_MAX_SEND_LANES);
-    CHECK(cfg.transport.frag_bytes == 256);
-    CHECK(cfg.transport.max_msg_bytes == 256);
+    CHECK(cfg.rpc.frag_bytes == 256);
+    CHECK(cfg.rpc.max_msg_bytes == 256);
     CHECK(cfg.runtime.max_streams == NB_MAX_STREAM_RECV_STREAMS);
 
     nb_node_config_default(&cfg);
-    cfg.discovery.disable = true;
+    cfg.rpc.discovery.disable = true;
     nb_node_config_normalize(&cfg);
-    CHECK(cfg.mode == NB_NODE_MODE_STATIC);
+    CHECK(cfg.rpc.mode == NB_NODE_MODE_STATIC);
 
     nb_node_config_default(&cfg);
-    cfg.mode = NB_NODE_MODE_STATIC;
+    cfg.rpc.mode = NB_NODE_MODE_STATIC;
     nb_node_config_normalize(&cfg);
-    CHECK(cfg.discovery.disable == 1);
+    CHECK(cfg.rpc.discovery.disable == 1);
 
     nb_node_config_default(&cfg);
     cfg.log.level = NB_LOG_LEVEL_DEFAULT;
@@ -471,7 +461,7 @@ static void test_normalize(void)
 
 static void test_doc_lifetime(void)
 {
-    const char *json = "{\"name\":\"orig\",\"transport\":{\"bindings\":[\"tcp://127.0.0.1:1\"]}}";
+    const char *json = "{\"name\":\"orig\",\"bindings\":[\"tcp://127.0.0.1:1\"]}";
     nb_config_doc_t *cfg = NULL;
     const nb_node_config_t *n;
 
@@ -480,8 +470,8 @@ static void test_doc_lifetime(void)
     CHECK(n != NULL);
     if (n) {
         CHECK(strcmp(n->name, "orig") == 0);
-        CHECK(n->transport.binding_count == 1);
-        CHECK(strcmp(n->transport.bindings[0].endpoint, "tcp://127.0.0.1:1") == 0);
+        CHECK(n->binding_count == 1);
+        CHECK(strcmp(n->bindings[0].endpoint, "tcp://127.0.0.1:1") == 0);
     }
     nb_config_doc_destroy(cfg);
     CHECK(nb_config_node(NULL) == NULL);
@@ -518,7 +508,5 @@ int main(void)
         nb_log_error("config: FAIL");
         return 1;
     }
-    nb_log_info("config: NB_OK");
     return 0;
 }
-

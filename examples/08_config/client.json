@@ -1,18 +1,18 @@
 {
   "name": "echo-client",
-  "mode": "static",
   "runtime": {
     "io_threads": 1
   },
-  "transport": {
-    "bindings": [
-      "tcp://127.0.0.1:0"
+  "rpc": {
+    "mode": "static",
+    "routes": [
+      {
+        "service": "EchoService",
+        "endpoint": "tcp://127.0.0.1:42440"
+      }
     ]
   },
-  "routes": [
-    {
-      "service": "EchoService",
-      "endpoint": "tcp://127.0.0.1:42440"
-    }
+  "bindings": [
+    "tcp://127.0.0.1:0"
   ]
 }

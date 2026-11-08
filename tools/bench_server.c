@@ -138,15 +138,15 @@ int main(int argc, char **argv)
     block_options.echo_request = 1;
     nb_node_config_default(&node_cfg);
     node_cfg.name = "bench_server";
-    node_cfg.transport.bind_host = "127.0.0.1";
-    node_cfg.discovery.broadcast_host = "127.0.0.1";
-    node_cfg.discovery.port = NB_DISCOVERY_PORT;
+    node_cfg.rpc.bind_host = "127.0.0.1";
+    node_cfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    node_cfg.rpc.discovery.port = NB_DISCOVERY_PORT;
     node_cfg.runtime.io_threads = 0; /* 0 = auto (hardware_concurrency); O1: was 2 */
 
     for (index = 1; index < argc; ++index) {
         if (strcmp(argv[index], "--transport") == 0 && index + 1 < argc) {
             const char *t = argv[++index];
-            node_cfg.transport.kind =
+            node_cfg.rpc.kind =
                 (strcmp(t, "tcp") == 0 || strcmp(t, "TCP") == 0) ? NB_TRANSPORT_KIND_TCP : NB_TRANSPORT_KIND_UDP;
         } else if (strcmp(argv[index], "--io-threads") == 0 && index + 1 < argc) {
             node_cfg.runtime.io_threads = (unsigned)atoi(argv[++index]);
@@ -193,17 +193,17 @@ int main(int argc, char **argv)
         } else if (strcmp(argv[index], "--method") == 0 && index + 1 < argc) {
             method_name = argv[++index];
         } else if (strcmp(argv[index], "--bind") == 0 && index + 1 < argc) {
-            node_cfg.transport.bind_host = argv[++index];
+            node_cfg.rpc.bind_host = argv[++index];
         } else if (strcmp(argv[index], "--discovery-port") == 0 && index + 1 < argc) {
-            node_cfg.discovery.port = (uint16_t)atoi(argv[++index]);
+            node_cfg.rpc.discovery.port = (uint16_t)atoi(argv[++index]);
         } else if (strcmp(argv[index], "--data-port") == 0 && index + 1 < argc) {
-            node_cfg.transport.data_port = (uint16_t)atoi(argv[++index]);
+            node_cfg.rpc.data_port = (uint16_t)atoi(argv[++index]);
         } else if (strcmp(argv[index], "--max-msg-bytes") == 0 && index + 1 < argc) {
-            node_cfg.transport.max_msg_bytes = (uint32_t)strtoul(argv[++index], NULL, 10);
+            node_cfg.rpc.max_msg_bytes = (uint32_t)strtoul(argv[++index], NULL, 10);
         } else if (strcmp(argv[index], "--backpressure-bytes") == 0 && index + 1 < argc) {
-            node_cfg.transport.backpressure_bytes = (uint32_t)strtoul(argv[++index], NULL, 10);
+            node_cfg.rpc.backpressure_bytes = (uint32_t)strtoul(argv[++index], NULL, 10);
         } else if (strcmp(argv[index], "--frag-bytes") == 0 && index + 1 < argc) {
-            node_cfg.transport.frag_bytes = (uint16_t)atoi(argv[++index]);
+            node_cfg.rpc.frag_bytes = (uint16_t)atoi(argv[++index]);
         } else if (strcmp(argv[index], "--peer") == 0 && index + 1 < argc) {
             if (peer_count < 16) {
                 snprintf(peer_hosts[peer_count], sizeof(peer_hosts[0]), "%s", argv[++index]);
@@ -251,8 +251,8 @@ int main(int argc, char **argv)
         shm_binding.name = "shm";
         shm_binding.endpoint = shm_endpoint;
         shm_binding.intra_process = NB_INTRA_PROCESS_OFF;
-        node_cfg.transport.bindings = &shm_binding;
-        node_cfg.transport.binding_count = 1;
+        node_cfg.bindings = &shm_binding;
+        node_cfg.binding_count = 1;
         mode = NB_NODE_MODE_STATIC;
     } else if (use_dds) {
         if (nb_cyclone_dds_register() != NB_OK) {
@@ -264,8 +264,8 @@ int main(int argc, char **argv)
         dds_binding.name = "dds";
         dds_binding.endpoint = dds_endpoint;
         dds_binding.intra_process = NB_INTRA_PROCESS_OFF;
-        node_cfg.transport.bindings = &dds_binding;
-        node_cfg.transport.binding_count = 1;
+        node_cfg.bindings = &dds_binding;
+        node_cfg.binding_count = 1;
         mode = NB_NODE_MODE_STATIC;
     } else if (use_rtps) {
         if (nb_rtps_transport_register() != NB_OK) {
@@ -276,11 +276,11 @@ int main(int argc, char **argv)
         rtps_binding.name = "rtps";
         rtps_binding.endpoint = rtps_endpoint;
         rtps_binding.intra_process = NB_INTRA_PROCESS_OFF;
-        node_cfg.transport.bindings = &rtps_binding;
-        node_cfg.transport.binding_count = 1;
+        node_cfg.bindings = &rtps_binding;
+        node_cfg.binding_count = 1;
         mode = NB_NODE_MODE_STATIC;
     }
-    node_cfg.mode = mode;
+    node_cfg.rpc.mode = mode;
     rc = nb_node_create(&node_cfg, &node);
     if (rc != NB_OK) {
         nb_log_error("nb_node_create failed: %d", rc);

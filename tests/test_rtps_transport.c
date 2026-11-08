@@ -421,10 +421,10 @@ static void test_node_discovery_view(void)
     binding.endpoint = "rtps://5:47190";
     binding.intra_process = NB_INTRA_PROCESS_OFF;
     nb_node_config_default(&cfg);
-    cfg.mode = NB_NODE_MODE_STATIC;
+    cfg.rpc.mode = NB_NODE_MODE_STATIC;
     cfg.runtime.io_threads = 1;
-    cfg.transport.bindings = &binding;
-    cfg.transport.binding_count = 1;
+    cfg.bindings = &binding;
+    cfg.binding_count = 1;
     CHECK(nb_node_create(&cfg, &node) == NB_OK);
     if (!node) {
         return;
@@ -459,10 +459,10 @@ static void test_node_metrics_include_rtps(void)
     binding.endpoint = "rtps://6:47192";
     binding.intra_process = NB_INTRA_PROCESS_OFF;
     nb_node_config_default(&cfg);
-    cfg.mode = NB_NODE_MODE_STATIC;
+    cfg.rpc.mode = NB_NODE_MODE_STATIC;
     cfg.runtime.io_threads = 1;
-    cfg.transport.bindings = &binding;
-    cfg.transport.binding_count = 1;
+    cfg.bindings = &binding;
+    cfg.binding_count = 1;
     CHECK(nb_node_create(&cfg, &node) == NB_OK);
     if (!node) {
         return;

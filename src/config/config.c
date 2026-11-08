@@ -7,6 +7,7 @@
  */
 #include <nb/config.h>
 #include <nb/node.h>
+#include <nb/transport_provider.h>
 
 #define NB_LOG_TAG "config"
 #include <nb/log.h>
@@ -162,6 +163,7 @@ static int nb_cfg_qos_bool(const cJSON *qos,
 }
 
 static int nb_cfg_load_qos(const cJSON *parent,
+                           const char *key,
                            nb_ps_qos_t *out,
                            nb_config_error_t *err,
                            const char *path)
@@ -188,10 +190,10 @@ static int nb_cfg_load_qos(const cJSON *parent,
     const cJSON *partition;
     int rc;
 
-    if (!parent || !out) {
+    if (!parent || !out || !key) {
         return NB_ERR_INVALID;
     }
-    qos = cJSON_GetObjectItemCaseSensitive(parent, "qos");
+    qos = cJSON_GetObjectItemCaseSensitive(parent, key);
     if (!qos) {
         return NB_OK;
     }
@@ -317,15 +319,25 @@ void nb_node_runtime_config_default(nb_node_runtime_config_t *cfg)
     memset(cfg, 0, sizeof(*cfg));
 }
 
-void nb_node_transport_config_default(nb_node_transport_config_t *cfg)
+void nb_rpc_config_default(nb_rpc_config_t *cfg)
 {
     if (!cfg) {
         return;
     }
     memset(cfg, 0, sizeof(*cfg));
+    cfg->mode = NB_NODE_MODE_MESH;
     cfg->kind = NB_TRANSPORT_KIND_UDP;
     cfg->bind_host = NB_DEFAULT_BIND_HOST;
-    nb_ps_qos_init(&cfg->qos);
+    nb_node_discovery_config_default(&cfg->discovery);
+}
+
+void nb_pubsub_config_default(nb_pubsub_config_t *cfg)
+{
+    if (!cfg) {
+        return;
+    }
+    memset(cfg, 0, sizeof(*cfg));
+    nb_ps_qos_init(&cfg->default_qos);
 }
 
 void nb_node_discovery_config_default(nb_node_discovery_config_t *cfg)
@@ -362,10 +374,9 @@ void nb_node_config_default(nb_node_config_t *cfg)
     }
     memset(cfg, 0, sizeof(*cfg));
     cfg->name = NB_DEFAULT_NODE_NAME;
-    cfg->mode = NB_NODE_MODE_MESH;
     nb_node_runtime_config_default(&cfg->runtime);
-    nb_node_transport_config_default(&cfg->transport);
-    nb_node_discovery_config_default(&cfg->discovery);
+    nb_rpc_config_default(&cfg->rpc);
+    nb_pubsub_config_default(&cfg->pubsub);
     nb_node_metrics_config_default(&cfg->metrics);
     nb_node_log_config_default(&cfg->log);
 }
@@ -377,7 +388,7 @@ void nb_binding_config_default(nb_binding_config_t *cfg)
     }
     memset(cfg, 0, sizeof(*cfg));
     cfg->intra_process = NB_INTRA_PROCESS_OFF;
-    nb_ps_qos_init(&cfg->qos);
+    nb_ps_qos_init(&cfg->ps_qos);
 }
 
 void nb_node_config_normalize(nb_node_config_t *cfg)
@@ -388,20 +399,20 @@ void nb_node_config_normalize(nb_node_config_t *cfg)
     if (!cfg->name) {
         cfg->name = NB_DEFAULT_NODE_NAME;
     }
-    if (!cfg->transport.bind_host) {
-        cfg->transport.bind_host = NB_DEFAULT_BIND_HOST;
+    if (!cfg->rpc.bind_host) {
+        cfg->rpc.bind_host = NB_DEFAULT_BIND_HOST;
     }
-    if (!cfg->discovery.broadcast_host) {
-        cfg->discovery.broadcast_host = NB_DEFAULT_DISCOVERY_HOST;
+    if (!cfg->rpc.discovery.broadcast_host) {
+        cfg->rpc.discovery.broadcast_host = NB_DEFAULT_DISCOVERY_HOST;
     }
     /*
      * 顶层 mode 与 discovery.disable 是同一件事的两种写法，这里收敛为一个
      * 一致状态，避免出现“mode=mesh 但 discovery.disable=true”这种自相矛盾。
      */
-    if (cfg->mode == NB_NODE_MODE_STATIC) {
-        cfg->discovery.disable = true;
-    } else if (cfg->discovery.disable) {
-        cfg->mode = NB_NODE_MODE_STATIC;
+    if (cfg->rpc.mode == NB_NODE_MODE_STATIC) {
+        cfg->rpc.discovery.disable = true;
+    } else if (cfg->rpc.discovery.disable) {
+        cfg->rpc.mode = NB_NODE_MODE_STATIC;
     }
     if (!cfg->runtime.io_threads) {
         unsigned hw = ntk_thread_hardware_concurrency();
@@ -416,35 +427,35 @@ void nb_node_config_normalize(nb_node_config_t *cfg)
     if (cfg->runtime.send_lanes > NB_MAX_SEND_LANES) {
         cfg->runtime.send_lanes = NB_MAX_SEND_LANES;
     }
-    if (!cfg->transport.frag_bytes) {
-        cfg->transport.frag_bytes = NB_DEFAULT_FRAG_BYTES;
-    } else if (cfg->transport.frag_bytes < NB_DEFAULT_FRAG_MIN_BYTES) {
-        cfg->transport.frag_bytes = NB_DEFAULT_FRAG_MIN_BYTES;
-    } else if (cfg->transport.frag_bytes > NB_DEFAULT_FRAG_MAX_BYTES) {
-        cfg->transport.frag_bytes = NB_DEFAULT_FRAG_MAX_BYTES;
+    if (!cfg->rpc.frag_bytes) {
+        cfg->rpc.frag_bytes = NB_DEFAULT_FRAG_BYTES;
+    } else if (cfg->rpc.frag_bytes < NB_DEFAULT_FRAG_MIN_BYTES) {
+        cfg->rpc.frag_bytes = NB_DEFAULT_FRAG_MIN_BYTES;
+    } else if (cfg->rpc.frag_bytes > NB_DEFAULT_FRAG_MAX_BYTES) {
+        cfg->rpc.frag_bytes = NB_DEFAULT_FRAG_MAX_BYTES;
     }
-    if (!cfg->transport.max_msg_bytes) {
-        cfg->transport.max_msg_bytes = NB_DEFAULT_MAX_MSG_BYTES;
-    } else if (cfg->transport.max_msg_bytes > NB_GLOBAL_MAX_MSG_BYTES_LIMIT) {
-        cfg->transport.max_msg_bytes = NB_GLOBAL_MAX_MSG_BYTES_LIMIT;
+    if (!cfg->rpc.max_msg_bytes) {
+        cfg->rpc.max_msg_bytes = NB_DEFAULT_MAX_MSG_BYTES;
+    } else if (cfg->rpc.max_msg_bytes > NB_GLOBAL_MAX_MSG_BYTES_LIMIT) {
+        cfg->rpc.max_msg_bytes = NB_GLOBAL_MAX_MSG_BYTES_LIMIT;
     }
-    if (cfg->transport.max_msg_bytes < cfg->transport.frag_bytes) {
-        cfg->transport.max_msg_bytes = cfg->transport.frag_bytes;
+    if (cfg->rpc.max_msg_bytes < cfg->rpc.frag_bytes) {
+        cfg->rpc.max_msg_bytes = cfg->rpc.frag_bytes;
     }
-    if (!cfg->transport.backpressure_bytes) {
-        cfg->transport.backpressure_bytes = NB_DEFAULT_BACKPRESSURE_BYTES;
+    if (!cfg->rpc.backpressure_bytes) {
+        cfg->rpc.backpressure_bytes = NB_DEFAULT_BACKPRESSURE_BYTES;
     }
-    if (!cfg->transport.rtcp_interval_ms) {
-        cfg->transport.rtcp_interval_ms = NB_DEFAULT_RTCP_INTERVAL_MS;
+    if (!cfg->rpc.rtcp_interval_ms) {
+        cfg->rpc.rtcp_interval_ms = NB_DEFAULT_RTCP_INTERVAL_MS;
     }
-    if (!cfg->discovery.port) {
-        cfg->discovery.port = NB_DEFAULT_DISCOVERY_PORT;
+    if (!cfg->rpc.discovery.port) {
+        cfg->rpc.discovery.port = NB_DEFAULT_DISCOVERY_PORT;
     }
-    if (!cfg->discovery.hello_interval_ms) {
-        cfg->discovery.hello_interval_ms = NB_DEFAULT_HELLO_INTERVAL_MS;
+    if (!cfg->rpc.discovery.hello_interval_ms) {
+        cfg->rpc.discovery.hello_interval_ms = NB_DEFAULT_HELLO_INTERVAL_MS;
     }
-    if (!cfg->discovery.node_ttl_ms) {
-        cfg->discovery.node_ttl_ms = NB_DEFAULT_NODE_TTL_MS;
+    if (!cfg->rpc.discovery.node_ttl_ms) {
+        cfg->rpc.discovery.node_ttl_ms = NB_DEFAULT_NODE_TTL_MS;
     }
     if (!cfg->runtime.max_inflight) {
         cfg->runtime.max_inflight = NB_DEFAULT_MAX_INFLIGHT;
@@ -478,12 +489,12 @@ int nb_node_config_validate(const nb_node_config_t *cfg)
     if (!cfg) {
         return NB_ERR_INVALID;
     }
-    if (!cfg->transport.bind_host || !cfg->transport.bind_host[0]) {
+    if (!cfg->rpc.bind_host || !cfg->rpc.bind_host[0]) {
         return NB_ERR_INVALID;
     }
-    if (strlen(cfg->transport.bind_host) >= NB_HOST_MAX ||
+    if (strlen(cfg->rpc.bind_host) >= NB_HOST_MAX ||
         (cfg->name && strlen(cfg->name) >= NB_NAME_MAX) ||
-        (cfg->discovery.broadcast_host && strlen(cfg->discovery.broadcast_host) >= NB_HOST_MAX)) {
+        (cfg->rpc.discovery.broadcast_host && strlen(cfg->rpc.discovery.broadcast_host) >= NB_HOST_MAX)) {
         return NB_ERR_TOOBIG;
     }
     if (cfg->runtime.io_threads > NB_TRANSPORT_MAX_IO ||
@@ -492,27 +503,27 @@ int nb_node_config_validate(const nb_node_config_t *cfg)
         cfg->runtime.max_streams > NB_STREAM_MAX_RECV_STREAMS) {
         return NB_ERR_INVALID;
     }
-    if (cfg->transport.frag_bytes != 0 &&
-        (cfg->transport.frag_bytes < NB_DEFAULT_FRAG_MIN_BYTES ||
-         cfg->transport.frag_bytes > NB_DEFAULT_FRAG_MAX_BYTES)) {
+    if (cfg->rpc.frag_bytes != 0 &&
+        (cfg->rpc.frag_bytes < NB_DEFAULT_FRAG_MIN_BYTES ||
+         cfg->rpc.frag_bytes > NB_DEFAULT_FRAG_MAX_BYTES)) {
         return NB_ERR_INVALID;
     }
-    if (cfg->transport.max_msg_bytes > NB_GLOBAL_MAX_MSG_BYTES_LIMIT) {
+    if (cfg->rpc.max_msg_bytes > NB_GLOBAL_MAX_MSG_BYTES_LIMIT) {
         return NB_ERR_INVALID;
     }
-    if (cfg->transport.max_msg_bytes != 0 && cfg->transport.frag_bytes != 0 &&
-        cfg->transport.max_msg_bytes < cfg->transport.frag_bytes) {
+    if (cfg->rpc.max_msg_bytes != 0 && cfg->rpc.frag_bytes != 0 &&
+        cfg->rpc.max_msg_bytes < cfg->rpc.frag_bytes) {
         return NB_ERR_INVALID;
     }
     if (cfg->log.level != NB_LOG_LEVEL_DEFAULT &&
         (cfg->log.level < NB_LOG_LEVEL_ASSERT || cfg->log.level > NB_LOG_LEVEL_VERBOSE)) {
         return NB_ERR_INVALID;
     }
-    if (cfg->transport.binding_count > 0 && !cfg->transport.bindings) {
+    if (cfg->binding_count > 0 && !cfg->bindings) {
         return NB_ERR_INVALID;
     }
-    for (i = 0; i < cfg->transport.binding_count; i++) {
-        if (nb_ps_qos_validate(&cfg->transport.bindings[i].qos) != NB_OK) {
+    for (i = 0; i < cfg->binding_count; i++) {
+        if (nb_ps_qos_validate(&cfg->bindings[i].ps_qos) != NB_OK) {
             return NB_ERR_INVALID;
         }
     }
@@ -530,6 +541,7 @@ typedef struct nb_cfg_runtime_in {
 } nb_cfg_runtime_in_t;
 
 typedef struct nb_cfg_transport_in {
+    char *mode;
     char *kind;
     char *bind_host;
     uint32_t data_port;
@@ -541,7 +553,6 @@ typedef struct nb_cfg_transport_in {
 } nb_cfg_transport_in_t;
 
 typedef struct nb_cfg_discovery_in {
-    char *mode;
     char *broadcast;
     uint32_t hello_interval_ms;
     uint32_t node_ttl_ms;
@@ -592,6 +603,7 @@ static const nb_codec_json_model_t nb_g_runtime_model[] = {
 
 static const nb_codec_json_model_t nb_g_transport_model[] = {
     { NB_CODEC_JSON_OBJ, NULL, 0, 0, { .obj_size = sizeof(nb_cfg_transport_in_t) } },
+    { NB_CODEC_JSON_STRING, "mode", offsetof(nb_cfg_transport_in_t, mode), 0, { 0 } },
     { NB_CODEC_JSON_STRING, "kind", offsetof(nb_cfg_transport_in_t, kind), 0, { 0 } },
     { NB_CODEC_JSON_STRING, "bind_host", offsetof(nb_cfg_transport_in_t, bind_host), 0, { 0 } },
     { NB_CODEC_JSON_U32, "data_port", offsetof(nb_cfg_transport_in_t, data_port), 0, { 0 } },
@@ -612,7 +624,6 @@ static const nb_codec_json_model_t nb_g_transport_model[] = {
 
 static const nb_codec_json_model_t nb_g_discovery_model[] = {
     { NB_CODEC_JSON_OBJ, NULL, 0, 0, { .obj_size = sizeof(nb_cfg_discovery_in_t) } },
-    { NB_CODEC_JSON_STRING, "mode", offsetof(nb_cfg_discovery_in_t, mode), 0, { 0 } },
     { NB_CODEC_JSON_STRING, "broadcast", offsetof(nb_cfg_discovery_in_t, broadcast), 0, { 0 } },
     { NB_CODEC_JSON_U32,
       "hello_interval_ms",
@@ -905,71 +916,97 @@ static int nb_load_runtime(const cJSON *root, nb_cfg_runtime_in_t *in, nb_config
     return rc == NB_CODEC_OK ? NB_OK : nb_cfg_fill_error(err, "runtime", bad, rc);
 }
 
-static int nb_load_transport(const cJSON *root,
-                          nb_cfg_transport_in_t *in,
-                          const cJSON **bindings,
-                          nb_config_error_t *err)
+static int nb_load_rpc(const cJSON *root,
+                       nb_cfg_transport_in_t *in,
+                       nb_cfg_discovery_in_t *disc,
+                       const cJSON **routes,
+                       const cJSON **peers,
+                       nb_config_error_t *err)
 {
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, "transport");
-    static const char *const extra[] = {"bindings", "qos"};
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, "rpc");
+    const cJSON *disc_obj = NULL;
+    static const char *const extra[] = {"discovery", "routes"};
+    static const char *const disc_extra[] = {"peers"};
     const char *bad = NULL;
     int rc;
 
-    *bindings = NULL;
+    *routes = NULL;
+    *peers = NULL;
     if (!item) {
         return NB_OK;
     }
     if (!cJSON_IsObject(item)) {
-        return nb_cfg_fail(err, "transport", "must be an object");
+        return nb_cfg_fail(err, "rpc", "must be an object");
     }
     nb_cfg_warn_unknown(item,
                         nb_g_transport_model,
                         CFG_MODEL_N(nb_g_transport_model),
                         extra,
                         sizeof(extra) / sizeof(extra[0]),
-                        "transport");
+                        "rpc");
     rc = nb_cfg_fill(item, nb_g_transport_model, CFG_MODEL_N(nb_g_transport_model), in, &bad);
     if (rc != NB_CODEC_OK) {
-        return nb_cfg_fill_error(err, "transport", bad, rc);
+        return nb_cfg_fill_error(err, "rpc", bad, rc);
     }
-    *bindings = cJSON_GetObjectItemCaseSensitive(item, "bindings");
-    if (*bindings && !cJSON_IsArray(*bindings)) {
-        return nb_cfg_fail(err, "transport.bindings", "must be an array");
+
+    /* rpc.discovery */
+    if (nb_cfg_child(item, "discovery", &disc_obj) != NB_OK) {
+        return nb_cfg_fail(err, "rpc.discovery", "must be an object");
+    }
+    nb_cfg_warn_unknown(disc_obj,
+                        nb_g_discovery_model,
+                        CFG_MODEL_N(nb_g_discovery_model),
+                        disc_extra,
+                        sizeof(disc_extra) / sizeof(disc_extra[0]),
+                        "rpc.discovery");
+    rc = nb_cfg_fill(disc_obj, nb_g_discovery_model, CFG_MODEL_N(nb_g_discovery_model), disc, &bad);
+    if (rc != NB_CODEC_OK) {
+        return nb_cfg_fill_error(err, "rpc.discovery", bad, rc);
+    }
+    if (disc_obj) {
+        *peers = cJSON_GetObjectItemCaseSensitive(disc_obj, "peers");
+    }
+    if (*peers && !cJSON_IsArray(*peers)) {
+        return nb_cfg_fail(err, "rpc.discovery.peers", "must be an array");
+    }
+
+    /* rpc.routes */
+    *routes = cJSON_GetObjectItemCaseSensitive(item, "routes");
+    if (*routes && !cJSON_IsArray(*routes)) {
+        return nb_cfg_fail(err, "rpc.routes", "must be an array");
     }
     return NB_OK;
 }
 
-static int nb_load_discovery(const cJSON *root,
-                          nb_cfg_discovery_in_t *in,
-                          const cJSON **peers,
-                          nb_config_error_t *err)
+/* Top-level, shared by both spines. */
+static int nb_load_bindings(const cJSON *root, const cJSON **out, nb_config_error_t *err)
 {
-    const cJSON *obj = NULL;
-    static const char *const extra[] = {"peers"};
-    const char *bad = NULL;
-    int rc;
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, "bindings");
 
-    *peers = NULL;
-    if (nb_cfg_child(root, "discovery", &obj) != NB_OK) {
-        return nb_cfg_fail(err, "discovery", "must be an object");
+    *out = NULL;
+    if (!item) {
+        return NB_OK;
     }
-    nb_cfg_warn_unknown(obj,
-                        nb_g_discovery_model,
-                        CFG_MODEL_N(nb_g_discovery_model),
-                        extra,
-                        sizeof(extra) / sizeof(extra[0]),
-                        "discovery");
-    rc = nb_cfg_fill(obj, nb_g_discovery_model, CFG_MODEL_N(nb_g_discovery_model), in, &bad);
-    if (rc != NB_CODEC_OK) {
-        return nb_cfg_fill_error(err, "discovery", bad, rc);
+    if (!cJSON_IsArray(item)) {
+        return nb_cfg_fail(err, "bindings", "must be an array");
     }
-    if (obj) {
-        *peers = cJSON_GetObjectItemCaseSensitive(obj, "peers");
-    }
-    if (*peers && !cJSON_IsArray(*peers)) {
-        return nb_cfg_fail(err, "discovery.peers", "must be an array");
-    }
+    *out = item;
     return NB_OK;
+}
+
+static int nb_load_pubsub(const cJSON *root, nb_ps_qos_t *qos, nb_config_error_t *err)
+{
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, "pubsub");
+    static const char *const extra[] = {"default_qos"};
+
+    if (!item) {
+        return NB_OK;
+    }
+    if (!cJSON_IsObject(item)) {
+        return nb_cfg_fail(err, "pubsub", "must be an object");
+    }
+    nb_cfg_warn_unknown(item, NULL, 0, extra, sizeof(extra) / sizeof(extra[0]), "pubsub");
+    return nb_cfg_load_qos(item, "default_qos", qos, err, "pubsub.default_qos");
 }
 
 static int nb_load_metrics(const cJSON *root, nb_cfg_metrics_in_t *in, nb_config_error_t *err)
@@ -1003,6 +1040,35 @@ static int nb_load_log(const cJSON *root, nb_cfg_log_in_t *in, nb_config_error_t
 
 /* ---- 转换到 nb_config_doc_t ---- */
 
+static int nb_cfg_roles(const cJSON *item, unsigned *out, nb_config_error_t *err, const char *path)
+{
+    const cJSON *role;
+    unsigned roles = 0;
+
+    *out = 0;
+    if (!item) {
+        return NB_OK;
+    }
+    if (!cJSON_IsArray(item)) {
+        return nb_cfg_fail(err, path, "must be an array of \"rpc\" / \"ps\"");
+    }
+    cJSON_ArrayForEach(role, item)
+    {
+        if (!cJSON_IsString(role) || !role->valuestring) {
+            return nb_cfg_fail(err, path, "roles must be strings");
+        }
+        if (strcmp(role->valuestring, "rpc") == 0) {
+            roles |= NB_PROVIDER_ROLE_RPC;
+        } else if (strcmp(role->valuestring, "ps") == 0) {
+            roles |= NB_PROVIDER_ROLE_PS;
+        } else {
+            return nb_cfg_fail(err, path, "roles must be \"rpc\" or \"ps\"");
+        }
+    }
+    *out = roles;
+    return NB_OK;
+}
+
 static int nb_fill_bindings(nb_config_doc_t *out, const cJSON *bindings, nb_config_error_t *err)
 {
     const cJSON *item;
@@ -1025,10 +1091,10 @@ static int nb_fill_bindings(nb_config_doc_t *out, const cJSON *bindings, nb_conf
         int rc = NB_OK;
         int frc;
 
-        snprintf(path, sizeof(path), "transport.bindings[%lu]", (unsigned long)index);
+        snprintf(path, sizeof(path), "bindings[%lu]", (unsigned long)index);
         index++;
         if (out->binding_count >= NB_CONFIG_MAX_BINDINGS) {
-            return nb_cfg_fail(err, "transport.bindings", "too many bindings");
+            return nb_cfg_fail(err, "bindings", "too many bindings");
         }
         memset(&parsed, 0, sizeof(parsed));
         if (cJSON_IsString(item) && item->valuestring) {
@@ -1039,7 +1105,7 @@ static int nb_fill_bindings(nb_config_doc_t *out, const cJSON *bindings, nb_conf
             }
         } else if (cJSON_IsObject(item)) {
             const char *bad = NULL;
-            static const char *const extra[] = {"qos"};
+            static const char *const extra[] = {"roles", "ps_qos"};
 
             nb_cfg_warn_unknown(item,
                                 nb_g_binding_model,
@@ -1105,8 +1171,16 @@ static int nb_fill_bindings(nb_config_doc_t *out, const cJSON *bindings, nb_conf
         view->intra_process = intra;
         view->poll_us = parsed.poll_us;
         if (cJSON_IsObject(item)) {
-            nb_cfg_join(sub, sizeof(sub), path, "qos");
-            if (nb_cfg_load_qos(item, &view->qos, err, sub) != NB_OK) {
+            nb_cfg_join(sub, sizeof(sub), path, "roles");
+            if (nb_cfg_roles(cJSON_GetObjectItemCaseSensitive(item, "roles"),
+                             &view->roles,
+                             err,
+                             sub) != NB_OK) {
+                rc = NB_ERR_INVALID;
+                goto done;
+            }
+            nb_cfg_join(sub, sizeof(sub), path, "ps_qos");
+            if (nb_cfg_load_qos(item, "ps_qos", &view->ps_qos, err, sub) != NB_OK) {
                 rc = NB_ERR_INVALID;
                 goto done;
             }
@@ -1134,10 +1208,10 @@ static int nb_fill_peers(nb_config_doc_t *out, const cJSON *peers, nb_config_err
         nb_peer_endpoint_t *peer;
         char path[96];
 
-        snprintf(path, sizeof(path), "discovery.peers[%lu]", (unsigned long)index);
+        snprintf(path, sizeof(path), "rpc.discovery.peers[%lu]", (unsigned long)index);
         index++;
         if (out->peer_count >= NB_CONFIG_MAX_PEERS) {
-            return nb_cfg_fail(err, "discovery.peers", "too many peers");
+            return nb_cfg_fail(err, "rpc.discovery.peers", "too many peers");
         }
         if (!cJSON_IsString(item) || !item->valuestring) {
             return nb_cfg_fail(err, path, "must be a string");
@@ -1164,7 +1238,7 @@ static int nb_fill_routes(nb_config_doc_t *out, const cJSON *routes, nb_config_e
         return NB_OK;
     }
     if (!cJSON_IsArray(routes)) {
-        return nb_cfg_fail(err, "routes", "must be an array");
+        return nb_cfg_fail(err, "rpc.routes", "must be an array");
     }
     cJSON_ArrayForEach(item, routes)
     {
@@ -1176,10 +1250,10 @@ static int nb_fill_routes(nb_config_doc_t *out, const cJSON *routes, nb_config_e
         int rc = NB_OK;
         int frc;
 
-        snprintf(path, sizeof(path), "routes[%lu]", (unsigned long)index);
+        snprintf(path, sizeof(path), "rpc.routes[%lu]", (unsigned long)index);
         index++;
         if (out->route_count >= NB_CONFIG_MAX_ROUTES) {
-            return nb_cfg_fail(err, "routes", "too many routes");
+            return nb_cfg_fail(err, "rpc.routes", "too many routes");
         }
         if (!cJSON_IsObject(item)) {
             return nb_cfg_fail(err, path, "each route must be an object");
@@ -1246,8 +1320,12 @@ static int nb_apply_config(nb_config_doc_t *out,
     int rc;
 
     nb_node_config_default(node);
+    rc = nb_load_pubsub(root, &node->pubsub.default_qos, err);
+    if (rc != NB_OK) {
+        return rc;
+    }
 
-    /* name / mode（顶层） */
+    /* name（顶层） */
     item = cJSON_GetObjectItemCaseSensitive(root, "name");
     if (item) {
         if (!cJSON_IsString(item) || !item->valuestring) {
@@ -1258,13 +1336,10 @@ static int nb_apply_config(nb_config_doc_t *out,
     if (nb_cfg_copy(out->name, sizeof(out->name), name, NB_DEFAULT_NODE_NAME) != NB_OK) {
         return nb_cfg_fail(err, "name", "too long");
     }
-    item = cJSON_GetObjectItemCaseSensitive(root, "mode");
-    if (item) {
-        if (!cJSON_IsString(item) || nb_cfg_mode(item->valuestring, &mode) != NB_OK) {
-            return nb_cfg_fail(err, "mode", "must be \"mesh\" or \"static\"");
-        }
+    if (tp->mode && nb_cfg_mode(tp->mode, &mode) != NB_OK) {
+        return nb_cfg_fail(err, "rpc.mode", "must be \"mesh\" or \"static\"");
     }
-    node->mode = mode;
+    node->rpc.mode = mode;
 
     /* runtime */
     if (rt->io_threads > NB_TRANSPORT_MAX_IO) {
@@ -1293,10 +1368,10 @@ static int nb_apply_config(nb_config_doc_t *out,
 
     /* transport */
     if (tp->kind && nb_cfg_transport_kind(tp->kind, &kind) != NB_OK) {
-        return nb_cfg_fail(err, "transport.kind", "must be \"udp\" or \"tcp\"");
+        return nb_cfg_fail(err, "rpc.kind", "must be \"udp\" or \"tcp\"");
     }
     if (tp->data_port > UINT16_MAX) {
-        return nb_cfg_fail(err, "transport.data_port", "out of range");
+        return nb_cfg_fail(err, "rpc.data_port", "out of range");
     }
     if (tp->frag_bytes != 0 &&
         (tp->frag_bytes < NB_DEFAULT_FRAG_MIN_BYTES || tp->frag_bytes > NB_DEFAULT_FRAG_MAX_BYTES)) {
@@ -1305,64 +1380,52 @@ static int nb_apply_config(nb_config_doc_t *out,
                  "must be 0 or %u..%u",
                  (unsigned)NB_DEFAULT_FRAG_MIN_BYTES,
                  (unsigned)NB_DEFAULT_FRAG_MAX_BYTES);
-        return nb_cfg_fail(err, "transport.frag_bytes", reason);
+        return nb_cfg_fail(err, "rpc.frag_bytes", reason);
     }
     if (tp->max_msg_bytes > NB_GLOBAL_MAX_MSG_BYTES_LIMIT) {
         snprintf(reason,
                  sizeof(reason),
                  "must be 0..%u",
                  (unsigned)NB_GLOBAL_MAX_MSG_BYTES_LIMIT);
-        return nb_cfg_fail(err, "transport.max_msg_bytes", reason);
+        return nb_cfg_fail(err, "rpc.max_msg_bytes", reason);
     }
     {
         uint32_t effective_frag =
             tp->frag_bytes ? tp->frag_bytes : (uint32_t)NB_DEFAULT_FRAG_BYTES;
         if (tp->max_msg_bytes && tp->max_msg_bytes < effective_frag) {
-            return nb_cfg_fail(err, "transport.max_msg_bytes", "must be >= frag_bytes");
+            return nb_cfg_fail(err, "rpc.max_msg_bytes", "must be >= frag_bytes");
         }
     }
-    node->transport.kind = kind;
+    node->rpc.kind = kind;
     if (nb_cfg_copy(out->bind_host, sizeof(out->bind_host), tp->bind_host, NB_DEFAULT_BIND_HOST) !=
         NB_OK) {
-        return nb_cfg_fail(err, "transport.bind_host", "too long");
+        return nb_cfg_fail(err, "rpc.bind_host", "too long");
     }
-    node->transport.data_port = (uint16_t)tp->data_port;
-    node->transport.frag_bytes = (uint16_t)tp->frag_bytes;
-    node->transport.max_msg_bytes = tp->max_msg_bytes;
-    node->transport.backpressure_bytes = tp->backpressure_bytes;
-    node->transport.rtcp_interval_ms = tp->rtcp_interval_ms;
-    node->transport.disable_rtcp = tp->disable_rtcp ? true : false;
-    {
-        const cJSON *transport_obj = cJSON_GetObjectItemCaseSensitive(root, "transport");
-        if (transport_obj) {
-            rc = nb_cfg_load_qos(transport_obj, &node->transport.qos, err, "transport.qos");
-            if (rc != NB_OK) {
-                return rc;
-            }
-        }
-    }
+    node->rpc.data_port = (uint16_t)tp->data_port;
+    node->rpc.frag_bytes = (uint16_t)tp->frag_bytes;
+    node->rpc.max_msg_bytes = tp->max_msg_bytes;
+    node->rpc.backpressure_bytes = tp->backpressure_bytes;
+    node->rpc.rtcp_interval_ms = tp->rtcp_interval_ms;
+    node->rpc.disable_rtcp = tp->disable_rtcp ? true : false;
 
     /* discovery */
-    if (disc->mode && nb_cfg_discovery_mode(disc->mode, &node->discovery.disable) != NB_OK) {
-        return nb_cfg_fail(err, "discovery.mode", "must be mesh/static/off/none");
-    }
     if (mode == NB_NODE_MODE_STATIC) {
-        node->discovery.disable = true;
+        node->rpc.discovery.disable = true;
     }
     if (disc->broadcast) {
         if (nb_cfg_host_port(
-                disc->broadcast, out->discovery_host, sizeof(out->discovery_host), &node->discovery.port) !=
+                disc->broadcast, out->discovery_host, sizeof(out->discovery_host), &node->rpc.discovery.port) !=
             NB_OK) {
-            return nb_cfg_fail(err, "discovery.broadcast", "invalid host:port");
+            return nb_cfg_fail(err, "rpc.discovery.broadcast", "invalid host:port");
         }
     } else if (nb_cfg_copy(out->discovery_host,
                         sizeof(out->discovery_host),
                         NULL,
                         NB_DEFAULT_DISCOVERY_HOST) != NB_OK) {
-        return nb_cfg_fail(err, "discovery.broadcast", "default host too long");
+        return nb_cfg_fail(err, "rpc.discovery.broadcast", "default host too long");
     }
-    node->discovery.hello_interval_ms = disc->hello_interval_ms;
-    node->discovery.node_ttl_ms = disc->node_ttl_ms;
+    node->rpc.discovery.hello_interval_ms = disc->hello_interval_ms;
+    node->rpc.discovery.node_ttl_ms = disc->node_ttl_ms;
 
     /* metrics */
     node->metrics.disable = mt->disable ? true : false;
@@ -1403,8 +1466,8 @@ static void nb_config_doc_rebind(nb_config_doc_t *doc)
         return;
     }
     doc->node.name = doc->name;
-    doc->node.transport.bind_host = doc->bind_host;
-    doc->node.discovery.broadcast_host = doc->discovery_host;
+    doc->node.rpc.bind_host = doc->bind_host;
+    doc->node.rpc.discovery.broadcast_host = doc->discovery_host;
     if (doc->binding_count > NB_CONFIG_MAX_BINDINGS) {
         doc->binding_count = NB_CONFIG_MAX_BINDINGS;
     }
@@ -1412,12 +1475,12 @@ static void nb_config_doc_rebind(nb_config_doc_t *doc)
         doc->binding_configs[i].name = doc->bindings[i].name;
         doc->binding_configs[i].endpoint = doc->bindings[i].endpoint;
     }
-    doc->node.transport.bindings = doc->binding_count ? doc->binding_configs : NULL;
-    doc->node.transport.binding_count = doc->binding_count;
-    doc->node.routes = doc->route_count ? doc->routes : NULL;
-    doc->node.route_count = doc->route_count;
-    doc->node.peers = doc->peer_count ? doc->peers : NULL;
-    doc->node.peer_count = doc->peer_count;
+    doc->node.bindings = doc->binding_count ? doc->binding_configs : NULL;
+    doc->node.binding_count = doc->binding_count;
+    doc->node.rpc.routes = doc->route_count ? doc->routes : NULL;
+    doc->node.rpc.route_count = doc->route_count;
+    doc->node.rpc.peers = doc->peer_count ? doc->peers : NULL;
+    doc->node.rpc.peer_count = doc->peer_count;
 }
 
 int nb_config_parse(const char *json, nb_config_doc_t **out, nb_config_error_t *err)
@@ -1459,8 +1522,8 @@ int nb_config_parse(const char *json, nb_config_doc_t **out, nb_config_error_t *
         goto done;
     }
     {
-        static const char *const top_keys[] = {
-            "name", "mode", "runtime", "transport", "discovery", "metrics", "log", "routes"};
+        static const char *const top_keys[] = {"name", "runtime", "rpc", "bindings", "pubsub",
+                                               "metrics", "log"};
         nb_cfg_warn_unknown(root,
                             NULL,
                             0,
@@ -1468,20 +1531,15 @@ int nb_config_parse(const char *json, nb_config_doc_t **out, nb_config_error_t *
                             sizeof(top_keys) / sizeof(top_keys[0]),
                             "");
     }
-    routes = cJSON_GetObjectItemCaseSensitive(root, "routes");
-    if (routes && !cJSON_IsArray(routes)) {
-        nb_cfg_fail(err, "routes", "must be an array");
-        goto done;
-    }
     rc = nb_load_runtime(root, &rt, err);
     if (rc != NB_OK) {
         goto done;
     }
-    rc = nb_load_transport(root, &tp, &bindings, err);
+    rc = nb_load_rpc(root, &tp, &disc, &routes, &peers, err);
     if (rc != NB_OK) {
         goto done;
     }
-    rc = nb_load_discovery(root, &disc, &peers, err);
+    rc = nb_load_bindings(root, &bindings, err);
     if (rc != NB_OK) {
         goto done;
     }

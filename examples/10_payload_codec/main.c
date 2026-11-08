@@ -91,7 +91,7 @@ int main(void)
 
     nb_node_config_default(&cfg);
     cfg.name = "CodecExample";
-    cfg.mode = NB_NODE_MODE_STATIC;
+    cfg.rpc.mode = NB_NODE_MODE_STATIC;
     cfg.runtime.io_threads = 1;
 
     rc = nb_node_create(&cfg, &node);

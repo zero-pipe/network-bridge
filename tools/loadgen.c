@@ -614,18 +614,18 @@ int main(int argc, char **argv)
 
     nb_node_config_default(&cfg);
     cfg.name = opt.worker_id ? opt.worker_id : "loadgen";
-    cfg.transport.kind = opt.transport;
-    cfg.transport.bind_host = opt.bind;
-    cfg.transport.data_port = opt.data_port;
-    cfg.discovery.broadcast_host = "255.255.255.255";
-    cfg.discovery.port = opt.discovery_port;
-    cfg.mode = mode;
+    cfg.rpc.kind = opt.transport;
+    cfg.rpc.bind_host = opt.bind;
+    cfg.rpc.data_port = opt.data_port;
+    cfg.rpc.discovery.broadcast_host = "255.255.255.255";
+    cfg.rpc.discovery.port = opt.discovery_port;
+    cfg.rpc.mode = mode;
     cfg.runtime.io_threads = opt.io_threads ? opt.io_threads : 1;
-    cfg.discovery.hello_interval_ms = 100;
-    cfg.discovery.node_ttl_ms = 3000;
-    cfg.transport.frag_bytes = opt.frag_bytes;
-    cfg.transport.max_msg_bytes = opt.max_msg_bytes;
-    cfg.transport.backpressure_bytes = opt.backpressure_bytes;
+    cfg.rpc.discovery.hello_interval_ms = 100;
+    cfg.rpc.discovery.node_ttl_ms = 3000;
+    cfg.rpc.frag_bytes = opt.frag_bytes;
+    cfg.rpc.max_msg_bytes = opt.max_msg_bytes;
+    cfg.rpc.backpressure_bytes = opt.backpressure_bytes;
 
     if ((opt.use_shm ? 1 : 0) + (opt.use_dds ? 1 : 0) + (opt.use_rtps ? 1 : 0) > 1) {
         nb_log_error("--shm, --dds and --rtps are mutually exclusive");
@@ -642,9 +642,9 @@ int main(int argc, char **argv)
         shm_binding.name = "shm";
         shm_binding.endpoint = shm_endpoint;
         shm_binding.intra_process = NB_INTRA_PROCESS_OFF;
-        cfg.transport.bindings = &shm_binding;
-        cfg.transport.binding_count = 1;
-        cfg.mode = NB_NODE_MODE_STATIC;
+        cfg.bindings = &shm_binding;
+        cfg.binding_count = 1;
+        cfg.rpc.mode = NB_NODE_MODE_STATIC;
     } else if (opt.use_dds) {
         if (nb_cyclone_dds_register() != NB_OK) {
             nb_log_error("dds provider register failed");
@@ -655,9 +655,9 @@ int main(int argc, char **argv)
         dds_binding.name = "dds";
         dds_binding.endpoint = dds_endpoint;
         dds_binding.intra_process = NB_INTRA_PROCESS_OFF;
-        cfg.transport.bindings = &dds_binding;
-        cfg.transport.binding_count = 1;
-        cfg.mode = NB_NODE_MODE_STATIC;
+        cfg.bindings = &dds_binding;
+        cfg.binding_count = 1;
+        cfg.rpc.mode = NB_NODE_MODE_STATIC;
     } else if (opt.use_rtps) {
         if (nb_rtps_transport_register() != NB_OK) {
             nb_log_error("rtps provider register failed");
@@ -667,9 +667,9 @@ int main(int argc, char **argv)
         rtps_binding.name = "rtps";
         rtps_binding.endpoint = opt.rtps_endpoint;
         rtps_binding.intra_process = NB_INTRA_PROCESS_OFF;
-        cfg.transport.bindings = &rtps_binding;
-        cfg.transport.binding_count = 1;
-        cfg.mode = NB_NODE_MODE_STATIC;
+        cfg.bindings = &rtps_binding;
+        cfg.binding_count = 1;
+        cfg.rpc.mode = NB_NODE_MODE_STATIC;
     }
 
     sem = ntk_sem_create(0);

@@ -95,25 +95,25 @@ static int run_case(nb_transport_kind_t kind, const char *label)
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "srv";
-    scfg.transport.kind = kind;
-    scfg.transport.bind_host = "127.0.0.1";
-    scfg.transport.data_port = 0;
-    scfg.discovery.broadcast_host = "127.0.0.1";
-    scfg.discovery.port = sport;
+    scfg.rpc.kind = kind;
+    scfg.rpc.bind_host = "127.0.0.1";
+    scfg.rpc.data_port = 0;
+    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.port = sport;
     scfg.runtime.io_threads = 1;
-    scfg.discovery.hello_interval_ms = 200;
-    scfg.discovery.node_ttl_ms = 3000;
+    scfg.rpc.discovery.hello_interval_ms = 200;
+    scfg.rpc.discovery.node_ttl_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "cli";
-    ccfg.transport.kind = kind;
-    ccfg.transport.bind_host = "127.0.0.1";
-    ccfg.transport.data_port = 0;
-    ccfg.discovery.broadcast_host = "127.0.0.1";
-    ccfg.discovery.port = cport;
+    ccfg.rpc.kind = kind;
+    ccfg.rpc.bind_host = "127.0.0.1";
+    ccfg.rpc.data_port = 0;
+    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.port = cport;
     ccfg.runtime.io_threads = 1;
-    ccfg.discovery.hello_interval_ms = 200;
-    ccfg.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.hello_interval_ms = 200;
+    ccfg.rpc.discovery.node_ttl_ms = 3000;
 
     rc = nb_node_create(&scfg, &server);
     if (rc != NB_OK) {

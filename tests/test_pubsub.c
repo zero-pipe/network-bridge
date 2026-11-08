@@ -92,10 +92,10 @@ static nb_node_t *make_node(const char *endpoint, const char *name)
     binding.intra_process = NB_INTRA_PROCESS_OFF;
     nb_node_config_default(&cfg);
     cfg.name = name;
-    cfg.mode = NB_NODE_MODE_STATIC;
+    cfg.rpc.mode = NB_NODE_MODE_STATIC;
     cfg.runtime.io_threads = 1;
-    cfg.transport.bindings = &binding;
-    cfg.transport.binding_count = 1;
+    cfg.bindings = &binding;
+    cfg.binding_count = 1;
     if (nb_node_create(&cfg, &node) != NB_OK) {
         return NULL;
     }
@@ -326,10 +326,10 @@ static void test_dds_topic(void)
     binding.endpoint = "dds://62";
     binding.intra_process = NB_INTRA_PROCESS_OFF;
     nb_node_config_default(&cfg);
-    cfg.mode = NB_NODE_MODE_STATIC;
+    cfg.rpc.mode = NB_NODE_MODE_STATIC;
     cfg.runtime.io_threads = 1;
-    cfg.transport.bindings = &binding;
-    cfg.transport.binding_count = 1;
+    cfg.bindings = &binding;
+    cfg.binding_count = 1;
     cfg.name = "ps-dds-a";
     CHECK(nb_node_create(&cfg, &node_a) == NB_OK);
     cfg.name = "ps-dds-b";

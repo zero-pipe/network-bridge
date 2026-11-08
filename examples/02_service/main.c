@@ -32,10 +32,10 @@ int main(int argc, char **argv)
 
     nb_node_config_default(&cfg);
     cfg.name = "HealthServer";
-    cfg.transport.kind = NB_TRANSPORT_KIND_TCP;
-    cfg.transport.bind_host = "127.0.0.1";
-    cfg.transport.data_port = port;
-    cfg.mode = NB_NODE_MODE_STATIC;
+    cfg.rpc.kind = NB_TRANSPORT_KIND_TCP;
+    cfg.rpc.bind_host = "127.0.0.1";
+    cfg.rpc.data_port = port;
+    cfg.rpc.mode = NB_NODE_MODE_STATIC;
     cfg.runtime.io_threads = 1;
 
     rc = nb_node_create(&cfg, &node);

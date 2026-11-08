@@ -132,12 +132,12 @@ static void test_node_and_service(void)
 
     nb_node_config_default(&cfg);
     cfg.name = "contracts";
-    cfg.mode = NB_NODE_MODE_STATIC;
+    cfg.rpc.mode = NB_NODE_MODE_STATIC;
     memset(&binding, 0, sizeof binding);
     binding.name = "udp";
     binding.endpoint = "udp://127.0.0.1:0";
-    cfg.transport.bindings = &binding;
-    cfg.transport.binding_count = 1;
+    cfg.bindings = &binding;
+    cfg.binding_count = 1;
 
     rc = nb_node_create(&cfg, &node);
     CHECK(rc == NB_OK && node != NULL);
@@ -183,12 +183,12 @@ static void test_route_failure(void)
     nb_node_t *node = NULL;
 
     nb_node_config_default(&cfg);
-    cfg.mode = NB_NODE_MODE_STATIC;
+    cfg.rpc.mode = NB_NODE_MODE_STATIC;
     memset(&route, 0, sizeof route);
     snprintf(route.service, sizeof route.service, "%s", "Svc");
     snprintf(route.endpoint, sizeof route.endpoint, "%s", "not-a-uri");
-    cfg.routes = &route;
-    cfg.route_count = 1;
+    cfg.rpc.routes = &route;
+    cfg.rpc.route_count = 1;
 
     CHECK(nb_node_create(&cfg, &node) == NB_ERR_INVALID);
     CHECK(node == NULL);

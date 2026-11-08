@@ -141,24 +141,24 @@ static int test_proxy_and_sync(void)
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "api_srv";
-    scfg.transport.kind = NB_TRANSPORT_KIND_UDP;
-    scfg.transport.bind_host = "127.0.0.1";
-    scfg.discovery.broadcast_host = "127.0.0.1";
-    scfg.discovery.port = sport;
+    scfg.rpc.kind = NB_TRANSPORT_KIND_UDP;
+    scfg.rpc.bind_host = "127.0.0.1";
+    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.port = sport;
     scfg.runtime.io_threads = 1;
-    scfg.discovery.hello_interval_ms = 200;
-    scfg.discovery.node_ttl_ms = 3000;
-    scfg.service_table = &g_order_table;
+    scfg.rpc.discovery.hello_interval_ms = 200;
+    scfg.rpc.discovery.node_ttl_ms = 3000;
+    scfg.rpc.service_table = &g_order_table;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "api_cli";
-    ccfg.transport.kind = NB_TRANSPORT_KIND_UDP;
-    ccfg.transport.bind_host = "127.0.0.1";
-    ccfg.discovery.broadcast_host = "127.0.0.1";
-    ccfg.discovery.port = cport;
+    ccfg.rpc.kind = NB_TRANSPORT_KIND_UDP;
+    ccfg.rpc.bind_host = "127.0.0.1";
+    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.port = cport;
     ccfg.runtime.io_threads = 1;
-    ccfg.discovery.hello_interval_ms = 200;
-    ccfg.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.hello_interval_ms = 200;
+    ccfg.rpc.discovery.node_ttl_ms = 3000;
 
     rc = nb_node_create(&scfg, &server);
     if (rc != NB_OK) {

@@ -174,6 +174,7 @@ int nb_node_transport_add(nb_node_t *node,
                           const char *host,
                           uint16_t port,
                           const char *path,
+                          unsigned roles,
                           nb_intra_process_t intra_process,
                           uint32_t poll_us,
                           const nb_ps_qos_t *qos)
@@ -202,6 +203,19 @@ int nb_node_transport_add(nb_node_t *node,
     provider = nb_transport_provider_find(scheme);
     if (kind != NB_TRANSPORT_KIND_TCP && kind != NB_TRANSPORT_KIND_UDP && !provider) {
         return NB_ERR_NOTFOUND; /* 未注册的 scheme */
+    }
+    /* A binding may declare the roles it serves; reject a role the transport
+     * cannot implement (udp/tcp are RPC-only, a PS-only backend cannot carry
+     * RPC). roles == 0 means "whatever the transport implements". */
+    if (roles != 0) {
+        if (provider) {
+            if (((roles & NB_PROVIDER_ROLE_RPC) && !provider->ops->rpc) ||
+                ((roles & NB_PROVIDER_ROLE_PS) && !provider->ops->ps)) {
+                return NB_ERR_NOT_SUPPORTED;
+            }
+        } else if (roles & NB_PROVIDER_ROLE_PS) {
+            return NB_ERR_NOT_SUPPORTED;
+        }
     }
     transport =
         provider ? (nb_transport_t *)calloc(1, sizeof(*transport)) : nb_create_transport(kind);
@@ -288,7 +302,8 @@ int nb_node_transport_add_binding(nb_node_t *node, const nb_binding_config_t *bi
                                  endpoint.host,
                                  endpoint.port,
                                  endpoint.path,
+                                 binding->roles,
                                  binding->intra_process,
                                  binding->poll_us,
-                                 &binding->qos);
+                                 &binding->ps_qos);
 }

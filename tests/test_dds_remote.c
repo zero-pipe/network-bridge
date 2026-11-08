@@ -209,10 +209,10 @@ static int run_publisher(const char *exe)
 
     nb_node_config_default(&cfg);
     cfg.name = "DdsRemotePublisher";
-    cfg.mode = NB_NODE_MODE_STATIC;
+    cfg.rpc.mode = NB_NODE_MODE_STATIC;
     cfg.runtime.io_threads = 1;
-    cfg.transport.bindings = &binding;
-    cfg.transport.binding_count = 1;
+    cfg.bindings = &binding;
+    cfg.binding_count = 1;
 
     rc = nb_node_create(&cfg, &node);
     if (rc == NB_OK) {

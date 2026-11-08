@@ -80,25 +80,25 @@ int main(void)
 
     nb_node_config_default(&cfg1);
     cfg1.name = "shm-mesh-a";
-    cfg1.mode = NB_NODE_MODE_MESH;
+    cfg1.rpc.mode = NB_NODE_MODE_MESH;
     cfg1.runtime.io_threads = 1;
-    cfg1.discovery.broadcast_host = "127.0.0.1";
-    cfg1.discovery.port = 42621;
-    cfg1.discovery.hello_interval_ms = 100;
-    cfg1.discovery.node_ttl_ms = 3000;
-    cfg1.transport.bindings = &binding1;
-    cfg1.transport.binding_count = 1;
+    cfg1.rpc.discovery.broadcast_host = "127.0.0.1";
+    cfg1.rpc.discovery.port = 42621;
+    cfg1.rpc.discovery.hello_interval_ms = 100;
+    cfg1.rpc.discovery.node_ttl_ms = 3000;
+    cfg1.bindings = &binding1;
+    cfg1.binding_count = 1;
 
     nb_node_config_default(&cfg2);
     cfg2.name = "shm-mesh-b";
-    cfg2.mode = NB_NODE_MODE_MESH;
+    cfg2.rpc.mode = NB_NODE_MODE_MESH;
     cfg2.runtime.io_threads = 1;
-    cfg2.discovery.broadcast_host = "127.0.0.1";
-    cfg2.discovery.port = 42622;
-    cfg2.discovery.hello_interval_ms = 100;
-    cfg2.discovery.node_ttl_ms = 3000;
-    cfg2.transport.bindings = &binding2;
-    cfg2.transport.binding_count = 1;
+    cfg2.rpc.discovery.broadcast_host = "127.0.0.1";
+    cfg2.rpc.discovery.port = 42622;
+    cfg2.rpc.discovery.hello_interval_ms = 100;
+    cfg2.rpc.discovery.node_ttl_ms = 3000;
+    cfg2.bindings = &binding2;
+    cfg2.binding_count = 1;
 
     rc = nb_node_create(&cfg1, &node1);
     if (rc == NB_OK) {
@@ -119,8 +119,8 @@ int main(void)
         goto done;
     }
 
-    (void)nb_node_add_discovery_peer(node1, "127.0.0.1", cfg2.discovery.port);
-    (void)nb_node_add_discovery_peer(node2, "127.0.0.1", cfg1.discovery.port);
+    (void)nb_node_add_discovery_peer(node1, "127.0.0.1", cfg2.rpc.discovery.port);
+    (void)nb_node_add_discovery_peer(node2, "127.0.0.1", cfg1.rpc.discovery.port);
     if (nb_node_wait_for_service(node1, "MeshEcho", 5000) != NB_OK) {
         nb_log_error("shm mesh service was not discovered");
         failed = 1;

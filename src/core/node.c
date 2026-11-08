@@ -199,21 +199,21 @@ int nb_node_create(const nb_node_config_t *cfg, nb_node_t **out)
     local = *cfg;
     nb_node_config_normalize(&local);
     cfg = &local;
-    if (!cfg->transport.bind_host[0]) {
+    if (!cfg->rpc.bind_host[0]) {
         return NB_ERR_INVALID;
     }
     if (nb_str_fits(cfg->name, NB_NAME_MAX) != NB_OK ||
-        nb_str_fits(cfg->transport.bind_host, NB_HOST_MAX) != NB_OK ||
-        nb_str_fits(cfg->discovery.broadcast_host, NB_HOST_MAX) != NB_OK) {
+        nb_str_fits(cfg->rpc.bind_host, NB_HOST_MAX) != NB_OK ||
+        nb_str_fits(cfg->rpc.discovery.broadcast_host, NB_HOST_MAX) != NB_OK) {
         return NB_ERR_TOOBIG;
     }
-    if (nb_ps_qos_validate(&cfg->transport.qos) != NB_OK) {
+    if (nb_ps_qos_validate(&cfg->pubsub.default_qos) != NB_OK) {
         return NB_ERR_INVALID;
     }
-    if (cfg->transport.bindings) {
+    if (cfg->bindings) {
         size_t bi;
-        for (bi = 0; bi < cfg->transport.binding_count; bi++) {
-            if (nb_ps_qos_validate(&cfg->transport.bindings[bi].qos) != NB_OK) {
+        for (bi = 0; bi < cfg->binding_count; bi++) {
+            if (nb_ps_qos_validate(&cfg->bindings[bi].ps_qos) != NB_OK) {
                 return NB_ERR_INVALID;
             }
         }
@@ -223,25 +223,25 @@ int nb_node_create(const nb_node_config_t *cfg, nb_node_t **out)
     if (!node) {
         return NB_ERR_NOMEM;
     }
-    if (cfg->service_table && nb_service_table_install(cfg->service_table) != NB_OK) {
+    if (cfg->rpc.service_table && nb_service_table_install(cfg->rpc.service_table) != NB_OK) {
         free(node);
         return NB_ERR_INVALID;
     }
     nb_copy_str(node->name, sizeof(node->name), cfg->name, NULL);
-    nb_copy_str(node->bind_host, sizeof(node->bind_host), cfg->transport.bind_host, NULL);
-    nb_copy_str(node->discovery_host, sizeof(node->discovery_host), cfg->discovery.broadcast_host, NULL);
-    node->discovery_port = cfg->discovery.port;
+    nb_copy_str(node->bind_host, sizeof(node->bind_host), cfg->rpc.bind_host, NULL);
+    nb_copy_str(node->discovery_host, sizeof(node->discovery_host), cfg->rpc.discovery.broadcast_host, NULL);
+    node->discovery_port = cfg->rpc.discovery.port;
     node->io_threads = cfg->runtime.io_threads;
     node->send_lanes = cfg->runtime.send_lanes;
-    node->hello_interval_ms = cfg->discovery.hello_interval_ms;
-    node->node_ttl_ms = cfg->discovery.node_ttl_ms;
-    node->mode = cfg->mode;
-    node->frag_bytes = cfg->transport.frag_bytes;
-    node->max_msg_bytes = cfg->transport.max_msg_bytes;
-    node->bp_high_water = cfg->transport.backpressure_bytes;
-    node->rtcp_interval_ms = cfg->transport.rtcp_interval_ms;
-    node->disable_rtcp = cfg->transport.disable_rtcp;
-    node->default_qos = cfg->transport.qos;
+    node->hello_interval_ms = cfg->rpc.discovery.hello_interval_ms;
+    node->node_ttl_ms = cfg->rpc.discovery.node_ttl_ms;
+    node->mode = cfg->rpc.mode;
+    node->frag_bytes = cfg->rpc.frag_bytes;
+    node->max_msg_bytes = cfg->rpc.max_msg_bytes;
+    node->bp_high_water = cfg->rpc.backpressure_bytes;
+    node->rtcp_interval_ms = cfg->rpc.rtcp_interval_ms;
+    node->disable_rtcp = cfg->rpc.disable_rtcp;
+    node->default_qos = cfg->pubsub.default_qos;
     node->max_recv_streams = cfg->runtime.max_streams;
     node->rate_limit_pps = cfg->runtime.peer_rate_limit_pps;
     node->handler_max_concurrency = cfg->runtime.handler_max_concurrency;
@@ -272,7 +272,7 @@ int nb_node_create(const nb_node_config_t *cfg, nb_node_t **out)
     node->next_request_id = 1;
     nb_route_init(&node->routes);
     nb_registry_init(&node->registry);
-    node->registry_backend = (cfg->mode == NB_NODE_MODE_MESH) ? nb_registry_backend_mesh() : NULL;
+    node->registry_backend = (cfg->rpc.mode == NB_NODE_MODE_MESH) ? nb_registry_backend_mesh() : NULL;
     node->id_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     if (!node->id_lock) {
         nb_node_destroy(node);
@@ -394,25 +394,26 @@ int nb_node_create(const nb_node_config_t *cfg, nb_node_t **out)
         }
     }
 
-    if (cfg->transport.bindings && cfg->transport.binding_count > 0) {
+    if (cfg->bindings && cfg->binding_count > 0) {
         size_t i;
-        for (i = 0; i < cfg->transport.binding_count; i++) {
-            const nb_binding_config_t *binding = &cfg->transport.bindings[i];
+        for (i = 0; i < cfg->binding_count; i++) {
+            const nb_binding_config_t *binding = &cfg->bindings[i];
             if (nb_node_transport_add_binding(node, binding) != NB_OK) {
                 nb_node_destroy(node);
                 return NB_ERR_IO;
             }
         }
     } else {
-        const char *scheme = cfg->transport.kind == NB_TRANSPORT_KIND_TCP ? "tcp" : "udp";
+        const char *scheme = cfg->rpc.kind == NB_TRANSPORT_KIND_TCP ? "tcp" : "udp";
         if (nb_node_transport_add(node,
                                   scheme,
                                   node->bind_host,
-                                  cfg->transport.data_port,
+                                  cfg->rpc.data_port,
                                   NULL,
+                                  NB_PROVIDER_ROLE_RPC,
                                   NB_INTRA_PROCESS_OFF,
                                   0,
-                                  &cfg->transport.qos) != NB_OK) {
+                                  &cfg->pubsub.default_qos) != NB_OK) {
             nb_node_destroy(node);
             return NB_ERR_IO;
         }
@@ -438,16 +439,16 @@ int nb_node_create(const nb_node_config_t *cfg, nb_node_t **out)
     }
     {
         size_t i;
-        for (i = 0; i < cfg->peer_count; i++) {
-            if (nb_node_add_discovery_peer(node, cfg->peers[i].host, cfg->peers[i].port) !=
+        for (i = 0; i < cfg->rpc.peer_count; i++) {
+            if (nb_node_add_discovery_peer(node, cfg->rpc.peers[i].host, cfg->rpc.peers[i].port) !=
                 NB_OK) {
                 nb_node_destroy(node);
                 return NB_ERR_INVALID;
             }
         }
-        for (i = 0; i < cfg->route_count; i++) {
+        for (i = 0; i < cfg->rpc.route_count; i++) {
             if (nb_node_add_static_route_uri(
-                    node, cfg->routes[i].service, cfg->routes[i].endpoint) != NB_OK) {
+                    node, cfg->rpc.routes[i].service, cfg->rpc.routes[i].endpoint) != NB_OK) {
                 nb_node_destroy(node);
                 return NB_ERR_INVALID;
             }

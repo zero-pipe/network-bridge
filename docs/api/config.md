@@ -33,13 +33,13 @@ nb_config_doc_destroy(cfg);  /* node 已经复制所需字段，可以立即释�
 不要按值拷贝它，也不要在栈上构造。`nb_node_create_from_config` 会复制 node
 需要的字段，因此文档只需活到该调用返回。已知字段类型错误、数值越界或 URI
 非法会返回 `NB_ERR_INVALID`；如果传入 error 输出参数，它会报告精确的 `path`
-（例如 `runtime.io_threads`、`routes[0].endpoint`、
-`transport.bindings[1].qos.depth`）和 `reason`。
+（例如 `runtime.io_threads`、`rpc.routes[0].endpoint`、
+`bindings[1].ps_qos.depth`）和 `reason`。
 
 为了向前兼容，未知字段会被忽略，但 `nb_config_parse` 会为每个未知字段打印一条
 `unknown config key ignored: <path>` 警告，避免拼写错误悄悄生效。
 
-字符串枚举值（`mode`、`transport.kind`、`discovery.mode`、`intra_process`、
+字符串枚举值（`rpc.mode`、`rpc.kind`、`intra_process`、binding `roles`、
 `log.level`、QoS 值）均为小写且区分大小写。
 
 完整 JSON Schema 见 [`docs/config.schema.json`](../config.schema.json)。
@@ -49,13 +49,13 @@ nb_config_doc_destroy(cfg);  /* node 已经复制所需字段，可以立即释�
 ```json
 {
   "name": "echo-server",
-  "mode": "static",
-  "transport": {
-    "bindings": ["tcp://127.0.0.1:42420"]
-  },
   "runtime": {
     "io_threads": 2
-  }
+  },
+  "rpc": {
+    "mode": "static"
+  },
+  "bindings": ["tcp://127.0.0.1:42420"]
 }
 ```
 
@@ -64,10 +64,28 @@ nb_config_doc_destroy(cfg);  /* node 已经复制所需字段，可以立即释�
 ```json
 {
   "name": "echo-client",
-  "mode": "static",
-  "routes": [
-    { "service": "EchoService", "endpoint": "tcp://127.0.0.1:42420" }
-  ]
+  "rpc": {
+    "mode": "static",
+    "routes": [
+      { "service": "EchoService", "endpoint": "tcp://127.0.0.1:42420" }
+    ]
+  },
+  "bindings": ["tcp://127.0.0.1:0"]
+}
+```
+
+## 最小发布/订阅进程
+
+```json
+{
+  "name": "ticker",
+  "bindings": [
+    { "name": "dds", "endpoint": "dds://0", "roles": ["ps"],
+      "ps_qos": { "reliability": "reliable", "history": "keep_last", "depth": 8 } }
+  ],
+  "pubsub": {
+    "default_qos": { "durability": "transient_local" }
+  }
 }
 ```
 
@@ -76,13 +94,12 @@ nb_config_doc_destroy(cfg);  /* node 已经复制所需字段，可以立即释�
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `name` | string | `"nb"` | node 名称，最多 `NB_NAME_MAX - 1` 个字符 |
-| `mode` | string | `"mesh"` | `mesh` 或 `static`；`static` 关闭发现 |
-| `runtime` | object | 见下文 | 线程、并发和限速 |
-| `transport` | object | 见下文 | 传输与监听端点 |
-| `discovery` | object | 见下文 | 服务发现 |
-| `metrics` | object | 见下文 | 指标采集 |
-| `log` | object | 见下文 | 日志 |
-| `routes` | array | 空 | 静态路由 |
+| `runtime` | object | 见下文 | 线程、并发和限速（两条主干共享） |
+| `rpc` | object | 见下文 | RPC 面：链路调优、发现、路由 |
+| `bindings` | array | 空 | 传输实例，两条主干共享，最多 8 个 |
+| `pubsub` | object | 见下文 | 发布/订阅面：默认 QoS |
+| `metrics` | object | 见下文 | 指标采集（共享） |
+| `log` | object | 见下文 | 日志（共享） |
 
 ## runtime
 
@@ -105,60 +122,54 @@ nb_config_doc_destroy(cfg);  /* node 已经复制所需字段，可以立即释�
 `handler_max_concurrency` 时，新请求会按调用路径返回 `NB_ERR_OVERLOAD` 或
 `NB_ERR_AGAIN`。
 
-## transport
+## bindings
 
-| 字段 | 类型 | 默认值 | 范围 | 说明 |
-| --- | --- | --- | --- | --- |
-| `kind` | string | `"udp"` | `udp` / `tcp` | 默认传输，仅在未显式配置 `bindings` 时使用 |
-| `bind_host` | string | `"0.0.0.0"` | - | 默认绑定地址，仅在未显式配置 `bindings` 时使用 |
-| `data_port` | uint | `0` | `0..65535` | 默认数据端口；`0` 自动分配 |
-| `bindings` | array | 空 | 最多 8 个 | 监听端点，元素见下文 |
-| `frag_bytes` | uint | `1440` | `0` 或 `256..8192` | UDP 分片大小；`0` 使用默认值 |
-| `max_msg_bytes` | uint | `1048576` | `0..67108864` | 单条消息上限；不得小于 `frag_bytes` |
-| `backpressure_bytes` | uint | `4194304` | `0..N` | 出站高水位；`0` 使用默认值 |
-| `rtcp_interval_ms` | uint | `1000` | `0..N` | UDP RTCP 报告间隔 |
-| `disable_rtcp` | bool | `false` | - | `true` 关闭 RTCP |
-| `qos` | object | 继承 | - | 默认 binding 的 provider QoS，字段见下文 |
+一个 binding 就是 node 启动一次的一个传输实例。两条主干从同一份列表里按角色
+取用，因此同一个 `dds://` 连接不会因为 RPC 和发布/订阅各写一遍而创建两次。
 
-`bindings` 还接受 `intra_process`（字符串：`off` / `auto` / `only`），用于 DDS
-事件发布/订阅的进程内快路径。`only` 不创建 DDS 事件 writer/reader，直接把
-消息指针投递给同一 provider 的本地订阅者；`auto` 本地投递的同时仍走 DDS。
-每个 binding 可以带自己的 `qos` 对象；不带则继承 `transport.qos`。
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `name` | string | URI scheme | binding 名称，最多 `NB_SCHEME_MAX - 1` 个字符 |
+| `endpoint` | string | - | `scheme://host[:port][/path]` |
+| `roles` | array | provider 默认 | 该 binding 服务的面：`"rpc"` / `"ps"`；缺省或空表示 provider 支持的全部角色 |
+| `intra_process` | string | `"off"` | `off` / `auto` / `only`，DDS 事件发布的进程内快路径 |
+| `poll_us` | uint | `0` | shm provider 的空闲自旋窗口（微秒） |
+| `ps_qos` | object | 继承 | 发布/订阅 QoS，字段见下文 |
 
-`bindings` 还接受 `poll_us`（uint，微秒），仅 `shm` provider 使用：排空本地
-队列后，先自旋轮询这么久再回退到阻塞等待。`0`（默认）总是阻塞等待唤醒。
-这适合低尾延迟场景，代价是一个核的空闲时间，通常与 `send_lanes` 配合，或
-少用一个 `io_threads`。运行期可用环境变量 `NB_SHM_POLL_US` 覆盖每个 binding
-的值，便于压测和实验。
-
-`bindings` 元素有两种形式：
+元素有两种形式：
 
 ```json
 {
-  "transport": {
-    "bindings": [
-      "tcp://127.0.0.1:42420",
-      { "name": "udp", "endpoint": "udp://0.0.0.0:42421" }
-    ]
-  }
+  "bindings": [
+    "tcp://127.0.0.1:42420",
+    { "name": "udp", "endpoint": "udp://0.0.0.0:42421", "roles": ["rpc"] },
+    { "name": "dds", "endpoint": "dds://0", "roles": ["ps"],
+      "ps_qos": { "reliability": "best_effort" } }
+  ]
 }
 ```
 
-字符串形式根据 URI scheme 选择 UDP/TCP。对象形式中 `name` 是 binding 名称
-（最多 `NB_SCHEME_MAX - 1` 个字符），默认取 scheme。端口 `0` 表示由系统选择
-临时端口。
+字符串形式根据 URI scheme 选择 UDP/TCP，角色取 provider 默认值。对象形式中
+`name` 默认取 scheme。端口 `0` 表示由系统选择临时端口。
 
-Cyclone DDS 使用 `dds://<domain>`，其中 host 是 DDS domain，端口可以省略
-（provider 会忽略；旧的 `dds://<domain>:1` 写法仍可解析）。dds、shm 这类非网络
-scheme 可以省略端口，tcp 和 udp 则必须带端口。共享内存使用
-`shm://<channel>:<node-id>`；mesh 模式下同一 channel 上的节点必须使用不同的
-node id（`1..9`）。shm 的 `node-id` 端口是必填的，省略会返回
-`NB_ERR_INVALID`。
+`roles` 会做校验：`udp` / `tcp` 只实现 RPC 角色；只实现发布/订阅的后端不能
+声明 `"rpc"`。角色不匹配时 `nb_node_create` 返回 `NB_ERR_NOT_SUPPORTED`。
+
+Cyclone DDS 使用 `dds://<domain>`，host 是 DDS domain，端口可以省略；共享内存
+使用 `shm://<channel>:<node-id>`，mesh 模式下同一 channel 上的节点必须使用不同
+的 node id（`1..9`）。
+
+`intra_process = "only"` 不创建 DDS 事件 writer/reader，直接把消息指针投递给
+同一 provider 的本地订阅者；`auto` 本地投递的同时仍走 DDS。
+
+`poll_us` 仅 `shm` provider 使用：排空本地队列后，先自旋轮询这么久再回退到
+阻塞等待。运行期可用环境变量 `NB_SHM_POLL_US` 覆盖每个 binding 的值。
 
 ### QoS
 
-`qos` 与 Cyclone DDS 的同名策略对应。值为 `0` 或字段缺省表示“继承 provider
-默认值”；只有显式配置的字段才会写入。当前到 DDS reader/writer 的映射：
+`ps_qos`（以及 `pubsub.default_qos`）与 Cyclone DDS 的同名策略对应。值为 `0`
+或字段缺省表示“继承 provider 默认值”；只有显式配置的字段才会写入。TCP/UDP 的
+RPC 链路不读取这些字段。
 
 | 字段 | 取值 | DDS 策略 |
 | --- | --- | --- |
@@ -184,24 +195,67 @@ node id（`1..9`）。shm 的 `node-id` 端口是必填的，省略会返回
 
 数值字段必须是整数；`1.5` 这类值会被拒绝，而不是截断。
 
-UDP/TCP/SHM 没有一一对应的链路策略，因此这些字段保留在配置中供应用和自定义
-provider 读取；内建实现不会据此改变消息语义。
+## rpc
 
-## discovery
+RPC 面独占的配置。只做发布/订阅的进程可以省略整个 `rpc` 对象。
+
+| 字段 | 类型 | 默认值 | 范围 | 说明 |
+| --- | --- | --- | --- | --- |
+| `mode` | string | `"mesh"` | `mesh` / `static` | `static` 关闭服务发现 |
+| `kind` | string | `"udp"` | `udp` / `tcp` | 默认传输，仅在未配置 `bindings` 时使用 |
+| `bind_host` | string | `"0.0.0.0"` | - | 默认绑定地址 |
+| `data_port` | uint | `0` | `0..65535` | 默认数据端口；`0` 自动分配 |
+| `frag_bytes` | uint | `1440` | `0` 或 `256..8192` | UDP 分片大小 |
+| `max_msg_bytes` | uint | `1048576` | `0..67108864` | 单条消息上限；不得小于 `frag_bytes` |
+| `backpressure_bytes` | uint | `4194304` | `0..N` | 出站高水位 |
+| `rtcp_interval_ms` | uint | `1000` | `0..N` | UDP RTCP 报告间隔 |
+| `disable_rtcp` | bool | `false` | - | `true` 关闭 RTCP |
+| `discovery` | object | 见下文 | - | 服务发现 |
+| `routes` | array | 空 | 最多 `NB_CONFIG_MAX_ROUTES` | 静态路由 |
+
+### rpc.discovery
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `mode` | string | `"mesh"` | `mesh` 启用发现；`static` / `off` / `none` 关闭 |
 | `broadcast` | string | `"255.255.255.255:41953"` | 广播/发现地址，`host:port` 形式 |
 | `peers` | array | 空 | 额外的单播 HELLO 目标，`"host:port"`，最多 32 个 |
 | `hello_interval_ms` | uint | `3000` | HELLO 周期 |
 | `node_ttl_ms` | uint | `9000` | 对端过期时间 |
 
-顶层 `mode = "static"` 和 `discovery.mode = "static"`（或 `off` / `none`）都会
-关闭发现；两者同时出现时，“关闭”优先。`nb_node_config_normalize` 会保持
-`mode` 和 `discovery.disable` 一致（关闭发现会把 `mode` 设为 `STATIC`）。
+`rpc.mode = "static"` 会关闭发现；`nb_node_config_normalize` 会把 `mode` 与
+内部的 `discovery.disable` 收敛到一致状态。MESH 通常要求双方使用相同的发现
+端口，或互相配置为单播 `peers`。
 
-MESH 通常要求双方使用相同的发现端口，或互相配置为单播 `peers`。
+### rpc.routes
+
+```json
+{
+  "rpc": {
+    "routes": [
+      { "service": "OrderService", "endpoint": "tcp://127.0.0.1:42420" },
+      { "service": "EchoService", "endpoint": "udp://127.0.0.1:42421" }
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | :---: | --- |
+| `service` | string | 是 | 目标服务名 |
+| `endpoint` | string | 是 | `scheme://host:port` |
+
+静态路由跳过发现。最多接受 `NB_CONFIG_MAX_ROUTES` 条；超出返回
+`NB_ERR_INVALID`。
+
+## pubsub
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `default_qos` | object | 继承 | binding 的 `ps_qos` 为 INHERIT 时使用，字段见 QoS |
+
+发布/订阅的 participant、topic、writer/reader 由 `nb_participant_*` /
+`nb_topic_*` / `nb_writer_*` / `nb_reader_*` 在运行期创建；配置只负责把底层
+传输启动起来并给出默认 QoS。
 
 ## metrics
 
@@ -231,25 +285,6 @@ metrics/log 运行时，因此多 node 时最后创建的 node 生效，销毁 n
 归一化为 `info`；越界值也会归一化为 `info`（`nb_node_config_validate` 则会
 直接报错）。
 
-## routes
-
-```json
-{
-  "routes": [
-    { "service": "OrderService", "endpoint": "tcp://127.0.0.1:42420" },
-    { "service": "EchoService", "endpoint": "udp://127.0.0.1:42421" }
-  ]
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | :---: | --- |
-| `service` | string | 是 | 目标服务名 |
-| `endpoint` | string | 是 | `scheme://host:port` |
-
-静态路由跳过发现。最多接受 `NB_CONFIG_MAX_ROUTES` 条；超出返回
-`NB_ERR_INVALID`。
-
 ## 默认值与归一化
 
 在代码中构造 `nb_node_config_t` 时，先调用 `nb_node_config_default`，或者在
@@ -259,10 +294,9 @@ metrics/log 运行时，因此多 node 时最后创建的 node 生效，销毁 n
 `nb_node_config_validate` 是严格版本：既不裁剪也不填默认值，字段越界时返回
 `NB_ERR_INVALID` / `NB_ERR_TOOBIG`。
 
-`nb_node_config_t` 带有 `routes`/`route_count` 和 `peers`/`peer_count`；
+`nb_rpc_config_t` 带有 `routes`/`route_count` 和 `peers`/`peer_count`；
 `nb_node_create` 会在返回前应用它们。任何 route 或 peer 注册失败，都会销毁
-构造到一半的 node 并返回错误，而不是静默忽略。JSON 中的 `routes`/`peers`
-落到同一组字段。
+构造到一半的 node 并返回错误，而不是静默忽略。
 
 职责划分：
 
@@ -274,16 +308,16 @@ metrics/log 运行时，因此多 node 时最后创建的 node 生效，销毁 n
 归一化规则：
 
 - `name == NULL` 使用 `"nb"`。
-- `transport.bind_host == NULL` 使用 `"0.0.0.0"`。
-- `discovery.broadcast_host == NULL` 使用 `"255.255.255.255"`。
-- `mode` 和 `discovery.disable` 收敛：任一关闭发现，两者都置为关闭。
+- `rpc.bind_host == NULL` 使用 `"0.0.0.0"`。
+- `rpc.discovery.broadcast_host == NULL` 使用 `"255.255.255.255"`。
+- `rpc.mode` 和 `rpc.discovery.disable` 收敛：任一关闭发现，两者都置为关闭。
 - `runtime.io_threads == 0` 使用硬件并发数，裁剪到 `1..NB_TRANSPORT_MAX_IO`。
 - `runtime.handler_threads` 裁剪到 `0..NB_MAX_HANDLER_THREADS`。
 - `runtime.send_lanes` 裁剪到 `0..NB_MAX_SEND_LANES`。
-- `frag_bytes == 0` 使用 `1440`；否则裁剪到 `256..8192`。
-- `max_msg_bytes == 0` 使用 `1 MiB`；裁剪到 `frag_bytes..64 MiB`。
-- `backpressure_bytes == 0` 使用 `4 MiB`。
-- `discovery.port == 0` 使用 `41953`。
+- `rpc.frag_bytes == 0` 使用 `1440`；否则裁剪到 `256..8192`。
+- `rpc.max_msg_bytes == 0` 使用 `1 MiB`；裁剪到 `frag_bytes..64 MiB`。
+- `rpc.backpressure_bytes == 0` 使用 `4 MiB`。
+- `rpc.discovery.port == 0` 使用 `41953`。
 - `metrics.sample_every == 0` 使用 `1`。
 
 ## 常见错误
@@ -291,24 +325,24 @@ metrics/log 运行时，因此多 node 时最后创建的 node 生效，销毁 n
 | 错误路径 | 原因 |
 | --- | --- |
 | `name` | 不是字符串，或过长 |
-| `mode` | 不是 `mesh` / `static` |
+| `rpc.mode` | 不是 `mesh` / `static` |
 | `runtime.io_threads` | 超过 `NB_TRANSPORT_MAX_IO`（8） |
 | `runtime.handler_threads` | 超过 `NB_MAX_HANDLER_THREADS`（1024） |
 | `runtime.send_lanes` | 超过 `NB_MAX_SEND_LANES`（64） |
 | `runtime.max_streams` | 超过 `NB_STREAM_MAX_RECV_STREAMS`（64） |
-| `transport.kind` | 不是 `udp` / `tcp` |
-| `transport.frag_bytes` | 既不是 `0` 也不在 `256..8192` 内 |
-| `transport.max_msg_bytes` | 超过 64 MiB 或小于 `frag_bytes` |
-| `transport.bindings[i].endpoint` | 元素不是字符串/对象、URI 非法，或数量过多 |
-| `transport.bindings[i].intra_process` | 不是 `off` / `auto` / `only` |
-| `transport.bindings[i].qos.<field>` | QoS 字段类型或取值非法 |
-| `discovery.mode` | 不是 `mesh` / `static` / `off` / `none` |
-| `discovery.broadcast` | 不是 `host:port` |
-| `discovery.peers[i]` | 不是合法的 `host:port` |
-| `routes[i].service` | 缺失或过长 |
-| `routes[i].endpoint` | 缺失、URI 非法或过长 |
+| `rpc.kind` | 不是 `udp` / `tcp` |
+| `rpc.frag_bytes` | 既不是 `0` 也不在 `256..8192` 内 |
+| `rpc.max_msg_bytes` | 超过 64 MiB 或小于 `frag_bytes` |
+| `bindings[i].endpoint` | 元素不是字符串/对象、URI 非法，或数量过多 |
+| `bindings[i].roles` | 不是 `"rpc"` / `"ps"` 数组 |
+| `bindings[i].intra_process` | 不是 `off` / `auto` / `only` |
+| `bindings[i].ps_qos.<field>` | QoS 字段类型或取值非法 |
+| `rpc.discovery.broadcast` | 不是 `host:port` |
+| `rpc.discovery.peers[i]` | 不是合法的 `host:port` |
+| `rpc.routes[i].service` | 缺失或过长 |
+| `rpc.routes[i].endpoint` | 缺失、URI 非法或过长 |
+| `pubsub.default_qos.<field>` | QoS 字段类型或取值非法 |
 | `log.level` | 不支持的级别 |
-| `transport.qos.<field>` | QoS 字段类型或取值非法 |
 
 `nb_config_parse_file` 对超过 `NB_CONFIG_MAX_FILE_BYTES`（1 MiB）的文件返回
 `NB_ERR_INVALID`，避免路径写错时把巨大文件读进内存。

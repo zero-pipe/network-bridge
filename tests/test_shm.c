@@ -154,10 +154,10 @@ int main(void)
 
     nb_node_config_default(&server_cfg);
     server_cfg.name = "shm-server";
-    server_cfg.mode = NB_NODE_MODE_STATIC;
+    server_cfg.rpc.mode = NB_NODE_MODE_STATIC;
     server_cfg.runtime.io_threads = 1;
-    server_cfg.transport.bindings = &server_binding;
-    server_cfg.transport.binding_count = 1;
+    server_cfg.bindings = &server_binding;
+    server_cfg.binding_count = 1;
 
     for (c = 0; c < CLIENT_COUNT; c++) {
         memset(&client_binding[c], 0, sizeof(client_binding[c]));
@@ -167,10 +167,10 @@ int main(void)
 
         nb_node_config_default(&client_cfg[c]);
         client_cfg[c].name = "shm-client";
-        client_cfg[c].mode = NB_NODE_MODE_STATIC;
+        client_cfg[c].rpc.mode = NB_NODE_MODE_STATIC;
         client_cfg[c].runtime.io_threads = 1;
-        client_cfg[c].transport.bindings = &client_binding[c];
-        client_cfg[c].transport.binding_count = 1;
+        client_cfg[c].bindings = &client_binding[c];
+        client_cfg[c].binding_count = 1;
     }
 
     rc = nb_node_create(&server_cfg, &server);

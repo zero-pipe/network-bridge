@@ -39,19 +39,19 @@ int main(void)
 
     nb_node_config_default(&scfg);
     scfg.name = "WorkerServer";
-    scfg.mode = NB_NODE_MODE_STATIC;
-    scfg.transport.kind = NB_TRANSPORT_KIND_TCP;
-    scfg.transport.bind_host = "127.0.0.1";
-    scfg.transport.data_port = 0;
+    scfg.rpc.mode = NB_NODE_MODE_STATIC;
+    scfg.rpc.kind = NB_TRANSPORT_KIND_TCP;
+    scfg.rpc.bind_host = "127.0.0.1";
+    scfg.rpc.data_port = 0;
     scfg.runtime.io_threads = 1;
     scfg.runtime.handler_threads = 2;
 
     nb_node_config_default(&ccfg);
     ccfg.name = "WorkerClient";
-    ccfg.mode = NB_NODE_MODE_STATIC;
-    ccfg.transport.kind = NB_TRANSPORT_KIND_TCP;
-    ccfg.transport.bind_host = "127.0.0.1";
-    ccfg.transport.data_port = 0;
+    ccfg.rpc.mode = NB_NODE_MODE_STATIC;
+    ccfg.rpc.kind = NB_TRANSPORT_KIND_TCP;
+    ccfg.rpc.bind_host = "127.0.0.1";
+    ccfg.rpc.data_port = 0;
     ccfg.runtime.io_threads = 1;
 
     options.exec = NB_SERVICE_EXEC_MODE_WORKER;

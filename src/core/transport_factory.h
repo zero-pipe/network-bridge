@@ -11,15 +11,17 @@
 
 #include <stdint.h>
 
-/* 成功返回 NB_OK；scheme 未注册/参数非法/启动失败返回相应错误码。 */
+/* 成功返回 NB_OK；scheme 未注册/参数非法/启动失败返回相应错误码。
+ * roles 是 NB_PROVIDER_ROLE_* 位掩码；0 表示接受该 provider 默认实现的角色。 */
 int nb_node_transport_add(nb_node_t *node,
                           const char *scheme,
                           const char *host,
                           uint16_t port,
                           const char *path,
+                          unsigned roles,
                           nb_intra_process_t intra_process,
                           uint32_t poll_us,
-                          const nb_ps_qos_t *qos);
+                          const nb_ps_qos_t *ps_qos);
 
 /* 按 binding 配置创建并启动传输（推荐入口）。 */
 int nb_node_transport_add_binding(nb_node_t *node, const nb_binding_config_t *binding);

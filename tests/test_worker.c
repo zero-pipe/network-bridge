@@ -244,24 +244,24 @@ static int run_case(nb_transport_kind_t kind, const char *label)
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "worker-srv";
-    scfg.transport.kind = kind;
-    scfg.transport.bind_host = "127.0.0.1";
-    scfg.discovery.broadcast_host = "127.0.0.1";
-    scfg.discovery.port = sport;
+    scfg.rpc.kind = kind;
+    scfg.rpc.bind_host = "127.0.0.1";
+    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.port = sport;
     scfg.runtime.io_threads = 1;
     scfg.runtime.handler_threads = 2;
-    scfg.discovery.hello_interval_ms = 200;
-    scfg.discovery.node_ttl_ms = 3000;
+    scfg.rpc.discovery.hello_interval_ms = 200;
+    scfg.rpc.discovery.node_ttl_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "worker-cli";
-    ccfg.transport.kind = kind;
-    ccfg.transport.bind_host = "127.0.0.1";
-    ccfg.discovery.broadcast_host = "127.0.0.1";
-    ccfg.discovery.port = cport;
+    ccfg.rpc.kind = kind;
+    ccfg.rpc.bind_host = "127.0.0.1";
+    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.port = cport;
     ccfg.runtime.io_threads = 1;
-    ccfg.discovery.hello_interval_ms = 200;
-    ccfg.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.hello_interval_ms = 200;
+    ccfg.rpc.discovery.node_ttl_ms = 3000;
 
     if (nb_node_create(&scfg, &server) != NB_OK || nb_node_create(&ccfg, &client) != NB_OK) {
         nb_log_error("[%s] node create failed", label);
@@ -401,24 +401,24 @@ static int run_fallback_case(nb_transport_kind_t kind, const char *label)
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "fallback-srv";
-    scfg.transport.kind = kind;
-    scfg.transport.bind_host = "127.0.0.1";
-    scfg.discovery.broadcast_host = "127.0.0.1";
-    scfg.discovery.port = sport;
+    scfg.rpc.kind = kind;
+    scfg.rpc.bind_host = "127.0.0.1";
+    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.port = sport;
     scfg.runtime.io_threads = 1;
     scfg.runtime.handler_threads = 0;
-    scfg.discovery.hello_interval_ms = 200;
-    scfg.discovery.node_ttl_ms = 3000;
+    scfg.rpc.discovery.hello_interval_ms = 200;
+    scfg.rpc.discovery.node_ttl_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "fallback-cli";
-    ccfg.transport.kind = kind;
-    ccfg.transport.bind_host = "127.0.0.1";
-    ccfg.discovery.broadcast_host = "127.0.0.1";
-    ccfg.discovery.port = cport;
+    ccfg.rpc.kind = kind;
+    ccfg.rpc.bind_host = "127.0.0.1";
+    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.port = cport;
     ccfg.runtime.io_threads = 1;
-    ccfg.discovery.hello_interval_ms = 200;
-    ccfg.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.hello_interval_ms = 200;
+    ccfg.rpc.discovery.node_ttl_ms = 3000;
 
     if (nb_node_create(&scfg, &server) != NB_OK || nb_node_create(&ccfg, &client) != NB_OK) {
         nb_log_error("[%s] node create failed", label);
@@ -499,12 +499,12 @@ static int run_api_checks(void)
 
     memset(&cfg, 0, sizeof(cfg));
     cfg.name = "worker-api";
-    cfg.transport.kind = NB_TRANSPORT_KIND_UDP;
-    cfg.transport.bind_host = "127.0.0.1";
-    cfg.transport.data_port = 0;
+    cfg.rpc.kind = NB_TRANSPORT_KIND_UDP;
+    cfg.rpc.bind_host = "127.0.0.1";
+    cfg.rpc.data_port = 0;
     cfg.runtime.io_threads = 1;
     cfg.runtime.handler_threads = 1;
-    cfg.mode = NB_NODE_MODE_STATIC;
+    cfg.rpc.mode = NB_NODE_MODE_STATIC;
 
     memset(&direct, 0, sizeof(direct));
     good_exec.user = &direct;
@@ -617,25 +617,25 @@ static int run_overload_case(nb_transport_kind_t kind, const char *label)
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "overload-srv";
-    scfg.transport.kind = kind;
-    scfg.transport.bind_host = "127.0.0.1";
-    scfg.discovery.broadcast_host = "127.0.0.1";
-    scfg.discovery.port = sport;
+    scfg.rpc.kind = kind;
+    scfg.rpc.bind_host = "127.0.0.1";
+    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.port = sport;
     scfg.runtime.io_threads = 1;
     scfg.runtime.handler_threads = 1;
     scfg.runtime.handler_max_concurrency = 1;
-    scfg.discovery.hello_interval_ms = 200;
-    scfg.discovery.node_ttl_ms = 3000;
+    scfg.rpc.discovery.hello_interval_ms = 200;
+    scfg.rpc.discovery.node_ttl_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "overload-cli";
-    ccfg.transport.kind = kind;
-    ccfg.transport.bind_host = "127.0.0.1";
-    ccfg.discovery.broadcast_host = "127.0.0.1";
-    ccfg.discovery.port = cport;
+    ccfg.rpc.kind = kind;
+    ccfg.rpc.bind_host = "127.0.0.1";
+    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.port = cport;
     ccfg.runtime.io_threads = 1;
-    ccfg.discovery.hello_interval_ms = 200;
-    ccfg.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.hello_interval_ms = 200;
+    ccfg.rpc.discovery.node_ttl_ms = 3000;
 
     if (nb_node_create(&scfg, &server) != NB_OK || nb_node_create(&ccfg, &client) != NB_OK) {
         nb_log_error("[%s] node create failed", label);
@@ -790,24 +790,24 @@ static int run_executor_case(nb_transport_kind_t kind, const char *label)
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "exec-srv";
-    scfg.transport.kind = kind;
-    scfg.transport.bind_host = "127.0.0.1";
-    scfg.discovery.broadcast_host = "127.0.0.1";
-    scfg.discovery.port = sport;
+    scfg.rpc.kind = kind;
+    scfg.rpc.bind_host = "127.0.0.1";
+    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.port = sport;
     scfg.runtime.io_threads = 1;
     scfg.runtime.handler_threads = 0; /* 证明自定义 executor 不依赖内置池 */
-    scfg.discovery.hello_interval_ms = 200;
-    scfg.discovery.node_ttl_ms = 3000;
+    scfg.rpc.discovery.hello_interval_ms = 200;
+    scfg.rpc.discovery.node_ttl_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "exec-cli";
-    ccfg.transport.kind = kind;
-    ccfg.transport.bind_host = "127.0.0.1";
-    ccfg.discovery.broadcast_host = "127.0.0.1";
-    ccfg.discovery.port = cport;
+    ccfg.rpc.kind = kind;
+    ccfg.rpc.bind_host = "127.0.0.1";
+    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.port = cport;
     ccfg.runtime.io_threads = 1;
-    ccfg.discovery.hello_interval_ms = 200;
-    ccfg.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.hello_interval_ms = 200;
+    ccfg.rpc.discovery.node_ttl_ms = 3000;
 
     if (nb_node_create(&scfg, &server) != NB_OK || nb_node_create(&ccfg, &client) != NB_OK) {
         nb_log_error("[%s] node create failed", label);
@@ -982,24 +982,24 @@ static int run_deadline_case(const char *label)
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "deadline-srv";
-    scfg.transport.kind = NB_TRANSPORT_KIND_TCP;
-    scfg.transport.bind_host = "127.0.0.1";
-    scfg.discovery.broadcast_host = "127.0.0.1";
-    scfg.discovery.port = sport;
+    scfg.rpc.kind = NB_TRANSPORT_KIND_TCP;
+    scfg.rpc.bind_host = "127.0.0.1";
+    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.port = sport;
     scfg.runtime.io_threads = 1;
     scfg.runtime.handler_threads = 1; /* 单 worker：第二个请求必然排队 */
-    scfg.discovery.hello_interval_ms = 200;
-    scfg.discovery.node_ttl_ms = 3000;
+    scfg.rpc.discovery.hello_interval_ms = 200;
+    scfg.rpc.discovery.node_ttl_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "deadline-cli";
-    ccfg.transport.kind = NB_TRANSPORT_KIND_TCP;
-    ccfg.transport.bind_host = "127.0.0.1";
-    ccfg.discovery.broadcast_host = "127.0.0.1";
-    ccfg.discovery.port = cport;
+    ccfg.rpc.kind = NB_TRANSPORT_KIND_TCP;
+    ccfg.rpc.bind_host = "127.0.0.1";
+    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.port = cport;
     ccfg.runtime.io_threads = 1;
-    ccfg.discovery.hello_interval_ms = 200;
-    ccfg.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.hello_interval_ms = 200;
+    ccfg.rpc.discovery.node_ttl_ms = 3000;
 
     block.started = ntk_sem_create(0);
     block.release = ntk_sem_create(0);
@@ -1177,24 +1177,24 @@ static int run_cancel_case(const char *label)
 
     memset(&scfg, 0, sizeof(scfg));
     scfg.name = "cancel-srv";
-    scfg.transport.kind = NB_TRANSPORT_KIND_TCP;
-    scfg.transport.bind_host = "127.0.0.1";
-    scfg.discovery.broadcast_host = "127.0.0.1";
-    scfg.discovery.port = sport;
+    scfg.rpc.kind = NB_TRANSPORT_KIND_TCP;
+    scfg.rpc.bind_host = "127.0.0.1";
+    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.port = sport;
     scfg.runtime.io_threads = 1;
     scfg.runtime.handler_threads = 1;
-    scfg.discovery.hello_interval_ms = 200;
-    scfg.discovery.node_ttl_ms = 3000;
+    scfg.rpc.discovery.hello_interval_ms = 200;
+    scfg.rpc.discovery.node_ttl_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "cancel-cli";
-    ccfg.transport.kind = NB_TRANSPORT_KIND_TCP;
-    ccfg.transport.bind_host = "127.0.0.1";
-    ccfg.discovery.broadcast_host = "127.0.0.1";
-    ccfg.discovery.port = cport;
+    ccfg.rpc.kind = NB_TRANSPORT_KIND_TCP;
+    ccfg.rpc.bind_host = "127.0.0.1";
+    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.port = cport;
     ccfg.runtime.io_threads = 1;
-    ccfg.discovery.hello_interval_ms = 200;
-    ccfg.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.hello_interval_ms = 200;
+    ccfg.rpc.discovery.node_ttl_ms = 3000;
 
     block.started = ntk_sem_create(0);
     block.release = ntk_sem_create(0);

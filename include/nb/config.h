@@ -4,13 +4,13 @@
 /*
  * Single configuration entry point for network bridge.
  *
- * Configuration is split into per-module sub-structs; a node only assembles
- * them, and each module reads only its own section. All sub-structs are
- * aggregated here, so callers only need to include <nb/config.h>.
+ * Configuration is split by spine: `rpc` holds the RPC link tuning, discovery
+ * and routes; `pubsub` holds the pub/sub default QoS; `bindings` is the shared
+ * list of transports, each declaring the roles it serves. Runtime/metrics/log
+ * are shared by both spines.
  *
  * {
  *   "name": "echo-server",
- *   "mode": "static",
  *   "runtime": {
  *     "io_threads": 2,
  *     "handler_threads": 4,
@@ -20,7 +20,8 @@
  *     "peer_rate_limit_pps": 0,
  *     "send_lanes": 0
  *   },
- *   "transport": {
+ *   "rpc": {
+ *     "mode": "static",
  *     "kind": "tcp",
  *     "bind_host": "0.0.0.0",
  *     "data_port": 42420,
@@ -29,22 +30,30 @@
  *     "backpressure_bytes": 4194304,
  *     "rtcp_interval_ms": 1000,
  *     "disable_rtcp": false,
- *     "bindings": ["tcp://127.0.0.1:42420"]
+ *     "discovery": {
+ *       "disable": false,
+ *       "broadcast": "255.255.255.255:41953",
+ *       "hello_interval_ms": 3000,
+ *       "node_ttl_ms": 9000,
+ *       "peers": ["127.0.0.1:41953"]
+ *     },
+ *     "routes": [ { "service": "EchoService", "endpoint": "tcp://127.0.0.1:42420" } ]
  *   },
- *   "discovery": {
- *     "mode": "static",
- *     "broadcast": "255.255.255.255:41953",
- *     "hello_interval_ms": 3000,
- *     "node_ttl_ms": 9000,
- *     "peers": ["127.0.0.1:41953"]
- *   },
+ *   "bindings": [
+ *     "tcp://127.0.0.1:42420",
+ *     { "name": "dds", "endpoint": "dds://0", "roles": ["ps"],
+ *       "ps_qos": { "reliability": "reliable" } }
+ *   ],
+ *   "pubsub": { "default_qos": { "durability": "transient_local" } },
  *   "metrics": { "disable": false, "disable_latency_histogram": false, "sample_every": 1 },
- *   "log":     { "disable": false, "level": "info" },
- *   "routes":  [ { "service": "EchoService", "endpoint": "tcp://127.0.0.1:42420" } ]
+ *   "log":     { "disable": false, "level": "info" }
  * }
  *
- * String enums (mode, transport.kind, discovery.mode, intra_process, log.level,
- * qos values) are lowercase and case-sensitive.
+ * A binding may be a bare endpoint string (roles default to whatever the
+ * provider implements) or an object with roles and a pub/sub QoS.
+ *
+ * String enums (mode, kind, discovery mode, intra_process, log.level, qos
+ * values, binding roles) are lowercase and case-sensitive.
  *
  * A field of the wrong type, out of range, or an invalid URI returns
  * NB_ERR_INVALID; unknown fields are ignored (and logged as warnings). Pass a
@@ -75,15 +84,22 @@ extern "C" {
 #define NB_CONFIG_MAX_BINDINGS NB_MAX_BINDINGS
 
 /* ---- Bindings ---- */
+/*
+ * One binding: a transport instance the node starts once. `roles` says which
+ * spines may use it (NB_PROVIDER_ROLE_RPC / NB_PROVIDER_ROLE_PS); 0 means the
+ * provider's default, i.e. every role it implements. `ps_qos` applies to the
+ * pub/sub role only; INHERIT takes nb_pubsub_config_t.default_qos.
+ */
 typedef struct nb_binding_config {
     const char *name;                 /* provider/binding name, e.g. "tcp" */
     const char *endpoint;             /* URI, e.g. tcp://127.0.0.1:8080 */
+    unsigned roles;                   /* NB_PROVIDER_ROLE_*; 0 = provider default */
     nb_intra_process_t intra_process; /* provider-local event fast path */
     /* Provider busy-poll window in microseconds; 0 blocks on wakeup. Honored by
      * the shm provider: after draining, keep polling this long before falling
      * back to a blocking wait. Trades one core's idle for lower tail latency. */
     uint32_t poll_us;
-    nb_ps_qos_t qos;                     /* provider QoS; zero = inherit */
+    nb_ps_qos_t ps_qos;               /* pub/sub role QoS; INHERIT = default */
 } nb_binding_config_t;
 
 /* ---- Per-module configuration ---- */
@@ -99,21 +115,6 @@ typedef struct nb_node_runtime_config {
     uint32_t peer_rate_limit_pps;     /* per-peer requests/sec cap; 0 = unlimited */
     unsigned send_lanes;              /* dedicated send-lane pollers; 0 = none, max NB_MAX_SEND_LANES */
 } nb_node_runtime_config_t;
-
-/* Transport and link tuning. */
-typedef struct nb_node_transport_config {
-    nb_transport_kind_t kind;            /* transport for the default binding; default UDP */
-    const char *bind_host;               /* bind address; default "0.0.0.0" */
-    uint16_t data_port;                  /* data-plane port; 0 = auto-assign */
-    uint16_t frag_bytes;                 /* UDP fragment size; 0 = 1440, else 256..8192 */
-    uint32_t max_msg_bytes;              /* max encoded envelope; 0 = 1 MiB, max 64 MiB */
-    uint32_t backpressure_bytes;         /* outbound high-water mark; 0 = 4 MiB */
-    uint32_t rtcp_interval_ms;           /* UDP RTCP interval; 0 = 1000 ms */
-    bool disable_rtcp;                   /* true disables UDP RTCP */
-    const nb_binding_config_t *bindings; /* non-empty starts every listed binding */
-    size_t binding_count;
-    nb_ps_qos_t qos;                        /* QoS for the default binding */
-} nb_node_transport_config_t;
 
 /* Service discovery. */
 typedef struct nb_node_discovery_config {
@@ -151,22 +152,48 @@ typedef struct nb_peer_endpoint {
     uint16_t port;
 } nb_peer_endpoint_t;
 
-/* Composite node configuration: identity plus per-module sub-configs. */
-typedef struct nb_node_config {
-    const char *name;                        /* node name (logs/discovery); may be NULL */
+/* ---- RPC spine ---- */
+/*
+ * RPC link tuning, service discovery and routes. Everything here is used by the
+ * RPC spine only; a process that only publishes/subscribes leaves it at the
+ * defaults.
+ */
+typedef struct nb_rpc_config {
     nb_node_mode_t mode;                     /* MESH (default) / STATIC */
     const nb_service_table_t *service_table; /* optional shared declaration table; static lifetime */
-    nb_node_runtime_config_t runtime;
-    nb_node_transport_config_t transport;
-    nb_node_discovery_config_t discovery;
-    nb_node_metrics_config_t metrics;
-    nb_node_log_config_t log;
+    nb_transport_kind_t kind;                /* default binding kind; default UDP */
+    const char *bind_host;                   /* bind address; default "0.0.0.0" */
+    uint16_t data_port;                      /* data-plane port; 0 = auto-assign */
+    uint16_t frag_bytes;                     /* UDP fragment size; 0 = 1440, else 256..8192 */
+    uint32_t max_msg_bytes;                  /* max encoded envelope; 0 = 1 MiB, max 64 MiB */
+    uint32_t backpressure_bytes;             /* outbound high-water mark; 0 = 4 MiB */
+    uint32_t rtcp_interval_ms;               /* UDP RTCP interval; 0 = 1000 ms */
+    bool disable_rtcp;                       /* true disables UDP RTCP */
+    nb_node_discovery_config_t discovery;    /* HELLO-based service discovery */
     /* Optional static routes applied during nb_node_create. */
     const nb_static_route_t *routes;
     size_t route_count;
     /* Optional unicast discovery peers applied during nb_node_create. */
     const nb_peer_endpoint_t *peers;
     size_t peer_count;
+} nb_rpc_config_t;
+
+/* ---- Pub/sub spine ---- */
+typedef struct nb_pubsub_config {
+    nb_ps_qos_t default_qos; /* inherited by bindings whose ps_qos is INHERIT */
+} nb_pubsub_config_t;
+
+/* Composite node configuration: identity, shared runtime, and the two spines. */
+typedef struct nb_node_config {
+    const char *name;          /* node name (logs/discovery); may be NULL */
+    nb_node_runtime_config_t runtime;
+    nb_rpc_config_t rpc;
+    /* Transports, started once each and shared by both spines. */
+    const nb_binding_config_t *bindings;
+    size_t binding_count;
+    nb_pubsub_config_t pubsub;
+    nb_node_metrics_config_t metrics;
+    nb_node_log_config_t log;
 } nb_node_config_t;
 
 /* ---- Parse results ---- */
@@ -180,8 +207,8 @@ typedef struct nb_binding_endpoint {
 /* Opaque parsed document. Use nb_config_node() to inspect the result. */
 typedef struct nb_config_doc nb_config_doc_t;
 
-/* Structured parse error: path looks like "transport.frag_bytes",
- * "routes[0].endpoint" or "transport.bindings[1].qos.depth". */
+/* Structured parse error: path looks like "rpc.frag_bytes",
+ * "rpc.routes[0].endpoint" or "bindings[1].ps_qos.depth". */
 typedef struct nb_config_error {
     int code; /* NB_ERR_* */
     char path[96];
@@ -190,7 +217,8 @@ typedef struct nb_config_error {
 
 /* ---- Defaults ---- */
 void nb_node_runtime_config_default(nb_node_runtime_config_t *config);
-void nb_node_transport_config_default(nb_node_transport_config_t *config);
+void nb_rpc_config_default(nb_rpc_config_t *config);
+void nb_pubsub_config_default(nb_pubsub_config_t *config);
 void nb_node_discovery_config_default(nb_node_discovery_config_t *config);
 void nb_node_metrics_config_default(nb_node_metrics_config_t *config);
 void nb_node_log_config_default(nb_node_log_config_t *config);

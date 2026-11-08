@@ -532,18 +532,18 @@ nb_cyclone_dds_register();
 nb_binding_config_t binding = { "dds", "dds://0" };
 nb_node_config_t cfg;
 nb_node_config_default(&cfg);
-cfg.mode = NB_NODE_MODE_STATIC;
-cfg.transport.bindings = &binding;
-cfg.transport.binding_count = 1;
+cfg.rpc.mode = NB_NODE_MODE_STATIC;
+cfg.bindings = &binding;
+cfg.binding_count = 1;
 ```
 
-可以配置 binding QoS；未设置的字段保留 Cyclone DDS 默认值：
+可以配置 binding 的发布/订阅 QoS；未设置的字段保留 Cyclone DDS 默认值：
 
 ```c
-strcpy(binding.qos.partition, "orders");
-binding.qos.reliability = NB_QOS_RELIABILITY_RELIABLE;
-binding.qos.history = NB_QOS_HISTORY_KEEP_LAST;
-binding.qos.depth = 8;
+strcpy(binding.ps_qos.partition, "orders");
+binding.ps_qos.reliability = NB_QOS_RELIABILITY_RELIABLE;
+binding.ps_qos.history = NB_QOS_HISTORY_KEEP_LAST;
+binding.ps_qos.depth = 8;
 ```
 
 topic 由完整的 `Service.method` 路由派生：

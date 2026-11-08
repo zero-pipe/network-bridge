@@ -10,11 +10,6 @@
       "maxLength": 63,
       "description": "Node 名称。默认：nb。"
     },
-    "mode": {
-      "type": "string",
-      "enum": ["mesh", "static"],
-      "description": "发现模式。默认：mesh。static 等价于 discovery.disable=true。"
-    },
     "runtime": {
       "type": "object",
       "properties": {
@@ -60,9 +55,64 @@
       },
       "additionalProperties": true
     },
-    "transport": {
+    "bindings": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "maxLength": 255,
+            "description": "端点 URI，例如 tcp://127.0.0.1:42420。"
+          },
+          {
+            "type": "object",
+            "required": ["endpoint"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 15
+              },
+              "endpoint": {
+                "type": "string",
+                "maxLength": 255
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["rpc", "ps"]
+                },
+                "description": "该 binding 服务的面。缺省表示 provider 支持的全部角色；udp/tcp 只支持 rpc。"
+              },
+              "intra_process": {
+                "type": "string",
+                "enum": ["off", "auto", "only"],
+                "description": "DDS 事件的进程内快路径。"
+              },
+              "poll_us": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "shm 排空本地队列后的忙轮询窗口（微秒），超时后回退到阻塞等待。0 表示阻塞等待唤醒。"
+              },
+              "ps_qos": {
+                "$ref": "#/$defs/qos"
+              }
+            },
+            "additionalProperties": true
+          }
+        ]
+      },
+      "description": "传输实例，RPC 与发布/订阅共享；每个只启动一次。"
+    },
+    "rpc": {
       "type": "object",
       "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["mesh", "static"],
+          "description": "服务发现模式。默认：mesh。static 关闭发现。"
+        },
         "kind": {
           "type": "string",
           "enum": ["udp", "tcp"],
@@ -78,48 +128,6 @@
           "minimum": 0,
           "maximum": 65535,
           "description": "默认数据端口。0 表示由操作系统选择。"
-        },
-        "bindings": {
-          "type": "array",
-          "maxItems": 8,
-          "items": {
-            "oneOf": [
-              {
-                "type": "string",
-                "maxLength": 255,
-                "description": "端点 URI，例如 tcp://127.0.0.1:42420。"
-              },
-              {
-                "type": "object",
-                "required": ["endpoint"],
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "maxLength": 15
-                  },
-                  "endpoint": {
-                    "type": "string",
-                    "maxLength": 255
-                  },
-                  "intra_process": {
-                    "type": "string",
-                    "enum": ["off", "auto", "only"],
-                    "description": "DDS 事件的进程内快路径。"
-                  },
-                  "poll_us": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "description": "shm 排空本地队列后的忙轮询窗口（微秒），超时后回退到阻塞等待。0 表示阻塞等待唤醒。"
-                  },
-                  "qos": {
-                    "$ref": "#/$defs/qos"
-                  }
-                },
-                "additionalProperties": true
-              }
-            ]
-          },
-          "description": "显式监听端点。"
         },
         "frag_bytes": {
           "type": "integer",
@@ -149,41 +157,65 @@
           "type": "boolean",
           "description": "设为 true 关闭 RTCP。"
         },
-        "qos": {
-          "$ref": "#/$defs/qos"
-        }
-      },
-      "additionalProperties": true
-    },
-    "discovery": {
-      "type": "object",
-      "properties": {
-        "mode": {
-          "type": "string",
-          "enum": ["mesh", "static", "off", "none"],
-          "description": "mesh 启用发现；static/off/none 关闭。顶层 mode 为 static 时始终关闭发现。"
+        "discovery": {
+          "type": "object",
+          "properties": {
+            "broadcast": {
+              "type": "string",
+              "description": "发现地址 host:port。默认 255.255.255.255:41953。"
+            },
+            "peers": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "description": "单播 HELLO 目标，host:port 形式。"
+              }
+            },
+            "hello_interval_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "HELLO 间隔。默认 3000 ms。"
+            },
+            "node_ttl_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "对端过期时间。默认 9000 ms。"
+            }
+          },
+          "additionalProperties": true
         },
-        "broadcast": {
-          "type": "string",
-          "description": "发现地址 host:port。默认 255.255.255.255:41953。"
-        },
-        "peers": {
+        "routes": {
           "type": "array",
           "maxItems": 32,
           "items": {
-            "type": "string",
-            "description": "单播 HELLO 目标，host:port 形式。"
-          }
-        },
-        "hello_interval_ms": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "HELLO 间隔。默认 3000 ms。"
-        },
-        "node_ttl_ms": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "对端过期时间。默认 9000 ms。"
+            "type": "object",
+            "required": ["service", "endpoint"],
+            "properties": {
+              "service": {
+                "type": "string",
+                "maxLength": 63
+              },
+              "endpoint": {
+                "type": "string",
+                "maxLength": 255,
+                "description": "端点 URI，例如 tcp://127.0.0.1:42420。"
+              }
+            },
+            "additionalProperties": true
+          },
+          "description": "绕过发现流程的静态服务路由。"
+        }
+      },
+      "additionalProperties": true,
+      "description": "RPC 面配置；只做发布/订阅的进程可以省略。"
+    },
+    "pubsub": {
+      "type": "object",
+      "properties": {
+        "default_qos": {
+          "$ref": "#/$defs/qos",
+          "description": "binding 的 ps_qos 为 INHERIT 时使用的默认 QoS。"
         }
       },
       "additionalProperties": true
@@ -221,27 +253,6 @@
         }
       },
       "additionalProperties": true
-    },
-    "routes": {
-      "type": "array",
-      "maxItems": 32,
-      "items": {
-        "type": "object",
-        "required": ["service", "endpoint"],
-        "properties": {
-          "service": {
-            "type": "string",
-            "maxLength": 63
-          },
-          "endpoint": {
-            "type": "string",
-            "maxLength": 255,
-            "description": "端点 URI，例如 tcp://127.0.0.1:42420。"
-          }
-        },
-        "additionalProperties": true
-      },
-      "description": "绕过发现流程的静态服务路由。"
     }
   },
   "$defs": {

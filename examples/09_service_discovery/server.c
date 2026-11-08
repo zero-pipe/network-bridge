@@ -34,14 +34,14 @@ int main(int argc, char **argv)
 
     nb_node_config_default(&cfg);
     cfg.name = "DiscoveryServer";
-    cfg.transport.kind = NB_TRANSPORT_KIND_TCP;
-    cfg.transport.bind_host = "0.0.0.0";
-    cfg.transport.data_port = data_port;
-    cfg.discovery.broadcast_host = "255.255.255.255";
-    cfg.discovery.port = discovery_port;
-    cfg.discovery.hello_interval_ms = 500;
-    cfg.discovery.node_ttl_ms = 3000;
-    cfg.mode = NB_NODE_MODE_MESH;
+    cfg.rpc.kind = NB_TRANSPORT_KIND_TCP;
+    cfg.rpc.bind_host = "0.0.0.0";
+    cfg.rpc.data_port = data_port;
+    cfg.rpc.discovery.broadcast_host = "255.255.255.255";
+    cfg.rpc.discovery.port = discovery_port;
+    cfg.rpc.discovery.hello_interval_ms = 500;
+    cfg.rpc.discovery.node_ttl_ms = 3000;
+    cfg.rpc.mode = NB_NODE_MODE_MESH;
     cfg.runtime.io_threads = 1;
 
     rc = nb_node_create(&cfg, &node);
