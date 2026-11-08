@@ -122,8 +122,16 @@ typedef struct nb_message {
     uint16_t peer_port;
     nb_reply_token_t reply_token;
     nb_buf_t *frame_owner;
-    /* DDS sample metadata, filled by providers that carry it. */
-    nb_sample_info_t sample;
+    /*
+     * Pub/sub sample metadata. Providers that model samples (DDS/RTPS) point
+     * this at storage valid for the callback; the pointer is NULL for RPC-only
+     * messages and for providers that do not model samples, which reads as
+     * ordinary data (NB_SAMPLE_STATE_VALID is zero).
+     *
+     * Kept as a pointer on purpose: the DDS instance/view state must not make
+     * every RPC message carry it.
+     */
+    const nb_sample_info_t *ps_sample;
 } nb_message_t;
 
 #ifdef __cplusplus

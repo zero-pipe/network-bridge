@@ -95,7 +95,9 @@ int nb_sample_queue_push(nb_sample_queue_t *queue, const nb_message_t *msg)
     }
     sample->len = len;
     sample->encoding = msg->payload.encoding;
-    sample->info = msg->sample;
+    if (msg->ps_sample) {
+        sample->info = *msg->ps_sample;
+    }
 
     ntk_mutex_lock(queue->lock);
     while (queue->count >= queue->depth && queue->head) {

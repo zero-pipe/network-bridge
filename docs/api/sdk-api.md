@@ -449,10 +449,11 @@ provider SPI 只使用三个公共对象：
 - `nb_endpoint_t`：`send` 的目标和 `reply` 的对端；`scheme/host/port/path`
   由 provider 自己解释，`uri` 是归一化形式。
 - `nb_message_t`：与核心内部相同的消息结构；不存在第二份 provider 消息拷贝。
-- `nb_ps_qos_t`：发布/订阅 QoS，创建实例时通过
-  `nb_transport_provider_options_t.qos` 传入。点对点 RPC 链路不读取这些策略。
+- `nb_ps_qos_t`：发布/订阅 QoS，只有发布/订阅角色会看到：创建实例时通过
+  `nb_transport_provider_options_t.ps->qos` 传入（`ps` 为 NULL 表示该 binding
+  不服务发布/订阅面）。点对点 RPC 链路不读取这些策略。
 
-`nb_message_t.sample` 是 DDS 样本元数据：`state`
+`nb_message_t.ps_sample` 是回调期 borrow 的 DDS 样本元数据指针：`state`
 （`NB_SAMPLE_STATE_VALID` / `DISPOSED` / `NO_WRITERS`，
 `nb_sample_info_valid_data()` 对应 DDS 的 `valid_data` 写法）、
 `instance_handle` 与 `has_instance_handle`、`source_timestamp_ns`、
@@ -460,17 +461,18 @@ provider SPI 只使用三个公共对象：
 `instance_state`（`ALIVE` / `NOT_ALIVE_DISPOSED` /
 `NOT_ALIVE_NO_WRITERS`）和 `view_state`（实例的第一个样本，或重新注册后的
 第一个样本为 `NEW`，否则为 `NOT_NEW`），`generation_rank` 统计重新注册次数。
-RTPS provider 会填这些字段；其它 provider 保持为零，读起来就是“没有实例的
-有效数据”。实例状态需要实例句柄，RTPS reader 从 PID_KEY_HASH 中取得；样本
+RTPS provider 会指向这些字段；其它 provider 留 NULL，读起来就是“没有实例的
+有效数据”。它是指针而不是内嵌结构，避免每条 RPC 消息都背负 DDS 实例状态。
+实例状态需要实例句柄，RTPS reader 从 PID_KEY_HASH 中取得；样本
 不带 key hash 的类型投递时不带按实例的状态。
 
-同一套元数据也适用于发送方向。消息设置了 `sample.has_instance_handle`，并且
-`sample.state` 为 `NB_SAMPLE_STATE_DISPOSED` 或
+同一套元数据也适用于发送方向。消息设置了 `ps_sample->has_instance_handle`，并且
+`ps_sample->state` 为 `NB_SAMPLE_STATE_DISPOSED` 或
 `NB_SAMPLE_STATE_NO_WRITERS` 时，会作为 key-only 的 DDS 样本发布，而不是普通
 样本：句柄进入 inline QoS，状态位表示实例被 dispose 还是 unregister，payload
 被当作序列化 key，而不是编码后的信封。使用 `rtps` provider 时，DDS 层 reader
 （包括 Cyclone DDS）能看到状态变化；远端 `nb` 对端目前还看不到，因为 v2 信封
-没有可路由这些信息的样本字段。普通样本发送时会忽略 `sample`。
+没有可路由这些信息的样本字段。普通样本发送时会忽略 `ps_sample`。
 
 ```c
 static int my_send(nb_transport_instance_t *inst,

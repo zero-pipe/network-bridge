@@ -312,6 +312,7 @@ static int nb_shm_op_create(const nb_transport_provider_options_t *options,
         return NB_ERR_NOMEM;
     }
     inst->options = *options;
+    inst->options.ps = NULL;
     inst->self_id = endpoint.port;
     nb_copy_str(inst->channel, sizeof(inst->channel), endpoint.host, "");
     inst->poll_us = options->poll_us;

@@ -1,12 +1,10 @@
 {
   "name": "echo-server",
-  "runtime": {
-    "io_threads": 2
+  "threads": {
+    "io": 2
   },
   "rpc": {
-    "mode": "static"
-  },
-  "bindings": [
-    "tcp://127.0.0.1:42440"
-  ]
+    "mode": "static",
+    "listen": ["tcp://127.0.0.1:42440"]
+  }
 }

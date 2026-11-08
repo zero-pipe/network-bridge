@@ -66,6 +66,7 @@ typedef struct nb_dds_endpoint {
 
 struct nb_dds_instance {
     nb_transport_provider_options_t options;
+    nb_ps_backend_options_t ps; /* copied: the core's options.ps is stack-scoped */
     dds_entity_t participant;
     char authority[NB_HOST_MAX];
     ntk_mutex *lock;
@@ -148,7 +149,7 @@ static dds_entity_t nb_dds_make_topic(nb_dds_instance_t *inst, const char *name)
  */
 static dds_qos_t *nb_dds_make_qos(nb_dds_instance_t *inst, int ignore_local)
 {
-    const nb_ps_qos_t *q = &inst->options.qos;
+    const nb_ps_qos_t *q = &inst->ps.qos;
     dds_qos_t *qos;
 
     if (!ignore_local && nb_ps_qos_is_default(q)) {
@@ -612,6 +613,10 @@ static int nb_dds_op_create(const nb_transport_provider_options_t *options, nb_t
         return NB_ERR_NOMEM;
     }
     inst->options = *options;
+    inst->options.ps = NULL;
+    if (options->ps) {
+        inst->ps = *options->ps;
+    }
     inst->participant = DDS_ENTITY_NIL;
 
     p = options->endpoint ? strstr(options->endpoint, "://") : NULL;

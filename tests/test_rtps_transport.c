@@ -133,14 +133,18 @@ static nb_transport_instance_t *make_instance(const nb_transport_provider_t *pro
                                               peer_ctx_t *ctx)
 {
     nb_transport_provider_options_t options;
+    nb_ps_backend_options_t ps;
     nb_transport_instance_t *instance = NULL;
 
     memset(&options, 0, sizeof(options));
+    memset(&ps, 0, sizeof(ps));
+    ps.struct_size = sizeof(ps);
+    ps.on_status = on_status;
     options.scheme = "rtps";
     options.endpoint = endpoint;
     options.user = ctx;
     options.on_receive = on_receive;
-    options.on_status = on_status;
+    options.ps = &ps;
     options.intra_process = NB_INTRA_PROCESS_OFF;
     options.struct_size = sizeof(options);
     ctx->provider = provider;
@@ -321,7 +325,7 @@ cleanup:
 /*
  * Status callbacks: two instances registering the same method publish and
  * subscribe to the same response topic, so each side matches a peer. The
- * provider reports that through options.on_status, naming the endpoint by the
+ * provider reports that through options.ps->on_status, naming the endpoint by the
  * method it belongs to.
  */
 static void test_status_events(void)

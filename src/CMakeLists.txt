@@ -63,13 +63,13 @@ set(NB_SOURCES
     utils/util.c
     utils/endpoint.c
     utils/qos.c
-    utils/json/codec_json.c
     message/frame.c
     message/envelope.c
     router/router.c
     registry/registry.c
     discovery/discovery.c
     config/config.c
+    config/config_defaults.c
     transport/common/framing.c
     transport/common/dds_bridge.c
     transport/common/transport.c
@@ -205,7 +205,6 @@ target_include_directories(nb
         ${CMAKE_CURRENT_SOURCE_DIR}/rpc
         ${CMAKE_CURRENT_SOURCE_DIR}/pubsub
         ${CMAKE_CURRENT_SOURCE_DIR}/utils
-        ${CMAKE_CURRENT_SOURCE_DIR}/utils/json
         ${CMAKE_CURRENT_SOURCE_DIR}/message
         ${CMAKE_CURRENT_SOURCE_DIR}/transport/common
         ${CMAKE_CURRENT_SOURCE_DIR}/transport/dds

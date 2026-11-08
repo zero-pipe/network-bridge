@@ -4,60 +4,54 @@
 /*
  * Single configuration entry point for network bridge.
  *
- * Configuration is split by spine: `rpc` holds the RPC link tuning, discovery
- * and routes; `pubsub` holds the pub/sub default QoS; `bindings` is the shared
- * list of transports, each declaring the roles it serves. Runtime/metrics/log
- * are shared by both spines.
+ * The JSON is grouped by how it is used, not by internal module:
  *
  * {
  *   "name": "echo-server",
- *   "runtime": {
- *     "io_threads": 2,
- *     "handler_threads": 4,
- *     "handler_max_concurrency": 64,
+ *   "threads": { "io": 2, "handlers": 4, "send_lanes": 0 },
+ *   "limits": {
  *     "max_inflight": 65536,
  *     "max_streams": 64,
- *     "peer_rate_limit_pps": 0,
- *     "send_lanes": 0
+ *     "handler_queue": 64,
+ *     "peer_rate_per_second": 0
  *   },
  *   "rpc": {
  *     "mode": "static",
- *     "kind": "tcp",
- *     "bind_host": "0.0.0.0",
- *     "data_port": 42420,
- *     "frag_bytes": 1440,
- *     "max_msg_bytes": 1048576,
+ *     "listen": ["tcp://0.0.0.0:42420"],
+ *     "max_message_bytes": 1048576,
  *     "backpressure_bytes": 4194304,
- *     "rtcp_interval_ms": 1000,
- *     "disable_rtcp": false,
+ *     "udp": { "fragment_bytes": 1440, "rtcp_interval": "1s", "rtcp": true },
  *     "discovery": {
- *       "disable": false,
  *       "broadcast": "255.255.255.255:41953",
- *       "hello_interval_ms": 3000,
- *       "node_ttl_ms": 9000,
- *       "peers": ["127.0.0.1:41953"]
+ *       "peers": ["10.0.0.2:41953"],
+ *       "hello_interval": "3s",
+ *       "node_ttl": "9s"
  *     },
- *     "routes": [ { "service": "EchoService", "endpoint": "tcp://127.0.0.1:42420" } ]
+ *     "routes": [ { "service": "EchoService", "endpoint": "tcp://10.0.0.2:42420" } ]
  *   },
- *   "bindings": [
- *     "tcp://127.0.0.1:42420",
- *     { "name": "dds", "endpoint": "dds://0", "roles": ["ps"],
- *       "ps_qos": { "reliability": "reliable" } }
- *   ],
- *   "pubsub": { "default_qos": { "durability": "transient_local" } },
- *   "metrics": { "disable": false, "disable_latency_histogram": false, "sample_every": 1 },
- *   "log":     { "disable": false, "level": "info" }
+ *   "pubsub": {
+ *     "backends": [
+ *       "dds://0",
+ *       { "endpoint": "shm://orders:1", "intra_process": "off",
+ *         "qos": { "reliability": "reliable" } }
+ *     ],
+ *     "default_qos": { "durability": "transient_local" }
+ *   },
+ *   "metrics": { "enabled": true, "latency_histogram": true, "sample_every": 1 },
+ *   "log": { "enabled": true, "level": "info" }
  * }
  *
- * A binding may be a bare endpoint string (roles default to whatever the
- * provider implements) or an object with roles and a pub/sub QoS.
+ * Durations are numbers of milliseconds or strings with a unit ("250ms", "2s").
+ * The same endpoint listed under rpc.listen and pubsub.backends is one
+ * transport serving both spines.
  *
- * String enums (mode, kind, discovery mode, intra_process, log.level, qos
- * values, binding roles) are lowercase and case-sensitive.
+ * String enums (mode, intra_process, log.level, QoS values) are lowercase and
+ * case-sensitive.
  *
  * A field of the wrong type, out of range, or an invalid URI returns
  * NB_ERR_INVALID; unknown fields are ignored (and logged as warnings). Pass a
- * non-NULL error output to locate the failing field and its reason.
+ * non-NULL error output to locate the failing field and its reason (for
+ * example "rpc.listen[0]" or "pubsub.default_qos.depth").
  *
  * Ownership: a parsed document is opaque and heap allocated. Release it with
  * nb_config_doc_destroy(). nb_node_create / nb_node_create_from_config copy the
@@ -85,10 +79,15 @@ extern "C" {
 
 /* ---- Bindings ---- */
 /*
- * One binding: a transport instance the node starts once. `roles` says which
- * spines may use it (NB_PROVIDER_ROLE_RPC / NB_PROVIDER_ROLE_PS); 0 means the
- * provider's default, i.e. every role it implements. `ps_qos` applies to the
- * pub/sub role only; INHERIT takes nb_pubsub_config_t.default_qos.
+ * One transport instance the node starts once. This is the normalized form:
+ * the JSON parser produces it from rpc.listen (roles = RPC) and
+ * pubsub.backends (roles = PS), merging entries that name the same endpoint.
+ * Code-built configs can fill it directly.
+ *
+ * `roles` says which spines may use the binding (NB_PROVIDER_ROLE_RPC /
+ * NB_PROVIDER_ROLE_PS); 0 means the provider's default, i.e. every role it
+ * implements. `ps_qos` applies to the pub/sub role only; INHERIT takes
+ * nb_pubsub_config_t.default_qos.
  */
 typedef struct nb_binding_config {
     const char *name;                 /* provider/binding name, e.g. "tcp" */
@@ -161,6 +160,9 @@ typedef struct nb_peer_endpoint {
 typedef struct nb_rpc_config {
     nb_node_mode_t mode;                     /* MESH (default) / STATIC */
     const nb_service_table_t *service_table; /* optional shared declaration table; static lifetime */
+    /* Fallback binding for code-built configs that leave nb_node_config_t.bindings
+     * empty. JSON configs declare explicit rpc.listen endpoints instead, so these
+     * three fields are not part of the JSON schema. */
     nb_transport_kind_t kind;                /* default binding kind; default UDP */
     const char *bind_host;                   /* bind address; default "0.0.0.0" */
     uint16_t data_port;                      /* data-plane port; 0 = auto-assign */

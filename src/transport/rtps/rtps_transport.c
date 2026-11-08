@@ -106,6 +106,7 @@ typedef struct nb_rtps_transport_endpoint {
 
 struct nb_rtps_transport {
     nb_transport_provider_options_t options;
+    nb_ps_backend_options_t ps; /* copied: the core's options.ps is stack-scoped */
     rtps_participant_t *participant;
     char authority[NB_HOST_MAX];
     char advertise[NB_HOST_MAX];
@@ -476,17 +477,17 @@ static int nb_rtps_transport_publish(nb_rtps_transport_t *inst,
     if (!writer || !message) {
         return NB_ERR_STATE;
     }
-    if (message->sample.has_instance_handle &&
-        message->sample.state != NB_SAMPLE_STATE_VALID) {
+    if (message->ps_sample && message->ps_sample->has_instance_handle &&
+        message->ps_sample->state != NB_SAMPLE_STATE_VALID) {
         /* A state change is key-only on the wire: the instance handle travels
          * in the inline QoS and the caller's payload is the serialized key. */
         rtps_instance_handle_t handle;
         rtps_instance_state_t state =
-            message->sample.state == NB_SAMPLE_STATE_NO_WRITERS
+            message->ps_sample->state == NB_SAMPLE_STATE_NO_WRITERS
                 ? RTPS_INSTANCE_NOT_ALIVE_NO_WRITERS
                 : RTPS_INSTANCE_NOT_ALIVE_DISPOSED;
 
-        memcpy(handle.bytes, message->sample.instance_handle, sizeof(handle.bytes));
+        memcpy(handle.bytes, message->ps_sample->instance_handle, sizeof(handle.bytes));
         return nb_rtps_transport_status(
             rtps_writer_write_instance(writer,
                                        &handle,
@@ -635,6 +636,7 @@ static void nb_rtps_transport_on_data(void *user,
     for (i = 0; i < count; i++) {
         nb_envelope_t env;
         nb_transport_message_t msg;
+        nb_sample_info_t info;
         char route_buf[NB_GLOBAL_MAX_ROUTE_BYTES];
 
         /* A state change carries no envelope to route; the callback contract
@@ -650,7 +652,9 @@ static void nb_rtps_transport_on_data(void *user,
         memset(&msg, 0, sizeof(msg));
         memset(route_buf, 0, sizeof(route_buf));
         nb_envelope_to_message(&env, route_buf, sizeof(route_buf), &msg);
-        nb_rtps_transport_fill_sample(&msg.sample, &samples[i].info);
+        /* info is callback-scoped; msg.ps_sample only borrows it. */
+        nb_rtps_transport_fill_sample(&info, &samples[i].info);
+        msg.ps_sample = &info;
         msg.peer = &peer;
         msg.peer_host = peer.host;
         msg.peer_port = peer.port;
@@ -701,7 +705,7 @@ static void nb_rtps_transport_on_status(void *user, const rtps_status_event_t *e
     nb_rtps_transport_t *inst = (nb_rtps_transport_t *)user;
     nb_status_event_t out;
 
-    if (!inst || !event || !inst->options.on_status) {
+    if (!inst || !event || !inst->ps.on_status) {
         return;
     }
     memset(&out, 0, sizeof(out));
@@ -738,7 +742,7 @@ static void nb_rtps_transport_on_status(void *user, const rtps_status_event_t *e
         memcpy(out.peer_guid, &event->peer, sizeof(out.peer_guid));
     }
     nb_copy_str(out.reason, sizeof(out.reason), event->reason, "");
-    inst->options.on_status(inst->options.user, &out);
+    inst->ps.on_status(inst->options.user, &out);
 }
 
 /* ---- binding parsing and creation --------------------------------------- */
@@ -885,6 +889,10 @@ static int nb_rtps_op_create(const nb_transport_provider_options_t *options,
         return NB_ERR_NOMEM;
     }
     inst->options = *options;
+    inst->options.ps = NULL;
+    if (options->ps) {
+        inst->ps = *options->ps;
+    }
     peers = (nb_rtps_transport_peer_t *)calloc(NB_RTPS_TRANSPORT_MAX_PEERS, sizeof(*peers));
     if (!peers) {
         free(inst);
@@ -964,8 +972,8 @@ static int nb_rtps_op_create(const nb_transport_provider_options_t *options,
         }
     }
 
-    nb_rtps_transport_build_qos(&options->qos, 1, &inst->qos);
-    nb_rtps_transport_build_qos(&options->qos, 0, &inst->reader_qos);
+    nb_rtps_transport_build_qos(&inst->ps.qos, 1, &inst->qos);
+    nb_rtps_transport_build_qos(&inst->ps.qos, 0, &inst->reader_qos);
 
     rtps_participant_config_init(&config);
     config.domain_id = (uint32_t)domain;

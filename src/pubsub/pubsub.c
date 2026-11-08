@@ -513,7 +513,9 @@ int nb_ps_handle_event(nb_node_t *node, nb_transport_t *transport, nb_message_t 
                                                message->payload.data,
                                                message->payload.len);
             sample.data.encoding = message->payload.encoding;
-            sample.info = message->sample;
+            if (message->ps_sample) {
+                sample.info = *message->ps_sample;
+            }
             entry->cb(entry->user, &sample);
         }
     }

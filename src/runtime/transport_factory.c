@@ -240,6 +240,7 @@ int nb_node_transport_add(nb_node_t *node,
     transport->metrics = &node->metrics;
     if (provider) {
         nb_transport_provider_options_t options;
+        nb_ps_backend_options_t ps_options;
         nb_transport_instance_t *instance = NULL;
         nb_ps_qos_t effective_qos = node->default_qos;
         transport->kind = NB_TRANSPORT_KIND_CUSTOM;
@@ -254,7 +255,14 @@ int nb_node_transport_add(nb_node_t *node,
         options.poll_us = poll_us;
         options.struct_size = (uint32_t)sizeof(options);
         nb_ps_qos_inherit(&effective_qos, qos);
-        options.qos = effective_qos;
+        /* QoS and DDS status callbacks only exist for a pub/sub role; an
+         * RPC-only provider never sees them. */
+        if (provider->ops->ps) {
+            memset(&ps_options, 0, sizeof(ps_options));
+            ps_options.struct_size = (uint32_t)sizeof(ps_options);
+            ps_options.qos = effective_qos;
+            options.ps = &ps_options;
+        }
         if (provider->ops->create(&options, &instance) != NB_OK || !instance) {
             free(transport);
             return NB_ERR_IO;

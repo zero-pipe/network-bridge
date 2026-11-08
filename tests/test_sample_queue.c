@@ -112,6 +112,7 @@ static void test_state_masks_and_instances(void)
     uint8_t handle_a[NB_INSTANCE_HANDLE_SIZE];
     uint8_t handle_b[NB_INSTANCE_HANDLE_SIZE];
     nb_message_t msg;
+    nb_sample_info_t info;
     nb_sample_t out[8];
     size_t n;
 
@@ -123,27 +124,33 @@ static void test_state_masks_and_instances(void)
     memset(handle_b, 0x22, sizeof(handle_b));
     instance_a.instance = handle_a;
 
+    memset(&info, 0, sizeof(info));
     init_msg(&msg, "A");
-    msg.sample.has_instance_handle = true;
-    memcpy(msg.sample.instance_handle, handle_a, sizeof(handle_a));
-    msg.sample.view_state = NB_VIEW_STATE_NEW;
-    msg.sample.instance_state = NB_INSTANCE_STATE_ALIVE;
+    msg.ps_sample = &info;
+    info.has_instance_handle = true;
+    memcpy(info.instance_handle, handle_a, sizeof(handle_a));
+    info.view_state = NB_VIEW_STATE_NEW;
+    info.instance_state = NB_INSTANCE_STATE_ALIVE;
     CHECK(nb_sample_queue_push(queue, &msg) == NB_OK);
 
+    memset(&info, 0, sizeof(info));
     init_msg(&msg, "B");
-    msg.sample.state = NB_SAMPLE_STATE_DISPOSED;
-    msg.sample.has_instance_handle = true;
-    memcpy(msg.sample.instance_handle, handle_b, sizeof(handle_b));
-    msg.sample.view_state = NB_VIEW_STATE_NEW;
-    msg.sample.instance_state = NB_INSTANCE_STATE_NOT_ALIVE_DISPOSED;
+    msg.ps_sample = &info;
+    info.state = NB_SAMPLE_STATE_DISPOSED;
+    info.has_instance_handle = true;
+    memcpy(info.instance_handle, handle_b, sizeof(handle_b));
+    info.view_state = NB_VIEW_STATE_NEW;
+    info.instance_state = NB_INSTANCE_STATE_NOT_ALIVE_DISPOSED;
     CHECK(nb_sample_queue_push(queue, &msg) == NB_OK);
 
+    memset(&info, 0, sizeof(info));
     init_msg(&msg, "C");
-    msg.sample.state = NB_SAMPLE_STATE_NO_WRITERS;
-    msg.sample.has_instance_handle = true;
-    memcpy(msg.sample.instance_handle, handle_b, sizeof(handle_b));
-    msg.sample.view_state = NB_VIEW_STATE_NOT_NEW;
-    msg.sample.instance_state = NB_INSTANCE_STATE_NOT_ALIVE_NO_WRITERS;
+    msg.ps_sample = &info;
+    info.state = NB_SAMPLE_STATE_NO_WRITERS;
+    info.has_instance_handle = true;
+    memcpy(info.instance_handle, handle_b, sizeof(handle_b));
+    info.view_state = NB_VIEW_STATE_NOT_NEW;
+    info.instance_state = NB_INSTANCE_STATE_NOT_ALIVE_NO_WRITERS;
     CHECK(nb_sample_queue_push(queue, &msg) == NB_OK);
 
     n = nb_sample_queue_read(queue, &new_not_read, out, 8);

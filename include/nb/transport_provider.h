@@ -52,6 +52,22 @@ typedef nb_transport_receive_fn transport_receive_fn;
 #define NB_PS_TOPIC_WRITER 0x1u
 #define NB_PS_TOPIC_READER 0x2u
 
+/*
+ * Pub/sub role options. They are only filled for a binding that serves the
+ * pub/sub spine; an RPC-only binding leaves nb_transport_provider_options_t.ps
+ * NULL, so an RPC transport never sees QoS policies or DDS status callbacks.
+ *
+ * The core copies this struct into the provider's create() call; a provider
+ * that keeps the values must copy them too (the pointer is stack-scoped).
+ */
+typedef struct nb_ps_backend_options {
+    uint32_t struct_size;              /* sizeof(nb_ps_backend_options_t) */
+    nb_ps_qos_t qos;                   /* pub/sub QoS; zero = provider default */
+    /* Optional DDS status events (deadline, liveliness, matching), called with
+     * the same `user` as on_receive. */
+    nb_status_callback_t on_status;
+} nb_ps_backend_options_t;
+
 typedef struct nb_transport_provider_options {
     const char *scheme;              /* provider scheme, e.g. "dds" */
     const char *endpoint;            /* binding endpoint URI */
@@ -61,16 +77,11 @@ typedef struct nb_transport_provider_options {
     /* Busy-poll window in microseconds after draining; 0 = blocking wait. Only
      * providers with an inspectable local queue (shm) honor this; others ignore. */
     uint32_t poll_us;
-    nb_ps_qos_t qos;                    /* provider QoS; zero = provider default */
-    /* Optional: DDS status events (deadline, liveliness, matching), called with
-     * the same `user` as on_receive. Appended last so the offsets of the fields
-     * above stay stable: a provider built against an older header sees a
-     * smaller struct_size and must not read past it. */
-    nb_status_callback_t on_status;
     /* ABI guard: sizeof(nb_transport_provider_options_t) as compiled into the
-     * caller. The core always fills this. Providers should ignore trailing
-     * fields when struct_size is smaller than they expect. */
+     * caller. The core always fills this. */
     uint32_t struct_size;
+    /* Role-specific options; NULL when the binding does not serve that role. */
+    const nb_ps_backend_options_t *ps;
 } nb_transport_provider_options_t;
 
 /*
@@ -210,7 +221,7 @@ typedef struct nb_transport_provider_ops {
     const nb_ps_backend_ops_t *ps;
 } nb_transport_provider_ops_t;
 
-#define NB_TRANSPORT_PROVIDER_ABI_VERSION 3u
+#define NB_TRANSPORT_PROVIDER_ABI_VERSION 4u
 
 /* Static descriptor registered with nb_transport_provider_register. */
 struct nb_transport_provider {
