@@ -171,7 +171,7 @@ int nb_rtps_param_put_resource_limits(nb_rtps_param_writer_t *writer,
     size_t i;
 
     for (i = 0; i < 3u; i++) {
-        /* 0 in nb_qos_t means unlimited, which DDS encodes as LENGTH_UNLIMITED
+        /* 0 in nb_ps_qos_t means unlimited, which DDS encodes as LENGTH_UNLIMITED
          * (-1). A literal 0 is rejected by strict peers (Cyclone discards the
          * whole ParameterList), and 0 is not a legal resource limit anyway. */
         uint32_t value = values[i] == 0 ? 0xffffffffu : values[i];

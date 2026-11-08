@@ -148,7 +148,7 @@ int nb_node_transport_add(nb_node_t *node,
                           const char *path,
                           nb_intra_process_t intra_process,
                           uint32_t poll_us,
-                          const nb_qos_t *qos)
+                          const nb_ps_qos_t *qos)
 {
     nb_transport_t *transport;
     nb_transport_kind_t kind;
@@ -199,7 +199,7 @@ int nb_node_transport_add(nb_node_t *node,
     if (provider) {
         nb_transport_provider_options_t options;
         nb_transport_instance_t *instance = NULL;
-        nb_qos_t effective_qos = node->default_qos;
+        nb_ps_qos_t effective_qos = node->default_qos;
         transport->kind = NB_TRANSPORT_KIND_CUSTOM;
         transport->ops = &nb_g_provider_ops;
         transport->provider = provider;
@@ -211,7 +211,7 @@ int nb_node_transport_add(nb_node_t *node,
         options.intra_process = intra_process;
         options.poll_us = poll_us;
         options.struct_size = (uint32_t)sizeof(options);
-        nb_qos_inherit(&effective_qos, qos);
+        nb_ps_qos_inherit(&effective_qos, qos);
         options.qos = effective_qos;
         if (provider->ops->create(&options, &instance) != NB_OK || !instance) {
             free(transport);

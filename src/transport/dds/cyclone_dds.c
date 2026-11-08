@@ -15,7 +15,7 @@
 #include "transport_internal.h"
 
 #include "envelope.h"
-#include <nb/poller_alloc.h>
+#include <nb/internal/poller_alloc.h>
 #include "util.h"
 
 #include <nb/log.h>
@@ -170,10 +170,10 @@ static dds_entity_t nb_dds_make_topic(nb_dds_instance_t *inst, const char *name)
  */
 static dds_qos_t *nb_dds_make_qos(nb_dds_instance_t *inst, int ignore_local)
 {
-    const nb_qos_t *q = &inst->options.qos;
+    const nb_ps_qos_t *q = &inst->options.qos;
     dds_qos_t *qos;
 
-    if (!ignore_local && nb_qos_is_default(q)) {
+    if (!ignore_local && nb_ps_qos_is_default(q)) {
         return NULL;
     }
     qos = dds_create_qos();

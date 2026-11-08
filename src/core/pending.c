@@ -8,7 +8,7 @@
 #include "pending.h"
 
 #include "metric_macros.h"
-#include <nb/poller_alloc.h>
+#include <nb/internal/poller_alloc.h>
 #include "node_internal.h"
 
 #include <stdlib.h>

@@ -3,7 +3,7 @@
 
 #include <string.h>
 
-void nb_qos_init(nb_qos_t *qos)
+void nb_ps_qos_init(nb_ps_qos_t *qos)
 {
     if (!qos) {
         return;
@@ -11,7 +11,7 @@ void nb_qos_init(nb_qos_t *qos)
     memset(qos, 0, sizeof(*qos));
 }
 
-void nb_qos_inherit(nb_qos_t *qos, const nb_qos_t *parent)
+void nb_ps_qos_inherit(nb_ps_qos_t *qos, const nb_ps_qos_t *parent)
 {
     if (!qos || !parent) {
         return;
@@ -54,9 +54,9 @@ void nb_qos_inherit(nb_qos_t *qos, const nb_qos_t *parent)
     }
 }
 
-bool nb_qos_is_default(const nb_qos_t *qos)
+bool nb_ps_qos_is_default(const nb_ps_qos_t *qos)
 {
-    static const nb_qos_t zero;
+    static const nb_ps_qos_t zero;
 
     if (!qos) {
         return true;
@@ -64,7 +64,7 @@ bool nb_qos_is_default(const nb_qos_t *qos)
     return memcmp(qos, &zero, sizeof(zero)) == 0;
 }
 
-int nb_qos_validate(const nb_qos_t *qos)
+int nb_ps_qos_validate(const nb_ps_qos_t *qos)
 {
     if (!qos) {
         return NB_ERR_INVALID;
@@ -82,7 +82,7 @@ int nb_qos_validate(const nb_qos_t *qos)
     return NB_OK;
 }
 
-const char *nb_qos_validate_reason(const nb_qos_t *qos)
+const char *nb_ps_qos_validate_reason(const nb_ps_qos_t *qos)
 {
     if (!qos) {
         return "qos is null";

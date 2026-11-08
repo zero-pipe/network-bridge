@@ -83,7 +83,7 @@ typedef struct nb_binding_config {
      * the shm provider: after draining, keep polling this long before falling
      * back to a blocking wait. Trades one core's idle for lower tail latency. */
     uint32_t poll_us;
-    nb_qos_t qos;                     /* provider QoS; zero = inherit */
+    nb_ps_qos_t qos;                     /* provider QoS; zero = inherit */
 } nb_binding_config_t;
 
 /* ---- Per-module configuration ---- */
@@ -112,7 +112,7 @@ typedef struct nb_node_transport_config {
     bool disable_rtcp;                   /* true disables UDP RTCP */
     const nb_binding_config_t *bindings; /* non-empty starts every listed binding */
     size_t binding_count;
-    nb_qos_t qos;                        /* QoS for the default binding */
+    nb_ps_qos_t qos;                        /* QoS for the default binding */
 } nb_node_transport_config_t;
 
 /* Service discovery. */

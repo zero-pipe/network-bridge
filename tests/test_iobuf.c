@@ -1,4 +1,4 @@
-#include <nb/iobuf.h>
+#include <nb/internal/iobuf.h>
 
 #define NB_LOG_TAG "test"
 #include <nb/log.h>

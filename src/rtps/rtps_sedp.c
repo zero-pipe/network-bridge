@@ -500,7 +500,7 @@ int nb_rtps_sedp_parse(const void *payload, size_t len, nb_rtps_endpoint_info_t 
             break;
         case NB_RTPS_PID_PARTITION:
             /* The wire form is a sequence of names; the stack keeps the list as
-             * one comma-separated string, the same spelling nb_qos_t uses. */
+             * one comma-separated string, the same spelling nb_ps_qos_t uses. */
             (void)nb_rtps_param_get_string_sequence_joined(
                 value, value_len, out->partition, sizeof(out->partition));
             break;

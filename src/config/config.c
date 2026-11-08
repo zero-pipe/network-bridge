@@ -162,7 +162,7 @@ static int nb_cfg_qos_bool(const cJSON *qos,
 }
 
 static int nb_cfg_load_qos(const cJSON *parent,
-                           nb_qos_t *out,
+                           nb_ps_qos_t *out,
                            nb_config_error_t *err,
                            const char *path)
 {
@@ -198,7 +198,7 @@ static int nb_cfg_load_qos(const cJSON *parent,
     if (!cJSON_IsObject(qos)) {
         return nb_cfg_fail(err, path, "must be an object");
     }
-    nb_qos_init(out);
+    nb_ps_qos_init(out);
     rc = nb_cfg_qos_enum(qos,
                          "reliability",
                          (int *)&out->reliability,
@@ -301,8 +301,8 @@ static int nb_cfg_load_qos(const cJSON *parent,
             return nb_cfg_fail(err, full, "value too long");
         }
     }
-    if (nb_qos_validate(out) != NB_OK) {
-        return nb_cfg_fail(err, path, nb_qos_validate_reason(out));
+    if (nb_ps_qos_validate(out) != NB_OK) {
+        return nb_cfg_fail(err, path, nb_ps_qos_validate_reason(out));
     }
     return NB_OK;
 }
@@ -325,7 +325,7 @@ void nb_node_transport_config_default(nb_node_transport_config_t *cfg)
     memset(cfg, 0, sizeof(*cfg));
     cfg->kind = NB_TRANSPORT_KIND_UDP;
     cfg->bind_host = NB_DEFAULT_BIND_HOST;
-    nb_qos_init(&cfg->qos);
+    nb_ps_qos_init(&cfg->qos);
 }
 
 void nb_node_discovery_config_default(nb_node_discovery_config_t *cfg)
@@ -377,7 +377,7 @@ void nb_binding_config_default(nb_binding_config_t *cfg)
     }
     memset(cfg, 0, sizeof(*cfg));
     cfg->intra_process = NB_INTRA_PROCESS_OFF;
-    nb_qos_init(&cfg->qos);
+    nb_ps_qos_init(&cfg->qos);
 }
 
 void nb_node_config_normalize(nb_node_config_t *cfg)
@@ -512,7 +512,7 @@ int nb_node_config_validate(const nb_node_config_t *cfg)
         return NB_ERR_INVALID;
     }
     for (i = 0; i < cfg->transport.binding_count; i++) {
-        if (nb_qos_validate(&cfg->transport.bindings[i].qos) != NB_OK) {
+        if (nb_ps_qos_validate(&cfg->transport.bindings[i].qos) != NB_OK) {
             return NB_ERR_INVALID;
         }
     }

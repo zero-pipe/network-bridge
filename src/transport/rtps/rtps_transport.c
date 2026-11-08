@@ -187,7 +187,7 @@ static void nb_rtps_transport_method(const char *route, char *out, size_t cap)
 
 /* Map the framework QoS onto the public rtps QoS. The transport has always
  * defaulted to reliable/volatile and BY_RECEPTION ordering; keep that. */
-static void nb_rtps_transport_build_qos(const nb_qos_t *q,
+static void nb_rtps_transport_build_qos(const nb_ps_qos_t *q,
                                         int with_history,
                                         rtps_qos_t *out)
 {

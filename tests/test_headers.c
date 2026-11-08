@@ -4,6 +4,9 @@
  * stray flat include would fail here rather than in a consumer.
  */
 #include <nb/nb.h>
+#include <nb/base.h>
+#include <nb/rpc.h>
+#include <nb/pubsub.h>
 #include <nb/node.h>
 #include <nb/service.h>
 #include <nb/proxy.h>

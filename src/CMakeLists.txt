@@ -213,7 +213,10 @@ install(TARGETS nb
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    # Internal facilities (poolset/slotpool/iobuf/poller_alloc) are compile-time
+    # details of the library, not part of the installed SDK.
+    PATTERN "internal" EXCLUDE)
 
 # elog 只是 log.c 的实现细节：静态库最终仍需链接，但不向使用者传播头文件路径�?
 target_link_libraries(nb PUBLIC ntk nb_base microcdr rtps PRIVATE nb_log ntk_discovery)

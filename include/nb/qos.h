@@ -2,11 +2,22 @@
 #define NB_QOS_H
 
 /*
- * Transport-neutral QoS policy, modelled after the DDS QoS policies that
- * Cyclone DDS exposes. The `dds` and `rtps` providers map these fields onto
- * their native equivalents: the `rtps` provider announces every field here and
- * applies the requested/offered matching rules. Lifespan is enforced: a retained
- * sample past its lifespan is announced with GAP instead of being retransmitted.
+ * Pub/sub QoS: the DDS policy set, attached to the pub/sub spine.
+ *
+ * These policies describe topics, not calls: reliability, durability,
+ * history, liveliness, ownership, partition, deadline, lifespan, resource
+ * limits and presentation. They are honoured by topic-based backends (`dds`
+ * and `rtps`); point-to-point RPC links (udp/tcp/shm) never read them.
+ *
+ * The type is named nb_ps_qos_t to make that ownership explicit. nb_qos_t is
+ * the pre-split spelling and stays as a source-compatible alias during 0.x;
+ * see docs/architecture-split.md. Do not add RPC-only settings here: they
+ * belong to the RPC spine.
+ *
+ * The `dds` and `rtps` providers map these fields onto their native
+ * equivalents: the `rtps` provider announces every field here and applies the
+ * requested/offered matching rules. Lifespan is enforced: a retained sample
+ * past its lifespan is announced with GAP instead of being retransmitted.
  * Deadline is monitored: a publication that does not write, and a subscription
  * that receives nothing from a matched writer, report a miss through the
  * participant status callback. Automatic liveliness is enforced: a publication
@@ -84,7 +95,7 @@ typedef enum nb_qos_presentation_scope {
     NB_QOS_PRESENTATION_GROUP = 2
 } nb_qos_presentation_scope_t;
 
-typedef struct nb_qos {
+typedef struct nb_ps_qos {
     nb_qos_reliability_t reliability;
     nb_qos_durability_t durability;
     nb_qos_history_t history;
@@ -116,16 +127,46 @@ typedef struct nb_qos {
     nb_qos_presentation_scope_t presentation_scope;
     bool coherent_access;
     bool ordered_access;
-} nb_qos_t;
+} nb_ps_qos_t;
 
-void nb_qos_init(nb_qos_t *qos);
+void nb_ps_qos_init(nb_ps_qos_t *qos);
 /* Fill fields that are INHERIT/empty in qos from parent (field-wise). */
-void nb_qos_inherit(nb_qos_t *qos, const nb_qos_t *parent);
+void nb_ps_qos_inherit(nb_ps_qos_t *qos, const nb_ps_qos_t *parent);
 /* True when no policy is set (all fields INHERIT/zero/empty). */
-bool nb_qos_is_default(const nb_qos_t *qos);
+bool nb_ps_qos_is_default(const nb_ps_qos_t *qos);
 /* Check enum ranges and the partition NUL terminator. */
-int nb_qos_validate(const nb_qos_t *qos);
-const char *nb_qos_validate_reason(const nb_qos_t *qos);
+int nb_ps_qos_validate(const nb_ps_qos_t *qos);
+const char *nb_ps_qos_validate_reason(const nb_ps_qos_t *qos);
+
+/*
+ * Pre-split spellings. They are the same type and the same functions, kept so
+ * sources written against 0.4 keep compiling; define NB_NO_DEPRECATED_API to
+ * hide them. New code uses nb_ps_qos_*.
+ */
+#ifndef NB_NO_DEPRECATED_API
+typedef nb_ps_qos_t nb_qos_t;
+
+static inline void nb_qos_init(nb_qos_t *qos)
+{
+    nb_ps_qos_init(qos);
+}
+static inline void nb_qos_inherit(nb_qos_t *qos, const nb_qos_t *parent)
+{
+    nb_ps_qos_inherit(qos, parent);
+}
+static inline bool nb_qos_is_default(const nb_qos_t *qos)
+{
+    return nb_ps_qos_is_default(qos);
+}
+static inline int nb_qos_validate(const nb_qos_t *qos)
+{
+    return nb_ps_qos_validate(qos);
+}
+static inline const char *nb_qos_validate_reason(const nb_qos_t *qos)
+{
+    return nb_ps_qos_validate_reason(qos);
+}
+#endif /* NB_NO_DEPRECATED_API */
 
 #ifdef __cplusplus
 }

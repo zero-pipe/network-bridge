@@ -23,6 +23,46 @@ foreach(header IN LISTS headers)
         message(FATAL_ERROR
             "${header} references the internal nb_stub layer; use nb_proxy_* instead")
     endif()
+
+    # Internal facilities (poolset/slotpool/iobuf/poller_alloc/...) live under
+    # include/nb/internal and must not leak through a public header.
+    string(FIND "${content}" "#include <nb/internal/" internal_pos)
+    if(NOT internal_pos EQUAL -1)
+        message(FATAL_ERROR
+            "${header} includes an internal nb header; public headers must not depend on include/nb/internal")
+    endif()
+endforeach()
+
+# ---- Spines -------------------------------------------------------------
+# base.h stays model-neutral, and nb.h re-exports both spines. This is what
+# keeps the umbrella header from growing into a union of RPC and pub/sub APIs;
+# see docs/architecture-split.md.
+foreach(spine rpc pubsub)
+    if(NOT EXISTS "${HEADER_DIR}/${spine}.h")
+        message(FATAL_ERROR "missing spine header ${HEADER_DIR}/${spine}.h")
+    endif()
+endforeach()
+
+file(READ "${HEADER_DIR}/base.h" base_content)
+foreach(forbidden
+        node service proxy config
+        qos sample waitset status discovery_view
+        publish subscribe dds rtps shm transport_provider)
+    string(FIND "${base_content}" "#include <nb/${forbidden}.h>" forbidden_pos)
+    if(NOT forbidden_pos EQUAL -1)
+        message(FATAL_ERROR
+            "nb/base.h includes nb/${forbidden}.h; the base header must stay model-neutral")
+    endif()
+endforeach()
+
+file(READ "${HEADER_DIR}/nb.h" umbrella_content)
+foreach(spine rpc pubsub)
+    string(FIND "${umbrella_content}" "#include <nb/${spine}.h>" umbrella_pos)
+    if(umbrella_pos EQUAL -1)
+        message(FATAL_ERROR
+            "nb/nb.h does not include nb/${spine}.h; the umbrella header must re-export both spines")
+    endif()
 endforeach()
 
 message(STATUS "public nb headers do not expose the internal stub layer")
+message(STATUS "nb/base.h stays model-neutral and nb/nb.h re-exports both spines")

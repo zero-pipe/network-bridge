@@ -430,7 +430,9 @@ provider SPI 只使用三个公共对象：
 - `nb_endpoint_t`：`send` 的目标和 `reply` 的对端；`scheme/host/port/path`
   由 provider 自己解释，`uri` 是归一化形式。
 - `nb_message_t`：与核心内部相同的消息结构；不存在第二份 provider 消息拷贝。
-- `nb_qos_t`：创建实例时通过 `nb_transport_provider_options_t.qos` 传入。
+- `nb_ps_qos_t`：发布/订阅 QoS，创建实例时通过
+  `nb_transport_provider_options_t.qos` 传入。0.4 的 `nb_qos_t` 是它的兼容
+  别名（`NB_NO_DEPRECATED_API` 下隐藏）。点对点 RPC 链路不读取这些策略。
 
 `nb_message_t.sample` 是 DDS 样本元数据：`state`
 （`NB_SAMPLE_STATE_VALID` / `DISPOSED` / `NO_WRITERS`，

@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <nb/poolset.h>
+#include <nb/internal/poolset.h>
 
 #ifndef MAX_REASM
 #define MAX_REASM 16

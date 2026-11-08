@@ -1,4 +1,4 @@
-#include <nb/poolset.h>
+#include <nb/internal/poolset.h>
 
 #include <stdint.h>
 #include <stdio.h>

@@ -1,4 +1,4 @@
-#include <nb/slotpool.h>
+#include <nb/internal/slotpool.h>
 
 #include "atomic.h"
 

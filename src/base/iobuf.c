@@ -1,5 +1,5 @@
-#include <nb/iobuf.h>
-#include <nb/poller_alloc.h>
+#include <nb/internal/iobuf.h>
+#include <nb/internal/poller_alloc.h>
 
 #include <stdlib.h>
 #include <string.h>

@@ -69,7 +69,7 @@ struct nb_node {
     uint8_t drop_percent;                             /* 测试用：UDP 出站丢包百分比 */
     uint32_t rtcp_interval_ms;
     int disable_rtcp;
-    nb_qos_t default_qos;
+    nb_ps_qos_t default_qos;
     uint32_t max_recv_streams;
     uint32_t rate_limit_pps;
     ntk_mutex *rate_lock;

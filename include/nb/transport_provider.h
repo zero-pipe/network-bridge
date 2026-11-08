@@ -56,7 +56,7 @@ typedef struct nb_transport_provider_options {
     /* Busy-poll window in microseconds after draining; 0 = blocking wait. Only
      * providers with an inspectable local queue (shm) honor this; others ignore. */
     uint32_t poll_us;
-    nb_qos_t qos;                    /* provider QoS; zero = provider default */
+    nb_ps_qos_t qos;                    /* provider QoS; zero = provider default */
     /* Optional: DDS status events (deadline, liveliness, matching), called with
      * the same `user` as on_receive. Appended last so the offsets of the fields
      * above stay stable: a provider built against an older header sees a

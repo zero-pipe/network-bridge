@@ -5,7 +5,7 @@
 
 #include "metric_macros.h"
 #include "defaults.h"
-#include <nb/poller_alloc.h>
+#include <nb/internal/poller_alloc.h>
 #include "transport_factory.h"
 #include "util.h"
 
@@ -207,13 +207,13 @@ int nb_node_create(const nb_node_config_t *cfg, nb_node_t **out)
         nb_str_fits(cfg->discovery.broadcast_host, NB_HOST_MAX) != NB_OK) {
         return NB_ERR_TOOBIG;
     }
-    if (nb_qos_validate(&cfg->transport.qos) != NB_OK) {
+    if (nb_ps_qos_validate(&cfg->transport.qos) != NB_OK) {
         return NB_ERR_INVALID;
     }
     if (cfg->transport.bindings) {
         size_t bi;
         for (bi = 0; bi < cfg->transport.binding_count; bi++) {
-            if (nb_qos_validate(&cfg->transport.bindings[bi].qos) != NB_OK) {
+            if (nb_ps_qos_validate(&cfg->transport.bindings[bi].qos) != NB_OK) {
                 return NB_ERR_INVALID;
             }
         }

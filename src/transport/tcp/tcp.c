@@ -18,9 +18,9 @@
 #include "transport_internal.h"
 
 #include "metric_macros.h"
-#include <nb/poolset.h>
+#include <nb/internal/poolset.h>
 #include "envelope.h"
-#include <nb/iobuf.h>
+#include <nb/internal/iobuf.h>
 #include "util.h"
 
 #define NB_LOG_TAG "tcp"

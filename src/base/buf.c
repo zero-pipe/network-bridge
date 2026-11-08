@@ -1,5 +1,5 @@
 #include <nb/buf.h>
-#include <nb/poolset.h>
+#include <nb/internal/poolset.h>
 #include "atomic.h"
 
 #include <nb/error.h>

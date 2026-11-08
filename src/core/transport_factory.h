@@ -19,7 +19,7 @@ int nb_node_transport_add(nb_node_t *node,
                           const char *path,
                           nb_intra_process_t intra_process,
                           uint32_t poll_us,
-                          const nb_qos_t *qos);
+                          const nb_ps_qos_t *qos);
 
 /* 按 binding 配置创建并启动传输（推荐入口）。 */
 int nb_node_transport_add_binding(nb_node_t *node, const nb_binding_config_t *binding);
