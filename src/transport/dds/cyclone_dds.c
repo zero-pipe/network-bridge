@@ -161,19 +161,19 @@ static dds_qos_t *nb_dds_make_qos(nb_dds_instance_t *inst, int ignore_local)
     if (ignore_local) {
         dds_qset_ignorelocal(qos, DDS_IGNORELOCAL_PARTICIPANT);
     }
-    if (q->reliability == NB_QOS_RELIABLE) {
+    if (q->reliability == NB_QOS_RELIABILITY_RELIABLE) {
         dds_qset_reliability(qos, DDS_RELIABILITY_RELIABLE, DDS_MSECS(100));
-    } else if (q->reliability == NB_QOS_BEST_EFFORT) {
+    } else if (q->reliability == NB_QOS_RELIABILITY_BEST_EFFORT) {
         dds_qset_reliability(qos, DDS_RELIABILITY_BEST_EFFORT, 0);
     }
-    if (q->durability == NB_QOS_TRANSIENT_LOCAL) {
+    if (q->durability == NB_QOS_DURABILITY_TRANSIENT_LOCAL) {
         dds_qset_durability(qos, DDS_DURABILITY_TRANSIENT_LOCAL);
-    } else if (q->durability == NB_QOS_VOLATILE) {
+    } else if (q->durability == NB_QOS_DURABILITY_VOLATILE) {
         dds_qset_durability(qos, DDS_DURABILITY_VOLATILE);
     }
-    if (q->history == NB_QOS_KEEP_ALL) {
+    if (q->history == NB_QOS_HISTORY_KEEP_ALL) {
         dds_qset_history(qos, DDS_HISTORY_KEEP_ALL, 0);
-    } else if (q->history == NB_QOS_KEEP_LAST) {
+    } else if (q->history == NB_QOS_HISTORY_KEEP_LAST) {
         dds_qset_history(qos, DDS_HISTORY_KEEP_LAST, (int32_t)(q->depth ? q->depth : 1u));
     }
     if (q->deadline_ms > 0) {

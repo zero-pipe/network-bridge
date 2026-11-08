@@ -169,11 +169,11 @@ static int nb_cfg_load_qos(const cJSON *parent,
                            const char *path)
 {
     static const char *const reliability_names[] = {"best_effort", "reliable"};
-    static const int reliability_values[] = {NB_QOS_BEST_EFFORT, NB_QOS_RELIABLE};
+    static const int reliability_values[] = {NB_QOS_RELIABILITY_BEST_EFFORT, NB_QOS_RELIABILITY_RELIABLE};
     static const char *const durability_names[] = {"volatile", "transient_local"};
-    static const int durability_values[] = {NB_QOS_VOLATILE, NB_QOS_TRANSIENT_LOCAL};
+    static const int durability_values[] = {NB_QOS_DURABILITY_VOLATILE, NB_QOS_DURABILITY_TRANSIENT_LOCAL};
     static const char *const history_names[] = {"keep_last", "keep_all"};
-    static const int history_values[] = {NB_QOS_KEEP_LAST, NB_QOS_KEEP_ALL};
+    static const int history_values[] = {NB_QOS_HISTORY_KEEP_LAST, NB_QOS_HISTORY_KEEP_ALL};
     static const char *const liveliness_names[] = {
         "automatic", "manual_by_participant", "manual_by_topic"};
     static const int liveliness_values[] = {
@@ -816,23 +816,6 @@ static int nb_cfg_mode(const char *text, nb_node_mode_t *out)
     }
     if (strcmp(text, "mesh") == 0) {
         *out = NB_NODE_MODE_MESH;
-        return NB_OK;
-    }
-    return NB_ERR_INVALID;
-}
-
-/* discovery.mode: mesh enables discovery; static/off/none disables it. */
-static int nb_cfg_discovery_mode(const char *text, bool *disable)
-{
-    if (!text) {
-        return NB_ERR_INVALID;
-    }
-    if (strcmp(text, "mesh") == 0) {
-        *disable = false;
-        return NB_OK;
-    }
-    if (strcmp(text, "static") == 0 || strcmp(text, "off") == 0 || strcmp(text, "none") == 0) {
-        *disable = true;
         return NB_OK;
     }
     return NB_ERR_INVALID;

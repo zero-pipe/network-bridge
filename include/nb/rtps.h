@@ -25,9 +25,9 @@
  *   <Service>_<method>_res  response topic
  *   <Service>_<method>_evt  one-way event / pub-sub topic
  *
- * QoS is taken from nb_binding_config_t.qos (or the inherited transport.qos);
- * reliability, durability, history depth and partition are mapped onto the
- * participant's endpoint policies.
+ * QoS is taken from nb_binding_config_t.ps_qos (or the inherited
+ * pubsub.default_qos); reliability, durability, history depth and partition are
+ * mapped onto the participant's endpoint policies.
  */
 
 #include <nb/transport_provider.h>

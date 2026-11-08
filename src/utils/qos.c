@@ -69,8 +69,8 @@ int nb_ps_qos_validate(const nb_ps_qos_t *qos)
     if (!qos) {
         return NB_ERR_INVALID;
     }
-    if (qos->reliability > NB_QOS_RELIABLE || qos->durability > NB_QOS_TRANSIENT_LOCAL ||
-        qos->history > NB_QOS_KEEP_ALL ||
+    if (qos->reliability > NB_QOS_RELIABILITY_RELIABLE || qos->durability > NB_QOS_DURABILITY_TRANSIENT_LOCAL ||
+        qos->history > NB_QOS_HISTORY_KEEP_ALL ||
         qos->liveliness > NB_QOS_LIVELINESS_MANUAL_BY_TOPIC ||
         qos->ownership > NB_QOS_OWNERSHIP_EXCLUSIVE ||
         qos->presentation_scope > NB_QOS_PRESENTATION_GROUP) {
@@ -87,8 +87,8 @@ const char *nb_ps_qos_validate_reason(const nb_ps_qos_t *qos)
     if (!qos) {
         return "qos is null";
     }
-    if (qos->reliability > NB_QOS_RELIABLE || qos->durability > NB_QOS_TRANSIENT_LOCAL ||
-        qos->history > NB_QOS_KEEP_ALL ||
+    if (qos->reliability > NB_QOS_RELIABILITY_RELIABLE || qos->durability > NB_QOS_DURABILITY_TRANSIENT_LOCAL ||
+        qos->history > NB_QOS_HISTORY_KEEP_ALL ||
         qos->liveliness > NB_QOS_LIVELINESS_MANUAL_BY_TOPIC ||
         qos->ownership > NB_QOS_OWNERSHIP_EXCLUSIVE) {
         return "qos policy value out of range";

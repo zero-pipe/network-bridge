@@ -17,8 +17,9 @@
  *   <Service>_<method>_evt  one-way event / pub-sub topic
  * Characters outside [A-Za-z0-9_] are replaced with '_'.
  *
- * QoS is taken from nb_binding_config_t.qos (or the inherited transport.qos)
- * and mapped to Cyclone DDS reader/writer policies; see qos.h.
+ * QoS is taken from nb_binding_config_t.ps_qos (or the inherited
+ * pubsub.default_qos) and mapped to Cyclone DDS reader/writer policies; see
+ * qos.h.
  */
 
 #include <nb/transport_provider.h>
