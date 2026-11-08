@@ -4,11 +4,9 @@
 /*
  * DDS reader history: read/take, state masks and instance filtering.
  *
- * A subscription either forwards samples to a callback
- * (nb_subscriber_subscribe) or keeps a bounded reader-side history that the
- * application drains with read/take (nb_subscriber_subscribe_queue). Both are
- * ordinary service methods; the queue simply replaces the callback for EVENT
- * messages.
+ * A reader either forwards samples to a callback or keeps a bounded
+ * reader-side history that the application drains with nb_reader_read /
+ * nb_reader_take. Both are nb_reader_t instances on a topic (see pubsub.h).
  *
  * History follows DDS KEEP_LAST: a full queue drops its oldest sample. The
  * queue is per subscription, not per instance; instance filtering is done by

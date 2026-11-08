@@ -199,6 +199,43 @@ int nb_proxy_stream_send(nb_stream_t *stream, const nb_chunk_t *chunk);
 int nb_proxy_stream_cancel(nb_stream_t *stream);
 int nb_proxy_stream_destroy(nb_stream_t *stream);
 
+/* ---- Zero-copy publish (loan/borrow) ---- */
+/*
+ * A provider that keeps payloads in inspectable memory (shm) can hand out a
+ * writable chunk so a one-way EVENT skips the payload copy the normal path
+ * performs. The loan pins the resolved target transport at loan time and only
+ * EVENT publishing is supported.
+ *
+ *   nb_proxy_loan(pub, service, method, capacity, &loan, &data, &cap)
+ *       Reserve a writable payload area of at least `capacity` bytes.
+ *       *data points into provider memory and *cap is the actual writable
+ *       capacity (>= capacity). Fill it, then publish.
+ *   nb_proxy_publish_loan(loan, length, encoding, &request_id)
+ *       Encode the envelope around data[0..length) and publish it as an
+ *       EVENT. Takes ownership of the loan in every case.
+ *   nb_proxy_loan_release(loan)
+ *       Return an unpublished loan without sending anything.
+ *
+ * Errors: NB_ERR_NOT_SUPPORTED when the target transport has no loan path
+ * (anything but shm today); NB_ERR_AGAIN when no chunk that large is free
+ * (retry once consumers drain); NB_ERR_NOTFOUND when the service cannot be
+ * resolved. A loan is thread-confined: use and publish it from one thread.
+ */
+typedef struct nb_loan nb_loan_t;
+
+int nb_proxy_loan(nb_proxy_t *proxy,
+                  const char *service,
+                  const char *method,
+                  uint32_t capacity,
+                  nb_loan_t **out_loan,
+                  uint8_t **out_data,
+                  uint32_t *out_capacity);
+int nb_proxy_publish_loan(nb_loan_t *loan,
+                          uint32_t length,
+                          uint8_t encoding,
+                          nb_request_id_t *out_request_id);
+void nb_proxy_loan_release(nb_loan_t *loan);
+
 #ifdef __cplusplus
 }
 #endif

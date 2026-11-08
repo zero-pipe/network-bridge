@@ -155,10 +155,10 @@ nb_add_test(test_contracts unit.contracts LABELS "unit;contracts")
 nb_add_test(test_loopback e2e.loopback LABELS "e2e;loopback" TIMEOUT 300)
 nb_add_test(test_stream e2e.stream LABELS "e2e;stream" TIMEOUT 300)
 nb_add_test(test_api e2e.api LABELS "e2e;api")
-nb_add_test(test_sample_queue e2e.sample_queue
-    LABELS "e2e;dds"
+nb_add_test(test_sample_queue unit.sample_queue
+    LABELS "unit;dds"
     INCLUDES ${NB_SRC_DIR}/core
-    TIMEOUT 120)
+    TIMEOUT 60)
 nb_add_test(test_move e2e.move LABELS "e2e;move")
 nb_add_test(test_worker e2e.worker LABELS "e2e;worker")
 nb_add_test(test_semantics e2e.semantics LABELS "e2e;semantics")

@@ -237,19 +237,9 @@ static void test_response_and_view(void)
 
 int main(void)
 {
-    /* The publisher/subscriber helpers must be functions, not macros. */
-    int (*publisher_create)(nb_node_t *, const nb_publisher_options_t *, nb_publisher_t **) =
-        nb_publisher_create;
-    void (*publisher_destroy)(nb_publisher_t *) = nb_publisher_destroy;
-    int (*subscriber_create)(nb_node_t *, const char *, nb_subscriber_t **) = nb_subscriber_create;
     int (*reply_fn)(nb_call_t *, int, const nb_payload_t *) = nb_reply;
-    void (*stub_options_unused)(void) = NULL;
 
-    (void)publisher_create;
-    (void)publisher_destroy;
-    (void)subscriber_create;
     (void)reply_fn;
-    (void)stub_options_unused;
 
     test_metadata();
     test_endpoint();

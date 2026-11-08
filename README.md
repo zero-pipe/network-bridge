@@ -98,7 +98,7 @@ int main(void)
 | `<nb/node.h>` | node、调度、发现、路由、指标 |
 | `<nb/service.h>` | service、handler、reply、message view |
 | `<nb/proxy.h>` | proxy、异步/同步/事件/流式调用 |
-| `<nb/publish.h>`、`<nb/subscribe.h>` | topic、sample 和 reader |
+| `<nb/pubsub.h>` | participant、topic、writer、reader、QoS、status |
 | `<nb/endpoint.h>` | endpoint 与自定义传输 provider（`<nb/transport_provider.h>`） |
 | `<nb/codec.h>` | 载荷 codec、message view 和 service table |
 | `<nb/config.h>` | JSON 配置 |

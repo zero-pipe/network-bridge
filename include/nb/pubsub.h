@@ -14,13 +14,11 @@
  *
  * Topic-based backends: dds, rtps, shm. The policies in <nb/qos.h> are DDS
  * policies and are honoured by these backends; point-to-point RPC links
- * ignore them. Reader-side history (read/take, waitsets, sample filters) and
- * the DDS status events also belong to this spine, not to the RPC one.
+ * ignore them.
  *
- * The publisher/subscriber aliases in publish.h and subscribe.h are the
- * pre-spine spelling, where a topic was expressed as a service method. They
- * are kept for source compatibility during 0.x; new code uses the topic
- * objects above (see docs/architecture-split.md).
+ * Reader histories and wait sets belong to this spine: a history reader keeps
+ * a bounded KEEP_LAST queue that nb_reader_read / nb_reader_take drain, and
+ * nb_waitset_attach_reader makes a wait set observe it.
  */
 
 #include <nb/base.h>
@@ -112,6 +110,8 @@ size_t nb_reader_take(nb_reader_t *reader,
                       size_t max);
 /* Samples currently held by the history (0 for callback readers). */
 size_t nb_reader_size(const nb_reader_t *reader);
+/* Samples dropped because the history was full (0 for callback readers). */
+uint64_t nb_reader_dropped(const nb_reader_t *reader);
 
 /* ---- Wait sets over readers ---- */
 /* A wait set created with nb_waitset_create can observe reader histories:
@@ -121,11 +121,6 @@ size_t nb_reader_size(const nb_reader_t *reader);
  * both a reader and the legacy service-method attach. */
 int nb_waitset_attach_reader(nb_waitset_t *waitset, nb_reader_t *reader);
 int nb_waitset_detach_reader(nb_waitset_t *waitset, nb_reader_t *reader);
-
-/* ---- Legacy aliases (pre-spine spelling) ---- */
-#include <nb/service_history.h>
-#include <nb/publish.h>
-#include <nb/subscribe.h>
 
 /* Topic-based backends; including these also makes their registration calls
  * visible. They are opt-in providers, so including them here is what a

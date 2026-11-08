@@ -9,10 +9,9 @@
  * limits and presentation. They are honoured by topic-based backends (`dds`
  * and `rtps`); point-to-point RPC links (udp/tcp/shm) never read them.
  *
- * The type is named nb_ps_qos_t to make that ownership explicit. nb_qos_t is
- * the pre-split spelling and stays as a source-compatible alias during 0.x;
- * see docs/architecture-split.md. Do not add RPC-only settings here: they
- * belong to the RPC spine.
+ * The type is named nb_ps_qos_t to make that ownership explicit: it is the
+ * pub/sub spine's QoS, not a transport-neutral policy set. Do not add RPC-only
+ * settings here; they belong to the RPC spine.
  *
  * The `dds` and `rtps` providers map these fields onto their native
  * equivalents: the `rtps` provider announces every field here and applies the
@@ -137,36 +136,6 @@ bool nb_ps_qos_is_default(const nb_ps_qos_t *qos);
 /* Check enum ranges and the partition NUL terminator. */
 int nb_ps_qos_validate(const nb_ps_qos_t *qos);
 const char *nb_ps_qos_validate_reason(const nb_ps_qos_t *qos);
-
-/*
- * Pre-split spellings. They are the same type and the same functions, kept so
- * sources written against 0.4 keep compiling; define NB_NO_DEPRECATED_API to
- * hide them. New code uses nb_ps_qos_*.
- */
-#ifndef NB_NO_DEPRECATED_API
-typedef nb_ps_qos_t nb_qos_t;
-
-static inline void nb_qos_init(nb_qos_t *qos)
-{
-    nb_ps_qos_init(qos);
-}
-static inline void nb_qos_inherit(nb_qos_t *qos, const nb_qos_t *parent)
-{
-    nb_ps_qos_inherit(qos, parent);
-}
-static inline bool nb_qos_is_default(const nb_qos_t *qos)
-{
-    return nb_ps_qos_is_default(qos);
-}
-static inline int nb_qos_validate(const nb_qos_t *qos)
-{
-    return nb_ps_qos_validate(qos);
-}
-static inline const char *nb_qos_validate_reason(const nb_qos_t *qos)
-{
-    return nb_ps_qos_validate_reason(qos);
-}
-#endif /* NB_NO_DEPRECATED_API */
 
 #ifdef __cplusplus
 }

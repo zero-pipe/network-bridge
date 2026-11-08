@@ -601,7 +601,6 @@ void nb_node_destroy(nb_node_t *node)
                 if (m->owns_user) {
                     free(m->user);
                 }
-                nb_sample_queue_destroy(m->queue);
                 free(m);
                 m = mn;
             }

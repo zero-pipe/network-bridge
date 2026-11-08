@@ -2,7 +2,6 @@
 #include "node_internal.h"
 #include "service_internal.h"
 
-#include <nb/service_history.h>
 
 #include "envelope.h"
 #include "metric_macros.h"
@@ -595,7 +594,6 @@ void nb_service_handle_request(nb_node_t *node, nb_transport_t *transport, nb_me
     nb_service_t *svc;
     nb_method_t *m = NULL;
     handler_fn fn = NULL;
-    nb_sample_queue_t *queue = NULL;
     void *user = NULL;
     service_interceptor_fn interceptor = NULL;
     void *interceptor_user = NULL;
@@ -617,36 +615,19 @@ void nb_service_handle_request(nb_node_t *node, nb_transport_t *transport, nb_me
             continue;
         }
         for (m = svc->methods; m; m = m->next) {
-            if (strcmp(m->name, dot + 1) == 0 && (m->fn || m->queue)) {
+            if (strcmp(m->name, dot + 1) == 0 && m->fn) {
                 fn = m->fn;
                 user = m->user;
-                queue = m->queue;
                 break;
             }
         }
-        if (fn || queue) {
+        if (fn) {
             interceptor = svc->interceptor;
             interceptor_user = svc->interceptor_user;
         }
         break;
     }
     ntk_mutex_unlock(node->services_lock);
-    if (!fn && !queue) {
-        nb_service_send_status(transport, msg, NB_ERR_NOTFOUND);
-        return;
-    }
-    /*
-     * 排队式订阅：EVENT 样本进入读者历史，不再回调 handler。REQUEST 仍走
-     * 请求路径，因此同一方法可以同时有队列和 unary handler。
-     */
-    if (queue && msg->kind == KIND_EVENT) {
-        int rc = nb_sample_queue_push(queue, msg);
-        if (rc != NB_OK) {
-            nb_log_warn("sample queue push failed: service=%s method=%s rc=%d", tmp, dot + 1, rc);
-        }
-        return;
-    }
-    /* 排队式订阅没有 handler：发往它的 REQUEST 无处可去。 */
     if (!fn) {
         nb_service_send_status(transport, msg, NB_ERR_NOTFOUND);
         return;
@@ -1421,14 +1402,13 @@ static int nb_service_method_register(nb_service_t *svc,
                                    void *user,
                                    int owns_user,
                                    int run_in_worker,
-                                   const nb_service_executor_t *executor,
-                                   uint32_t queue_depth)
+                                   const nb_service_executor_t *executor)
 {
     nb_method_t *m = NULL;
     nb_svc_task_t *t;
     int rc;
 
-    if (!svc || !method || !method[0] || (!fn && !stream_fn && queue_depth == 0)) {
+    if (!svc || !method || !method[0] || (!fn && !stream_fn)) {
         return NB_ERR_INVALID;
     }
     m = (nb_method_t *)calloc(1, sizeof(*m));
@@ -1446,16 +1426,8 @@ static int nb_service_method_register(nb_service_t *svc,
     m->owns_user = owns_user;
     m->run_in_worker = run_in_worker;
     m->executor = executor;
-    if (queue_depth > 0) {
-        m->queue = nb_sample_queue_create(queue_depth);
-        if (!m->queue) {
-            free(m);
-            return NB_ERR_NOMEM;
-        }
-    }
     t = (nb_svc_task_t *)calloc(1, sizeof(*t));
     if (!t) {
-        nb_sample_queue_destroy(m->queue);
         free(m);
         return NB_ERR_NOMEM;
     }
@@ -1464,7 +1436,6 @@ static int nb_service_method_register(nb_service_t *svc,
     t->method = m;
     if (ntk_poller_async(svc->node->poller, nb_svc_method_task, t, 1) != NTK_OK) {
         free(t);
-        nb_sample_queue_destroy(m->queue);
         free(m);
         return NB_ERR_IO;
     }
@@ -1473,109 +1444,7 @@ static int nb_service_method_register(nb_service_t *svc,
 
 int nb_service_add_method(nb_service_t *svc, const char *method, handler_fn fn, void *user)
 {
-    return nb_service_method_register(svc, method, fn, NULL, user, 0, 0, NULL, 0);
-}
-
-/* ---- DDS 读者历史（read/take） ---- */
-
-int nb_service_add_queue_method(nb_service_t *svc, const char *method, uint32_t depth)
-{
-    return nb_service_method_register(svc,
-                                   method,
-                                   NULL,
-                                   NULL,
-                                   NULL,
-                                   0,
-                                   0,
-                                   NULL,
-                                   depth ? depth : NB_SAMPLE_QUEUE_DEFAULT_DEPTH);
-}
-
-/* 必须在 node->services_lock 内调用。 */
-static nb_method_t *nb_service_lookup_method_locked(nb_service_t *svc, const char *method)
-{
-    nb_method_t *m;
-    for (m = svc ? svc->methods : NULL; m; m = m->next) {
-        if (strcmp(m->name, method) == 0) {
-            return m;
-        }
-    }
-    return NULL;
-}
-
-nb_sample_queue_t *nb_service_queue_internal(nb_service_t *svc, const char *method)
-{
-    nb_sample_queue_t *queue = NULL;
-    nb_method_t *m;
-
-    if (!svc || !method || !method[0] || !svc->node || !svc->node->services_lock) {
-        return NULL;
-    }
-    ntk_mutex_lock(svc->node->services_lock);
-    m = nb_service_lookup_method_locked(svc, method);
-    if (m) {
-        queue = m->queue;
-    }
-    ntk_mutex_unlock(svc->node->services_lock);
-    return queue;
-}
-
-int nb_service_set_queue(nb_service_t *svc, const char *method, uint32_t depth)
-{
-    nb_method_t *m;
-    int rc = NB_ERR_NOTFOUND;
-
-    if (!svc || !method || !method[0] || !svc->node || !svc->node->services_lock) {
-        return NB_ERR_INVALID;
-    }
-    if (depth == 0) {
-        depth = NB_SAMPLE_QUEUE_DEFAULT_DEPTH;
-    }
-    ntk_mutex_lock(svc->node->services_lock);
-    m = nb_service_lookup_method_locked(svc, method);
-    if (m) {
-        if (m->queue) {
-            nb_sample_queue_set_depth(m->queue, depth);
-            rc = NB_OK;
-        } else {
-            m->queue = nb_sample_queue_create(depth);
-            rc = m->queue ? NB_OK : NB_ERR_NOMEM;
-        }
-    }
-    ntk_mutex_unlock(svc->node->services_lock);
-    return rc;
-}
-
-size_t nb_service_read(nb_service_t *svc,
-                       const char *method,
-                       const nb_sample_filter_t *filter,
-                       nb_sample_t *out,
-                       size_t max)
-{
-    nb_sample_queue_t *queue = nb_service_queue_internal(svc, method);
-    return queue ? nb_sample_queue_read(queue, filter, out, max) : 0;
-}
-
-size_t nb_service_take(nb_service_t *svc,
-                       const char *method,
-                       const nb_sample_filter_t *filter,
-                       nb_sample_t *out,
-                       size_t max)
-{
-    nb_sample_queue_t *queue = nb_service_queue_internal(svc, method);
-    return queue ? nb_sample_queue_take(queue, filter, out, max) : 0;
-}
-
-size_t nb_service_queue_size(nb_service_t *svc, const char *method)
-{
-    nb_sample_queue_t *queue = nb_service_queue_internal(svc, method);
-    return queue ? nb_sample_queue_size(queue) : 0;
-}
-
-uint64_t nb_service_queue_dropped(nb_service_t *svc, const char *method)
-{
-    nb_sample_queue_t *queue = nb_service_queue_internal(svc, method);
-    return queue ? nb_sample_queue_dropped(queue) : 0;
+    return nb_service_method_register(svc, method, fn, NULL, user, 0, 0, NULL);
 }
 
 int nb_service_add_method_with_options(nb_service_t *svc,
@@ -1590,12 +1459,12 @@ int nb_service_add_method_with_options(nb_service_t *svc,
     if (rc != NB_OK) {
         return rc;
     }
-    return nb_service_method_register(svc, method, fn, NULL, user, 0, run_in_worker, executor, 0);
+    return nb_service_method_register(svc, method, fn, NULL, user, 0, run_in_worker, executor);
 }
 
 int nb_service_add_method_worker(nb_service_t *svc, const char *method, handler_fn fn, void *user)
 {
-    return nb_service_method_register(svc, method, fn, NULL, user, 0, 1, NULL, 0);
+    return nb_service_method_register(svc, method, fn, NULL, user, 0, 1, NULL);
 }
 
 static int nb_service_add_sync_ex(nb_service_t *svc,
@@ -1622,7 +1491,7 @@ static int nb_service_add_sync_ex(nb_service_t *svc,
     bridge->fn = fn;
     bridge->user = user;
     rc = nb_service_method_register(
-        svc, method, nb_sync_method_bridge, NULL, bridge, 1, run_in_worker, executor, 0);
+        svc, method, nb_sync_method_bridge, NULL, bridge, 1, run_in_worker, executor);
     if (rc != NB_OK) {
         free(bridge);
     }
@@ -1655,7 +1524,7 @@ int nb_service_add_sync_method_worker(nb_service_t *svc,
 
 int nb_service_add_stream_method(nb_service_t *svc, const char *method, chunk_handler_fn fn, void *user)
 {
-    return nb_service_method_register(svc, method, NULL, fn, user, 0, 0, NULL, 0);
+    return nb_service_method_register(svc, method, NULL, fn, user, 0, 0, NULL);
 }
 
 int nb_service_add_stream_method_with_options(nb_service_t *svc,
@@ -1670,7 +1539,7 @@ int nb_service_add_stream_method_with_options(nb_service_t *svc,
     if (rc != NB_OK) {
         return rc;
     }
-    return nb_service_method_register(svc, method, NULL, fn, user, 0, run_in_worker, executor, 0);
+    return nb_service_method_register(svc, method, NULL, fn, user, 0, run_in_worker, executor);
 }
 
 int nb_service_add_methods(nb_service_t *svc,

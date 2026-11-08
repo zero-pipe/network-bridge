@@ -451,6 +451,14 @@ size_t nb_reader_size(const nb_reader_t *reader)
     return nb_sample_queue_size(reader->entry->queue);
 }
 
+uint64_t nb_reader_dropped(const nb_reader_t *reader)
+{
+    if (!reader || !reader->entry || !reader->entry->queue) {
+        return 0;
+    }
+    return nb_sample_queue_dropped(reader->entry->queue);
+}
+
 nb_sample_queue_t *nb_ps_reader_queue(nb_reader_t *reader)
 {
     return (reader && reader->entry) ? reader->entry->queue : NULL;

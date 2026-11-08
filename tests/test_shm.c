@@ -8,7 +8,7 @@
 #include <nb/proxy.h>
 #include <nb/node.h>
 #include <nb/service.h>
-#include <nb/publish.h>
+#include <nb/proxy.h>
 #include <nb/shm.h>
 #include <platform.h>
 #include <thread/sem.h>
@@ -280,7 +280,7 @@ int main(void)
         sub_st.count = 0;
         sub_st.len = 0;
         for (attempt = 0; attempt < 50 && sub_st.count == 0; attempt++) {
-            int lrc = nb_publisher_loan(proxy[2],
+            int lrc = nb_proxy_loan(proxy[2],
                                         "TopicService",
                                         "chat",
                                         (uint32_t)sizeof(expect),
@@ -298,12 +298,12 @@ int main(void)
             }
             if (cap < sizeof(expect)) {
                 nb_log_error("shm loan capacity too small: %u", cap);
-                nb_publisher_loan_release(loan);
+                nb_proxy_loan_release(loan);
                 failed = 1;
                 break;
             }
             memcpy(data, expect, sizeof(expect));
-            if (nb_publisher_publish_loan(loan, (uint32_t)sizeof(expect), 0, NULL) != NB_OK) {
+            if (nb_proxy_publish_loan(loan, (uint32_t)sizeof(expect), 0, NULL) != NB_OK) {
                 failed = 1;
                 break;
             }
@@ -326,7 +326,7 @@ int main(void)
             nb_loan_t *loan = NULL;
             uint8_t *data = NULL;
             uint32_t cap = 0;
-            int lrc = nb_publisher_loan(
+            int lrc = nb_proxy_loan(
                 proxy[2], "TopicService", "chat", 250000, &loan, &data, &cap);
 
             if (lrc != NB_OK) {
@@ -334,7 +334,7 @@ int main(void)
                 failed = 1;
                 break;
             }
-            nb_publisher_loan_release(loan);
+            nb_proxy_loan_release(loan);
         }
     }
 

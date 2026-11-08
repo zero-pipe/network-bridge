@@ -10,7 +10,6 @@
 
 #include "caps.h"
 #include "transport_internal.h"
-#include "sample_queue.h"
 
 typedef struct nb_method {
     struct nb_method *next;
@@ -21,8 +20,6 @@ typedef struct nb_method {
     int owns_user;                         /* user 由框架分配（如 sync 桥接结构），销毁时释放 */
     int run_in_worker;                     /* 非 0 时 unary handler 调度到 node->handler_pool */
     const nb_service_executor_t *executor; /* 非 NULL 时使用调用者提供的 executor */
-    /* DDS 读者历史（P2.4）：非 NULL 时该方法的 EVENT 样本入队，不再回调 handler。 */
-    nb_sample_queue_t *queue;
 } nb_method_t;
 
 struct nb_service {
@@ -93,9 +90,6 @@ typedef struct nb_recv_stream {
 void nb_service_handle_request(nb_node_t *node,
                                 nb_transport_t *transport,
                                 nb_message_t *message);
-/* Resolve the reader history of (service, method); NULL when it has none.
- * Used by wait sets; the returned queue lives as long as the node. */
-nb_sample_queue_t *nb_service_queue_internal(nb_service_t *svc, const char *method);
 void nb_service_handle_cancel(nb_node_t *node,
                                nb_transport_t *transport,
                                const nb_message_t *message);

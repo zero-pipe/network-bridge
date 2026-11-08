@@ -36,9 +36,9 @@
  * channel supports at most NB_SHM_MAX_NODES nodes.
  *
  * Zero-copy publish: the shm provider implements the loan/borrow SPI, so
- * nb_publisher_loan / nb_publisher_publish_loan (see publish.h) write the
- * payload straight into a segment chunk and skip the send-side copy that the
- * ordinary event path performs.
+ * nb_proxy_loan / nb_proxy_publish_loan (see proxy.h) write the payload
+ * straight into a segment chunk and skip the send-side copy that the ordinary
+ * event path performs.
  */
 
 #include <nb/transport_provider.h>

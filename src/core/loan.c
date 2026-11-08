@@ -5,7 +5,7 @@
  * 编码＋扇出，跳过普通 send 路径里把 payload 拷进 chunk 的那一次 memcpy。
  * 句柄由 core 分配、publish/release 归还，额度来自 provider 的段内 chunk。
  */
-#include <nb/publish.h>
+#include <nb/proxy.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -35,7 +35,7 @@ static nb_request_id_t nb_loan_next_id(nb_node_t *node)
     return id ? id : 1;
 }
 
-int nb_publisher_loan(nb_publisher_t *pub,
+int nb_proxy_loan(nb_proxy_t *pub,
                       const char *service,
                       const char *method,
                       uint32_t capacity,
@@ -90,7 +90,7 @@ int nb_publisher_loan(nb_publisher_t *pub,
     return NB_OK;
 }
 
-int nb_publisher_publish_loan(nb_loan_t *loan,
+int nb_proxy_publish_loan(nb_loan_t *loan,
                               uint32_t length,
                               uint8_t encoding,
                               nb_request_id_t *out_request_id)
@@ -124,7 +124,7 @@ int nb_publisher_publish_loan(nb_loan_t *loan,
     return rc;
 }
 
-void nb_publisher_loan_release(nb_loan_t *loan)
+void nb_proxy_loan_release(nb_loan_t *loan)
 {
     if (!loan) {
         return;

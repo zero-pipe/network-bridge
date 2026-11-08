@@ -172,13 +172,6 @@ int nb_service_add_sync_method_worker(nb_service_t *service,
                                       nb_sync_handler_fn handler,
                                       void *user);
 
-/* ---- DDS reader history (read/take) ---- */
-/*
- * Reader-side history on a service method belongs to the pub/sub spine and is
- * declared in <nb/service_history.h> (reachable from <nb/pubsub.h> and
- * <nb/nb.h>). New code uses nb_reader_t instead.
- */
-
 /* ---- Replies ---- */
 /* One-shot asynchronous reply. status is application-defined; replies to EVENT
  * requests are silently ignored. Returns NB_OK when the reply was accepted for

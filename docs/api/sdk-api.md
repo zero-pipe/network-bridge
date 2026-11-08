@@ -17,8 +17,8 @@ proxy 和字节视图；载荷序列化由应用通过 codec 决定。
 | --- | --- |
 | `<nb/node.h>` | node、调度、发现、路由、指标 |
 | `<nb/service.h>` | service、handler、reply、message view |
-| `<nb/proxy.h>` | proxy、异步/同步/事件/流式调用 |
-| `<nb/publish.h>`、`<nb/subscribe.h>` | topic、sample、reader |
+| `<nb/proxy.h>` | proxy、异步/同步/事件/流式调用、零拷贝发布 |
+| `<nb/pubsub.h>` | participant、topic、writer、reader、QoS、status、wait set |
 | `<nb/endpoint.h>` | endpoint 解析与自定义传输 provider |
 | `<nb/codec.h>` | codec、message view、service table |
 | `<nb/config.h>` | JSON 配置加载与 node 创建 |
@@ -31,10 +31,12 @@ proxy 和字节视图；载荷序列化由应用通过 codec 决定。
 ## 对象模型
 
 ```text
-node
-  ├─ service   注册方法、接收请求并回复
-  └─ proxy     发现/路由并发送调用：
-               call_async / call_sync / call_event
+node                               运行时：线程、binding、发现
+  ├─ service                       注册方法、接收请求并回复
+  ├─ proxy                         发现/路由并发送调用：
+  │                                call_async / call_sync / call_event
+  └─ participant                  发布/订阅面，绑定一个 topic 后端
+       └─ topic → writer / reader  按 topic 名匹配；reader 可回调或带 history
 ```
 
 一个 node 可以同时承担客户端和服务端角色。proxy 借用 node 的 poller 和路由表，
@@ -212,25 +214,31 @@ EXECUTOR。WORKER 要求 `runtime.handler_threads > 0`；否则方法会降级�
 
 ### Reader history（read/take）与 wait set
 
-订阅可以把样本投递给回调（`nb_subscriber_subscribe`），也可以保存在 reader 侧
-history 中：
+发布/订阅用 `nb_participant_t` / `nb_topic_t` / `nb_reader_t`。reader 可以把
+样本投递给回调，也可以保存在 reader 侧 history 中：
 
 ```c
-#include <nb/subscribe.h>
+#include <nb/pubsub.h>
 
-nb_subscriber_t *sub = NULL;
-nb_subscriber_create(node, "TradeService", &sub);
-nb_subscriber_subscribe_queue(sub, "ticks", 16); /* KEEP_LAST 深度 16 */
+nb_participant_t *part = NULL;
+nb_participant_options_t popt = { .node = node, .scheme = "dds" };
+nb_participant_create(&popt, &part);
+
+nb_topic_t *ticks = NULL;
+nb_topic_create(part, "ticks", "Trade", NULL, &ticks);
+
+nb_reader_t *rd = NULL;
+nb_reader_create(ticks, NULL, NULL, NULL, 16, &rd); /* KEEP_LAST 深度 16 */
 
 nb_sample_t samples[8];
 nb_sample_filter_t filter = NB_SAMPLE_FILTER_ANY;
-size_t n = nb_subscriber_read(sub, "ticks", &filter, samples, 8);
+size_t n = nb_reader_read(rd, &filter, samples, 8);
 for (size_t i = 0; i < n; i++) {
     /* samples[i].data 是借用视图：有效到样本被 take 为止 */
     use(samples[i].data.data, samples[i].data.len, &samples[i].info);
 }
 
-n = nb_subscriber_take(sub, "ticks", &filter, samples, 8);
+n = nb_reader_take(rd, &filter, samples, 8);
 for (size_t i = 0; i < n; i++) {
     use(samples[i].data.data, samples[i].data.len, &samples[i].info);
     nb_sample_release(&samples[i]); /* take() 返回的样本归调用方所有 */
@@ -239,10 +247,10 @@ for (size_t i = 0; i < n; i++) {
 
 语义：
 
-- history 是 DDS 的 `KEEP_LAST(depth)`；depth 为 0 时使用默认值 32。溢出时
-  丢弃最旧的样本，并计入 `nb_service_queue_dropped`。
-- `read()` 把返回的样本标记为 READ 但保留，返回借用视图（loan 路径）；
-  `take()` 移除样本并返回拥有所有权的副本。两者都先应用掩码。
+- history 是 DDS 的 `KEEP_LAST(depth)`；深度由 `nb_reader_create` 给出。溢出时
+  丢弃最旧的样本，并计入 `nb_reader_dropped`。
+- 回调读者（`on_data` 非 NULL）与 history 读者（`on_data` 为 NULL、depth 非 0）
+  二选一；回调在 provider 线程上运行，样本只在回调内有效。
 - 掩码组合 DDS 的三个维度
   （`NB_STATE_SAMPLE_READ`/`_NOT_READ`、`NB_STATE_VIEW_NEW`/`_NOT_NEW`、
   `NB_STATE_INSTANCE_ALIVE`/`_DISPOSED`/`_NO_WRITERS`）。某个维度只有设置了
@@ -251,24 +259,23 @@ for (size_t i = 0; i < n; i++) {
 - `nb_sample_filter_t.instance` 用 16 字节句柄选择某个 DDS 实例；`NULL`
   表示任意。没有句柄的样本永远不会匹配非 NULL 句柄。
 
-wait set 可以阻塞等待一个或多个 history：
+wait set 可以阻塞等待一个或多个 reader history：
 
 ```c
-#include <nb/waitset.h>
-
 nb_waitset_t *ws = NULL;
 nb_waitset_create(node, &ws);
-nb_waitset_attach(ws, sub, "ticks");
+nb_waitset_attach_reader(ws, rd);
 
 if (nb_waitset_wait(ws, &filter, 500) == 1) {
-    n = nb_subscriber_take(sub, "ticks", &filter, samples, 8);
+    n = nb_reader_take(rd, &filter, samples, 8);
 }
 ```
 
 `nb_waitset_wait` 在挂载的 history 有匹配样本时返回 1，超时返回 0，其它情况
 返回负错误码。唤醒是事件驱动的：每次入队都会 post 一个许可，因此阻塞的等待者
 无需轮询延迟即可返回。`NB_WAITSET_INFINITE` 表示永久等待。wait set 只报告
-就绪；随后仍需从具体订阅中取走数据。
+就绪；随后仍需从具体 reader 中取走数据。回调读者没有 history，挂载会返回
+`NB_ERR_INVALID`。
 
 ## Proxy（客户端）
 
@@ -343,9 +350,9 @@ nb_loan_t *loan = NULL;
 uint8_t *data = NULL;
 uint32_t cap = 0;
 
-if (nb_publisher_loan(pub, "TopicService", "chat", len, &loan, &data, &cap) == NB_OK) {
-    memcpy(data, my_bytes, len);                   /* 直接写进共享段 */
-    nb_publisher_publish_loan(loan, len, 0, NULL); /* 加信封前缀并扇出 */
+if (nb_proxy_loan(pub, "TopicService", "chat", len, &loan, &data, &cap) == NB_OK) {
+    memcpy(data, my_bytes, len);                 /* 直接写进共享段 */
+    nb_proxy_publish_loan(loan, len, 0, NULL);   /* 加信封前缀并扇出 */
 } else {
     /* NB_ERR_NOT_SUPPORTED：传输不支持 loan；
        NB_ERR_AGAIN：暂时没有可用 chunk，稍后重试 */
@@ -354,10 +361,10 @@ if (nb_publisher_loan(pub, "TopicService", "chat", len, &loan, &data, &cap) == N
 
 - loan 在发放时就固定了目标传输（通过 proxy 的固定端点或发现），因此
   `publish_loan` 不再做路由查找。只支持 EVENT 发布。
-- `publish_loan` 的 `encoding` 为 0 时使用 publisher 的默认
+- `publish_loan` 的 `encoding` 为 0 时使用 proxy 的默认
   `payload_encoding`，与普通事件路径一致。
-- `nb_publisher_publish_loan` 无论成功失败都会接管 loan。要放弃一个未发布的
-  loan，调用 `nb_publisher_loan_release`。loan 是线程私有的，绝不能跨线程传递。
+- `nb_proxy_publish_loan` 无论成功失败都会接管 loan。要放弃一个未发布的
+  loan，调用 `nb_proxy_loan_release`。loan 是线程私有的，绝不能跨线程传递。
 - `cap` 可能大于请求的 `capacity`（按段大小档位向上取整）。写入不要超过
   `len` 字节。
 
@@ -443,8 +450,7 @@ provider SPI 只使用三个公共对象：
   由 provider 自己解释，`uri` 是归一化形式。
 - `nb_message_t`：与核心内部相同的消息结构；不存在第二份 provider 消息拷贝。
 - `nb_ps_qos_t`：发布/订阅 QoS，创建实例时通过
-  `nb_transport_provider_options_t.qos` 传入。0.4 的 `nb_qos_t` 是它的兼容
-  别名（`NB_NO_DEPRECATED_API` 下隐藏）。点对点 RPC 链路不读取这些策略。
+  `nb_transport_provider_options_t.qos` 传入。点对点 RPC 链路不读取这些策略。
 
 `nb_message_t.sample` 是 DDS 样本元数据：`state`
 （`NB_SAMPLE_STATE_VALID` / `DISPOSED` / `NO_WRITERS`，
@@ -546,10 +552,11 @@ topic 由完整的 `Service.method` 路由派生：
 - 响应：`<Service>_<method>_res`
 - 事件/发布订阅：`<Service>_<method>_evt`
 
-用 `nb_publisher_publish` 发布（等价于 `nb_proxy_call_event`），用
-`nb_subscriber_subscribe` 订阅（等价于 `nb_service_add_method`）。注册服务端
-方法会创建请求/事件 reader 和响应 writer；第一次客户端请求会按需创建请求
-writer 和响应 reader。
+发布/订阅推荐使用 `nb_writer_t` / `nb_reader_t`（`<nb/pubsub.h>`）：topic 名
+原样上线，不做路由派生。RPC 事件（`nb_proxy_call_event` 发布、
+`nb_service_add_method` 接收）仍按上面的 `<Service>_<method>_evt` 派生。
+注册服务端方法会创建请求/事件 reader 和响应 writer；第一次客户端请求会按需
+创建请求 writer 和响应 reader。
 
 DDS binding 的 `intra_process` 支持 `off` / `auto` / `only`。`auto` 先在进程
 内投递事件，再照常发布到 DDS；`only` 完全跳过 DDS 事件 writer/reader 和
