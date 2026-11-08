@@ -86,10 +86,21 @@ static int make_participant(uint32_t domain, rtps_participant_t **out)
         fprintf(stderr, "participant create failed\n");
         return -1;
     }
-    (void)rtps_participant_add_peer(*out, "127.0.0.1", FASTDDS_METATRAFFIC_PORT);
-    (void)rtps_participant_add_peer(*out, "127.0.0.1", FASTDDS_METATRAFFIC_PORT + 2);
-    (void)rtps_participant_add_peer(*out, "127.0.0.1", FASTDDS_METATRAFFIC_PORT + 4);
-    (void)rtps_participant_add_peer(*out, "127.0.0.1", FASTDDS_METATRAFFIC_PORT + 6);
+    if (!getenv("RTPS_TEST_NO_PEERS")) {
+        /* Explicit peers make the test independent of multicast, but the
+         * source address they use becomes part of discovery. Default to
+         * loopback for same-host runs; set RTPS_TEST_PEER_HOST to the real
+         * interface address when the DDS peer binds to that interface, or
+         * Fast DDS answers through the loopback and the handshake stalls. */
+        const char *peer_host = getenv("RTPS_TEST_PEER_HOST");
+        if (!peer_host || !peer_host[0]) {
+            peer_host = "127.0.0.1";
+        }
+        (void)rtps_participant_add_peer(*out, peer_host, FASTDDS_METATRAFFIC_PORT);
+        (void)rtps_participant_add_peer(*out, peer_host, FASTDDS_METATRAFFIC_PORT + 2);
+        (void)rtps_participant_add_peer(*out, peer_host, FASTDDS_METATRAFFIC_PORT + 4);
+        (void)rtps_participant_add_peer(*out, peer_host, FASTDDS_METATRAFFIC_PORT + 6);
+    }
     if (rtps_participant_start(*out) != RTPS_OK) {
         fprintf(stderr, "participant start failed\n");
         rtps_participant_destroy(*out);
