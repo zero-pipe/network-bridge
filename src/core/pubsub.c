@@ -19,6 +19,7 @@
  */
 
 #include "node_internal.h"
+#include "pubsub_internal.h"
 #include "sample_queue.h"
 #include "transport_internal.h"
 #include "util.h"
@@ -452,6 +453,11 @@ size_t nb_reader_size(const nb_reader_t *reader)
         return 0;
     }
     return nb_sample_queue_size(reader->entry->queue);
+}
+
+nb_sample_queue_t *nb_ps_reader_queue(nb_reader_t *reader)
+{
+    return (reader && reader->entry) ? reader->entry->queue : NULL;
 }
 
 /* ---- inbound delivery (called from dispatch.c) -------------------------- */

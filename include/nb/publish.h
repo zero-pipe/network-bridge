@@ -7,6 +7,12 @@
  * method for route-based transports and the topic for topic-based transports
  * such as DDS.
  *
+ * Legacy spelling: a publisher is a proxy and the topic is a method name, so a
+ * topic-based backend derives the wire topic as "<Service>_<method>_evt". New
+ * code should use nb_writer_t on an nb_topic_t (<nb/pubsub.h>), which publishes
+ * under the topic name itself. These aliases are kept for source compatibility
+ * during 0.x.
+ *
  * Zero-copy publish (loan/borrow): providers with an inspectable payload area
  * (shm) can hand out a writable chunk directly in shared memory, so the publish
  * skips the payload copy the normal path performs. The loan pins the resolved

@@ -17,6 +17,10 @@
  * Threading: one thread may wait on a wait set while other threads enqueue.
  * Attaching/detaching and destroying are not safe concurrently with a wait in
  * progress on the same object.
+ *
+ * A pub/sub reader with a history can also be attached with
+ * nb_waitset_attach_reader (<nb/pubsub.h>); that spelling does not need a
+ * service/method pair.
  */
 
 #include <nb/node.h>

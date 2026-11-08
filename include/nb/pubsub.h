@@ -113,6 +113,15 @@ size_t nb_reader_take(nb_reader_t *reader,
 /* Samples currently held by the history (0 for callback readers). */
 size_t nb_reader_size(const nb_reader_t *reader);
 
+/* ---- Wait sets over readers ---- */
+/* A wait set created with nb_waitset_create can observe reader histories:
+ * nb_waitset_wait returns 1 as soon as any attached reader has a matching
+ * sample. Only history readers can be attached; a callback reader has no
+ * history and returns NB_ERR_INVALID. Do not watch the same history through
+ * both a reader and the legacy service-method attach. */
+int nb_waitset_attach_reader(nb_waitset_t *waitset, nb_reader_t *reader);
+int nb_waitset_detach_reader(nb_waitset_t *waitset, nb_reader_t *reader);
+
 /* ---- Legacy aliases (pre-spine spelling) ---- */
 #include <nb/publish.h>
 #include <nb/subscribe.h>

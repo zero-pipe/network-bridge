@@ -9,8 +9,11 @@
 
 typedef struct nb_waitset_link {
     struct nb_waitset_link *next;
+    /* Exactly one key is set: (service, method) for a legacy service-method
+     * history, or reader for a pub/sub reader. */
     nb_service_t *service;
     char method[NB_METHOD_NAME_MAX];
+    struct nb_reader *reader;
     nb_sample_queue_t *queue;
 } nb_waitset_link_t;
 

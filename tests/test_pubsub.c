@@ -129,6 +129,7 @@ static void test_callback_and_wire_name(void)
     nb_topic_t *topic_b = NULL;
     nb_writer_t *writer = NULL;
     nb_reader_t *reader = NULL;
+    nb_waitset_t *waitset = NULL;
     nb_participant_options_t popt;
     sink_t sink;
     static const char text[] = "hello-pubsub";
@@ -175,6 +176,10 @@ static void test_callback_and_wire_name(void)
     CHECK(memcmp(sink.last, text, sizeof(text) - 1u) == 0);
     ntk_mutex_unlock(sink.lock);
 
+    /* A callback reader has no history, so a wait set cannot watch it. */
+    CHECK(nb_waitset_create(node_b, &waitset) == NB_OK);
+    CHECK(nb_waitset_attach_reader(waitset, reader) == NB_ERR_INVALID);
+
     /* The provider names the native topic after the topic itself: no
      * "service.method" route, no "_evt" suffix. */
     for (i = 0; i < 40 && wire_topic_name(node_a, "chat") == NULL; i++) {
@@ -184,6 +189,7 @@ static void test_callback_and_wire_name(void)
     CHECK(wire_topic_name(node_a, "chat_evt") == NULL);
 
 cleanup:
+    nb_waitset_destroy(waitset);
     nb_reader_destroy(reader);
     nb_writer_destroy(writer);
     nb_topic_destroy(topic_a);
@@ -205,6 +211,7 @@ static void test_history_reader(void)
     nb_topic_t *topic_b = NULL;
     nb_writer_t *writer = NULL;
     nb_reader_t *reader = NULL;
+    nb_waitset_t *waitset = NULL;
     nb_participant_options_t popt;
     nb_sample_t samples[4];
     nb_payload_t payload;
@@ -238,6 +245,9 @@ static void test_history_reader(void)
         goto cleanup;
     }
     CHECK(nb_reader_size(reader) == 0);
+    CHECK(nb_waitset_create(node_b, &waitset) == NB_OK);
+    CHECK(nb_waitset_attach_reader(waitset, reader) == NB_OK);
+    CHECK(nb_waitset_attach_reader(waitset, reader) == NB_OK); /* idempotent */
 
     /* Re-send the next missing word until it shows up: samples published before
      * the reliable/volatile reader has matched are simply dropped, so a single
@@ -257,6 +267,9 @@ static void test_history_reader(void)
     }
     confirmed = nb_reader_size(reader);
     CHECK(confirmed == 3);
+    /* The attached history is ready, and a wait on it returns immediately. */
+    CHECK(nb_waitset_ready(waitset, NULL) > 0);
+    CHECK(nb_waitset_wait(waitset, NULL, 1) == 1);
 
     memset(samples, 0, sizeof(samples));
     taken = nb_reader_take(reader, NULL, samples, 4);
@@ -270,6 +283,7 @@ static void test_history_reader(void)
     CHECK(nb_reader_size(reader) == 0);
 
 cleanup:
+    nb_waitset_destroy(waitset);
     nb_reader_destroy(reader);
     nb_writer_destroy(writer);
     nb_topic_destroy(topic_a);
@@ -295,6 +309,7 @@ static void test_dds_topic(void)
     nb_topic_t *topic_b = NULL;
     nb_writer_t *writer = NULL;
     nb_reader_t *reader = NULL;
+    nb_waitset_t *waitset = NULL;
     nb_participant_options_t popt;
     sink_t sink;
     static const char text[] = "dds-pubsub";
@@ -356,6 +371,7 @@ static void test_dds_topic(void)
     ntk_mutex_unlock(sink.lock);
 
 cleanup:
+    nb_waitset_destroy(waitset);
     nb_reader_destroy(reader);
     nb_writer_destroy(writer);
     nb_topic_destroy(topic_a);

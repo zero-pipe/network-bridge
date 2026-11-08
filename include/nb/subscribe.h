@@ -5,6 +5,12 @@
  * Subscriber-facing aliases. A subscriber is an ordinary service whose method
  * names a topic. Topic-based transports deliver inbound samples as EVENT
  * messages to that method.
+ *
+ * Legacy spelling: the topic is a method name, so a topic-based backend derives
+ * the wire topic as "<Service>_<method>_evt". New code should use nb_reader_t
+ * on an nb_topic_t (<nb/pubsub.h>), which receives samples under the topic name
+ * itself and can also keep a KEEP_LAST history. These aliases are kept for
+ * source compatibility during 0.x.
  */
 
 #include <nb/service.h>

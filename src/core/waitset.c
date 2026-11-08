@@ -1,5 +1,6 @@
 #include "waitset.h"
 
+#include "pubsub_internal.h"
 #include "service_internal.h"
 #include "util.h"
 
@@ -129,6 +130,81 @@ int nb_waitset_detach(nb_waitset_t *waitset, nb_service_t *service, const char *
     ntk_mutex_lock(waitset->lock);
     for (link = waitset->links; link; prev = link, link = link->next) {
         if (link->service == service && strcmp(link->method, method) == 0) {
+            if (prev) {
+                prev->next = link->next;
+            } else {
+                waitset->links = link->next;
+            }
+            ntk_mutex_unlock(waitset->lock);
+            nb_waitset_detach_link(waitset, link);
+            return NB_OK;
+        }
+    }
+    ntk_mutex_unlock(waitset->lock);
+    return NB_ERR_NOTFOUND;
+}
+
+static nb_waitset_link_t *nb_waitset_find_reader_locked(nb_waitset_t *waitset,
+                                                        nb_reader_t *reader)
+{
+    nb_waitset_link_t *link;
+
+    for (link = waitset->links; link; link = link->next) {
+        if (link->reader == reader) {
+            return link;
+        }
+    }
+    return NULL;
+}
+
+int nb_waitset_attach_reader(nb_waitset_t *waitset, nb_reader_t *reader)
+{
+    nb_waitset_link_t *link;
+    nb_sample_queue_t *queue;
+
+    if (!waitset || !reader) {
+        return NB_ERR_INVALID;
+    }
+    queue = nb_ps_reader_queue(reader);
+    if (!queue) {
+        /* A callback reader has no history to observe. */
+        return NB_ERR_INVALID;
+    }
+    link = (nb_waitset_link_t *)calloc(1, sizeof(*link));
+    if (!link) {
+        return NB_ERR_NOMEM;
+    }
+    link->reader = reader;
+    link->queue = queue;
+
+    if (nb_sample_queue_add_listener(queue, nb_waitset_notify, waitset) != NB_OK) {
+        free(link);
+        return NB_ERR_AGAIN;
+    }
+    ntk_mutex_lock(waitset->lock);
+    if (nb_waitset_find_reader_locked(waitset, reader)) {
+        ntk_mutex_unlock(waitset->lock);
+        nb_sample_queue_remove_listener(queue, nb_waitset_notify, waitset);
+        free(link);
+        return NB_OK; /* already attached */
+    }
+    link->next = waitset->links;
+    waitset->links = link;
+    ntk_mutex_unlock(waitset->lock);
+    return NB_OK;
+}
+
+int nb_waitset_detach_reader(nb_waitset_t *waitset, nb_reader_t *reader)
+{
+    nb_waitset_link_t *link;
+    nb_waitset_link_t *prev = NULL;
+
+    if (!waitset || !reader) {
+        return NB_ERR_INVALID;
+    }
+    ntk_mutex_lock(waitset->lock);
+    for (link = waitset->links; link; prev = link, link = link->next) {
+        if (link->reader == reader) {
             if (prev) {
                 prev->next = link->next;
             } else {
