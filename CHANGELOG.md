@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   BEST_EFFORT) rather than adding a vendor-specific heuristic, so a Fast DDS
   writer must announce a non-default max_blocking_time to match a reliable
   reader. `tools/fastdds_interop/` keeps the manual probe sources and notes.
+- Fast DDS 2.5.0 (Ubuntu 22.04 packages) interoperability was re-verified with
+  the same matrix, including 1 KiB and 200 KiB payloads, late join, restart,
+  multi-participant and standard ports. The probe gained `RTPS_TEST_PEER_HOST`,
+  `RTPS_TEST_NO_PEERS`, `FDDS_TL`, `FDDS_MATCHED` and `FDDS_PROFILE` so the
+  loopback, durability and match-count cases can be driven without editing the
+  sources. `docs/rtps-standard-alignment.md` section 6.5 records the run and
+  the reader-window fix it uncovered.
 - A standalone discovery library, `libntk_discovery`, that depends only on ntk.
   It exchanges opaque key/value pairs over UDP broadcast on one hop; the RPC
   framework uses service names as keys and peer endpoints as the value's
@@ -150,6 +157,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- RTPS: a VOLATILE reliable reader could drop a large fragmented sample when the
+  writer's HEARTBEAT overtook the sample's last DATA_FRAG. The heartbeat opened
+  the reader window at `lastSN + 1`, so the completed sample fell behind the
+  window, was discarded, and was acknowledged as received (so the writer never
+  retransmitted it). The window now stops at an already in-flight fragment
+  assembly, which proves the sample arrived after the match. Found while
+  re-verifying against Fast DDS 2.5.0 with 200 KiB samples; Cyclone DDS and the
+  Fast DDS 3.6.2 runs were unaffected.
 - RTPS: the send-side counters for DATA, DATA_FRAG, HEARTBEAT, ACKNACK, GAP and
   NACK_FRAG were incremented inside the send-failure branch after an
   unconditional `return NB_ERR_IO`, so they stayed at zero and the metrics for a

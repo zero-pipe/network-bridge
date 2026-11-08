@@ -214,7 +214,7 @@ Lifespan：超过 publication 的 `lifespan_ms` 的样本不再重传、不再�
 每个（writer, reader）对有一个 256 序列号的窗口，在收到第一个 DATA 或 HEARTBEAT 时建立。`next_expected` 加位图记录已经消费过的样本；重复包（重传、多播地址重复）只投递一次。
 
 - 由 DATA 建立的窗口：VOLATILE 订阅从该样本的序列号开始；`TRANSIENT_LOCAL` 或更强的订阅从 1 开始，由 writer 用 GAP 告诉它哪些号已经没有了。
-- 由 HEARTBEAT 建立的窗口：持久订阅从 1 开始；VOLATILE 订阅从 `lastSN + 1` 开始，从而不会拉取匹配之前产生的样本。
+- 由 HEARTBEAT 建立的窗口：持久订阅从 1 开始；VOLATILE 订阅从 `lastSN + 1` 开始，从而不会拉取匹配之前产生的样本。例外：该 writer 已有未完成的分片重组时，窗口不能越过那个样本的序列号——分片已经开始到达，说明样本产生于匹配之后；大样本的 HEARTBEAT 可能早于最后一片到达。
 
 ### 5.3 HEARTBEAT 与 ACKNACK
 

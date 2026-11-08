@@ -3620,6 +3620,28 @@ static void handle_user_gap(nb_rtps_participant_t *participant,
     }
 }
 
+/* A partial fragment assembly proves the sample was already arriving after the
+ * reader matched. A HEARTBEAT can race the last fragment of a large sample, so
+ * the window opened from that HEARTBEAT must not start past it. */
+static uint64_t oldest_inflight_sn(nb_rtps_participant_t *participant,
+                                   const nb_rtps_guid_t *writer,
+                                   uint64_t last_sn)
+{
+    uint64_t oldest = last_sn + 1u;
+    size_t i;
+
+    for (i = 0; i < participant->max_frag_assemblies; i++) {
+        const nb_rtps_frag_assembly_t *assembly =
+            &participant->frag_assemblies[i];
+
+        if (assembly->used && !assembly->complete && assembly->sn < oldest &&
+            nb_rtps_guid_equal(&assembly->writer, writer)) {
+            oldest = assembly->sn;
+        }
+    }
+    return oldest;
+}
+
 /* Answer a writer HEARTBEAT with the set of samples still missing. */
 static void handle_user_heartbeat(nb_rtps_participant_t *participant,
                                   const nb_rtps_heartbeat_t *heartbeat,
@@ -3680,13 +3702,18 @@ static void handle_user_heartbeat(nb_rtps_participant_t *participant,
              * retained sample; a VOLATILE reader must not pull samples the
              * writer produced before the match, so its window starts just
              * past the heartbeat's last sequence number (RTPS 2.5 8.4.12 and
-             * the DDS durability contract). */
+             * the DDS durability contract). A sample that is already being
+             * reassembled is the exception: its fragments only arrived after
+             * the match, and the HEARTBEAT may have overtaken the last one. */
             {
-                uint32_t start = 1u;
+                uint64_t start = 1u;
 
                 if (local->info.durability < NB_RTPS_DURABILITY_TRANSIENT_LOCAL &&
                     last_sn != 0 && last_sn != UINT32_MAX) {
-                    start = last_sn + 1u;
+                    uint64_t inflight =
+                        oldest_inflight_sn(participant, &writer_guid, last_sn);
+
+                    start = inflight < last_sn + 1u ? inflight : last_sn + 1u;
                 }
                 state = get_data_reader(participant,
                                         &writer_guid,

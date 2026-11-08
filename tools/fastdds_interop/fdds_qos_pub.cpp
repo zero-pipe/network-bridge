@@ -25,8 +25,16 @@ int main(int argc, char **argv)
     const int msg_len = argc > 2 ? std::atoi(argv[2]) : 16;
     const int wait_s = argc > 3 ? std::atoi(argv[3]) : 0;
 
+    /* Optional XML participant profile. A profile is the portable way to pin
+     * Fast DDS to one interface (interfaceWhiteList), which 2.x needs when the
+     * host also has a loopback route to the nb peer. */
+    DomainParticipantQos pqos = PARTICIPANT_QOS_DEFAULT;
+    if (const char *prof = std::getenv("FDDS_PROFILE")) {
+        DomainParticipantFactory::get_instance()->load_profiles();
+        DomainParticipantFactory::get_instance()->get_participant_qos_from_profile(prof, pqos);
+    }
     DomainParticipant *participant =
-        DomainParticipantFactory::get_instance()->create_participant(0, PARTICIPANT_QOS_DEFAULT);
+        DomainParticipantFactory::get_instance()->create_participant(0, pqos);
     if (!participant) {
         std::fprintf(stderr, "participant create failed\n");
         return 1;
@@ -39,13 +47,19 @@ int main(int argc, char **argv)
     DataWriterQos wqos = DATAWRITER_QOS_DEFAULT;
     wqos.reliability().kind = RELIABLE_RELIABILITY_QOS;
     wqos.reliability().max_blocking_time = Duration_t(0, 200000000);
+    if (std::getenv("FDDS_TL")) {
+        wqos.durability().kind = TRANSIENT_LOCAL_DURABILITY_QOS;
+    }
     DataWriter *writer = publisher->create_datawriter(topic, wqos);
 
     if (!std::getenv("FDDS_NO_WAIT")) {
+        const int want = std::getenv("FDDS_MATCHED")
+                             ? std::atoi(std::getenv("FDDS_MATCHED"))
+                             : 1;
         for (int i = 0; i < 50; i++) {
             PublicationMatchedStatus status;
             if (writer->get_publication_matched_status(status) == RETCODE_OK &&
-                status.current_count > 0) {
+                status.current_count >= want) {
                 break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -62,7 +76,7 @@ int main(int argc, char **argv)
     for (int i = 0; i < count; i++) {
         sample.index((uint32_t)(i + 1));
         sample.message(std::string((size_t)msg_len, (char)('B' + (i % 20))));
-        if (writer->write(&sample) != RETCODE_OK) {
+        if (writer->write(&sample, HANDLE_NIL) != RETCODE_OK) {
             std::fprintf(stderr, "write failed\n");
             return 2;
         }

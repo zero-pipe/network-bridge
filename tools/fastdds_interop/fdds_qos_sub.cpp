@@ -46,8 +46,14 @@ int main(int argc, char **argv)
     const int expect = argc > 1 ? std::atoi(argv[1]) : 3;
     const int timeout_s = argc > 2 ? std::atoi(argv[2]) : 20;
 
+    /* Optional XML participant profile; see fdds_qos_pub.cpp. */
+    DomainParticipantQos pqos = PARTICIPANT_QOS_DEFAULT;
+    if (const char *prof = std::getenv("FDDS_PROFILE")) {
+        DomainParticipantFactory::get_instance()->load_profiles();
+        DomainParticipantFactory::get_instance()->get_participant_qos_from_profile(prof, pqos);
+    }
     DomainParticipant *participant =
-        DomainParticipantFactory::get_instance()->create_participant(0, PARTICIPANT_QOS_DEFAULT);
+        DomainParticipantFactory::get_instance()->create_participant(0, pqos);
     if (!participant) {
         std::fprintf(stderr, "participant create failed\n");
         return 1;
