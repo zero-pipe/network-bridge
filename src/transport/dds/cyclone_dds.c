@@ -14,6 +14,7 @@
  */
 #include "transport_internal.h"
 
+#include "dds_bridge.h"
 #include "envelope.h"
 #include <nb/internal/poller_alloc.h>
 #include "util.h"
@@ -86,29 +87,7 @@ static int nb_dds_status(int status, const char *what)
 
 static void nb_dds_sanitize(const char *in, char *out, size_t cap)
 {
-    size_t i = 0;
-    size_t j = 0;
-
-    if (!out || cap == 0) {
-        return;
-    }
-    if (!in) {
-        out[0] = '\0';
-        return;
-    }
-    if (in[0] >= '0' && in[0] <= '9') {
-        out[j++] = '_';
-    }
-    for (i = 0; in[i] != '\0' && j + 1 < cap; ++i) {
-        char c = in[i];
-        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-            c == '_') {
-            out[j++] = c;
-        } else {
-            out[j++] = '_';
-        }
-    }
-    out[j] = '\0';
+    nb_bridge_topic_key(in, out, cap);
 }
 
 /* Topic key: the full "Service.method" route, sanitized. Including the service
@@ -127,19 +106,13 @@ static void nb_dds_method_from_route(const char *route, char *out, size_t cap)
 
 static void nb_dds_endpoint_topics(nb_dds_endpoint_t *ep)
 {
-    char suffix[8];
-
-    nb_dds_sanitize(ep->method, ep->topic_req, sizeof(ep->topic_req));
-    snprintf(suffix, sizeof(suffix), "_req");
-    strncat(ep->topic_req, suffix, sizeof(ep->topic_req) - strlen(ep->topic_req) - 1);
-
-    nb_dds_sanitize(ep->method, ep->topic_res, sizeof(ep->topic_res));
-    snprintf(suffix, sizeof(suffix), "_res");
-    strncat(ep->topic_res, suffix, sizeof(ep->topic_res) - strlen(ep->topic_res) - 1);
-
-    nb_dds_sanitize(ep->method, ep->topic_evt, sizeof(ep->topic_evt));
-    snprintf(suffix, sizeof(suffix), "_evt");
-    strncat(ep->topic_evt, suffix, sizeof(ep->topic_evt) - strlen(ep->topic_evt) - 1);
+    nb_bridge_route_topics(ep->method,
+                           ep->topic_req,
+                           sizeof(ep->topic_req),
+                           ep->topic_res,
+                           sizeof(ep->topic_res),
+                           ep->topic_evt,
+                           sizeof(ep->topic_evt));
 }
 
 static void nb_dds_endpoint_init(nb_dds_endpoint_t *ep, nb_dds_instance_t *owner, const char *method)
@@ -534,7 +507,6 @@ static nb_dds_endpoint_t *nb_dds_endpoint_ensure_topic(nb_dds_instance_t *inst,
 
 static int nb_dds_publish(nb_dds_instance_t *inst, dds_entity_t writer, const nb_transport_message_t *message)
 {
-    nb_envelope_t env;
     dds_Message sample;
     uint8_t *wire;
     uint8_t inline_wire[512];
@@ -545,27 +517,7 @@ static int nb_dds_publish(nb_dds_instance_t *inst, dds_entity_t writer, const nb
     if (writer == DDS_ENTITY_NIL || !message) {
         return NB_ERR_INVALID;
     }
-    memset(&env, 0, sizeof(env));
-    env.kind = message->kind;
-    env.encoding = message->payload.encoding;
-    env.flags = message->flags;
-    env.status = message->status;
-    env.request_id = message->request_id;
-    env.timeout_ms = message->timeout_ms;
-    env.route = message->route;
-    env.metadata = message->metadata;
-    env.metadata_len = message->metadata_len;
-    env.status_msg = message->status_msg;
-    env.status_msg_len = message->status_msg_len;
-    env.payload = message->payload.data;
-    env.payload_len = message->payload.len;
-    if (message->has_stream) {
-        env.stream_flags = (uint8_t)message->stream.flags;
-        env.stream_id = message->stream.stream_id;
-        env.stream_offset = message->stream.offset;
-        env.stream_total_size = message->stream.total_size;
-    }
-    len = nb_envelope_size(&env);
+    len = nb_bridge_frame_size(message);
     if (len == 0) {
         return NB_ERR_INVALID;
     }
@@ -578,7 +530,7 @@ static int nb_dds_publish(nb_dds_instance_t *inst, dds_entity_t writer, const nb
         }
         wire_heap = 1;
     }
-    if (nb_envelope_encode(wire, len, &env) != len) {
+    if (nb_bridge_frame_encode(message, wire, len) != len) {
         if (wire_heap) {
             nb_poller_free(wire);
         }

@@ -65,6 +65,7 @@ set(NB_SOURCES
     discovery/discovery.c
     config/config.c
     transport/common/framing.c
+    transport/common/dds_bridge.c
     transport/common/transport.c
     transport/common/provider.c
     transport/common/rx_window.c

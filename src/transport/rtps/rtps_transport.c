@@ -42,6 +42,8 @@
 
 #include "transport_internal.h"
 
+#include "dds_bridge.h"
+
 #include <nb/discovery_view.h>
 
 #include "envelope.h"
@@ -164,30 +166,7 @@ static int nb_rtps_transport_status(int rtps_status)
  * same service maps to the same topic name on both transports. */
 static void nb_rtps_transport_method(const char *route, char *out, size_t cap)
 {
-    size_t i = 0;
-    size_t j = 0;
-
-    if (!out || cap == 0) {
-        return;
-    }
-    out[0] = '\0';
-    if (!route) {
-        return;
-    }
-    if (route[0] >= '0' && route[0] <= '9') {
-        out[j++] = '_';
-    }
-    for (i = 0; route[i] != '\0' && j + 1 < cap; ++i) {
-        char c = route[i];
-
-        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') || c == '_') {
-            out[j++] = c;
-        } else {
-            out[j++] = '_';
-        }
-    }
-    out[j] = '\0';
+    nb_bridge_topic_key(route, out, cap);
 }
 
 /* Map the framework QoS onto the public rtps QoS. The transport has always
@@ -278,9 +257,13 @@ static nb_rtps_transport_endpoint_t *nb_rtps_transport_endpoint_init(
     memset(ep, 0, sizeof(*ep));
     ep->used = 1;
     nb_copy_str(ep->method, sizeof(ep->method), method, "");
-    (void)snprintf(ep->topic_req, sizeof(ep->topic_req), "%s_req", method);
-    (void)snprintf(ep->topic_res, sizeof(ep->topic_res), "%s_res", method);
-    (void)snprintf(ep->topic_evt, sizeof(ep->topic_evt), "%s_evt", method);
+    nb_bridge_route_topics(method,
+                           ep->topic_req,
+                           sizeof(ep->topic_req),
+                           ep->topic_res,
+                           sizeof(ep->topic_res),
+                           ep->topic_evt,
+                           sizeof(ep->topic_evt));
     return ep;
 }
 
@@ -483,7 +466,6 @@ static int nb_rtps_transport_publish(nb_rtps_transport_t *inst,
                                      rtps_writer_t *writer,
                                      const nb_transport_message_t *message)
 {
-    nb_envelope_t env;
     uint8_t inline_frame[NB_RTPS_TRANSPORT_INLINE_FRAME];
     uint8_t *buf = inline_frame;
     size_t frame_len;
@@ -512,27 +494,7 @@ static int nb_rtps_transport_publish(nb_rtps_transport_t *inst,
                                        message->payload.data,
                                        message->payload.len));
     }
-    memset(&env, 0, sizeof(env));
-    env.kind = message->kind;
-    env.encoding = message->payload.encoding;
-    env.flags = message->flags;
-    env.status = message->status;
-    env.request_id = message->request_id;
-    env.timeout_ms = message->timeout_ms;
-    env.route = message->route;
-    env.metadata = message->metadata;
-    env.metadata_len = message->metadata_len;
-    env.status_msg = message->status_msg;
-    env.status_msg_len = message->status_msg_len;
-    env.payload = message->payload.data;
-    env.payload_len = message->payload.len;
-    if (message->has_stream) {
-        env.stream_flags = (uint8_t)message->stream.flags;
-        env.stream_id = message->stream.stream_id;
-        env.stream_offset = message->stream.offset;
-        env.stream_total_size = message->stream.total_size;
-    }
-    frame_len = nb_envelope_size(&env);
+    frame_len = nb_bridge_frame_size(message);
     if (frame_len == 0) {
         return NB_ERR_INVALID;
     }
@@ -543,7 +505,7 @@ static int nb_rtps_transport_publish(nb_rtps_transport_t *inst,
         }
         buf_heap = 1;
     }
-    if (nb_envelope_encode(buf, frame_len, &env) != frame_len) {
+    if (nb_bridge_frame_encode(message, buf, frame_len) != frame_len) {
         if (buf_heap) {
             free(buf);
         }
