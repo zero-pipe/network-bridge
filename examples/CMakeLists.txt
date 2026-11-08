@@ -15,53 +15,27 @@ function(nb_copy_example_file target file)
             $<TARGET_FILE_DIR:${target}>/${file})
 endfunction()
 
-add_subdirectory(01_hello_node)
-add_subdirectory(02_service)
-add_subdirectory(03_proxy)
-add_subdirectory(04_service_table)
-add_subdirectory(05_sync_call)
-add_subdirectory(06_static_route)
-add_subdirectory(07_direct_endpoint)
-add_subdirectory(08_config)
-add_subdirectory(09_service_discovery)
-add_subdirectory(10_payload_codec)
-add_subdirectory(11_streaming)
-add_subdirectory(12_worker)
-add_subdirectory(13_metadata_cancel)
-add_subdirectory(14_dds_pubsub)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_subdirectory(15_shm)
+add_subdirectory(01_rpc)
+add_subdirectory(02_rpc_streaming)
+add_subdirectory(04_config)
+if(NB_ENABLE_DDS)
+    add_subdirectory(03_dds_pubsub)
 endif()
 
 set(NB_EXAMPLE_TARGETS
-    example_01_hello_node
-    example_02_service
-    example_03_proxy
-    example_04_service_table
-    example_05_sync_call
-    example_06_static_route_server
-    example_06_static_route_client
-    example_07_direct_endpoint_server
-    example_07_direct_endpoint_client
-    example_08_config_server
-    example_08_config_client
-    example_09_service_discovery_server
-    example_09_service_discovery_client
-    example_10_payload_codec
-    example_11_streaming
-    example_12_worker
-    example_13_metadata_cancel
+    example_01_rpc_server
+    example_01_rpc_client
+    example_02_rpc_streaming
+    example_04_config_server
+    example_04_config_client
 )
 if(NB_ENABLE_DDS)
-    list(APPEND NB_EXAMPLE_TARGETS example_14_dds_pubsub)
-endif()
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    list(APPEND NB_EXAMPLE_TARGETS example_15_shm_server example_15_shm_client)
+    list(APPEND NB_EXAMPLE_TARGETS example_03_dds_pubsub)
 endif()
 install(TARGETS ${NB_EXAMPLE_TARGETS} RUNTIME DESTINATION bin)
 
 install(FILES
-    08_config/server.json
-    08_config/client.json
+    04_config/server.json
+    04_config/client.json
     DESTINATION bin
 )

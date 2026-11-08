@@ -1,4 +1,0 @@
-nb_add_example(example_08_config_server server.c)
-nb_add_example(example_08_config_client client.c)
-nb_copy_example_file(example_08_config_server server.json)
-nb_copy_example_file(example_08_config_client client.json)

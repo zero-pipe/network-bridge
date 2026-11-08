@@ -1,2 +1,0 @@
-nb_add_example(example_07_direct_endpoint_server server.c)
-nb_add_example(example_07_direct_endpoint_client client.c)
