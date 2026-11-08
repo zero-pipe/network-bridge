@@ -29,7 +29,6 @@
 
 #include <nb/types.h>
 #include <nb/message_view.h>
-#include <nb/sample.h>
 
 #include <stddef.h>
 
@@ -175,38 +174,10 @@ int nb_service_add_sync_method_worker(nb_service_t *service,
 
 /* ---- DDS reader history (read/take) ---- */
 /*
- * Register a method that keeps inbound samples in a reader-side history
- * instead of invoking a handler. depth is the DDS KEEP_LAST depth; 0 selects
- * NB_SAMPLE_QUEUE_DEFAULT_DEPTH (32). A full history drops its oldest sample.
- *
- * nb_service_set_queue() attaches a history to an already registered method
- * (its handler no longer sees EVENT messages). Note that method registration is
- * asynchronous: nb_service_add_queue_method() is the race-free way to create a
- * queued subscription.
+ * Reader-side history on a service method belongs to the pub/sub spine and is
+ * declared in <nb/service_history.h> (reachable from <nb/pubsub.h> and
+ * <nb/nb.h>). New code uses nb_reader_t instead.
  */
-int nb_service_add_queue_method(nb_service_t *service, const char *method, uint32_t depth);
-int nb_service_set_queue(nb_service_t *service, const char *method, uint32_t depth);
-
-/*
- * read/take up to max samples matching filter (NULL = NB_STATE_ANY, any
- * instance). Both mark returned samples READ. read() returns borrowed views
- * that stay valid until the sample is taken or the history is destroyed;
- * take() removes the samples and returns owned copies (release with
- * nb_sample_release). Return the number of samples written to out.
- */
-size_t nb_service_read(nb_service_t *service,
-                       const char *method,
-                       const nb_sample_filter_t *filter,
-                       nb_sample_t *out,
-                       size_t max);
-size_t nb_service_take(nb_service_t *service,
-                       const char *method,
-                       const nb_sample_filter_t *filter,
-                       nb_sample_t *out,
-                       size_t max);
-/* Samples currently in the history / samples dropped because it was full. */
-size_t nb_service_queue_size(nb_service_t *service, const char *method);
-uint64_t nb_service_queue_dropped(nb_service_t *service, const char *method);
 
 /* ---- Replies ---- */
 /* One-shot asynchronous reply. status is application-defined; replies to EVENT

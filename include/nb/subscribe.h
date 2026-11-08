@@ -13,7 +13,7 @@
  * source compatibility during 0.x.
  */
 
-#include <nb/service.h>
+#include <nb/service_history.h>
 
 typedef nb_service_t nb_subscriber_t;
 typedef nb_handler_fn nb_subscriber_handler_fn;

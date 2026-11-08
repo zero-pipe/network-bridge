@@ -64,5 +64,25 @@ foreach(spine rpc pubsub)
     endif()
 endforeach()
 
+# The RPC spine must not drag in pub/sub-only types: reader history on a service
+# method moved to nb/service_history.h, which rpc.h does not include.
+file(READ "${HEADER_DIR}/service.h" service_content)
+string(FIND "${service_content}" "#include <nb/sample.h>" service_sample)
+if(NOT service_sample EQUAL -1)
+    message(FATAL_ERROR
+        "nb/service.h includes nb/sample.h; reader history belongs to nb/service_history.h")
+endif()
+
+file(READ "${HEADER_DIR}/rpc.h" rpc_content)
+foreach(forbidden_header sample waitset status discovery_view
+        service_history publish subscribe dds rtps shm)
+    string(FIND "${rpc_content}" "#include <nb/${forbidden_header}.h>" rpc_pos)
+    if(NOT rpc_pos EQUAL -1)
+        message(FATAL_ERROR
+            "nb/rpc.h includes nb/${forbidden_header}.h; that header belongs to the pub/sub spine")
+    endif()
+endforeach()
+
 message(STATUS "public nb headers do not expose the internal stub layer")
 message(STATUS "nb/base.h stays model-neutral and nb/nb.h re-exports both spines")
+message(STATUS "nb/rpc.h does not pull pub/sub-only headers")

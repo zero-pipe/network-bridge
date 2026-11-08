@@ -2,6 +2,8 @@
 #include "node_internal.h"
 #include "service_internal.h"
 
+#include <nb/service_history.h>
+
 #include "envelope.h"
 #include "metric_macros.h"
 #include <nb/internal/poller_alloc.h>

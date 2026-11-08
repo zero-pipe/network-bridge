@@ -123,6 +123,7 @@ int nb_waitset_attach_reader(nb_waitset_t *waitset, nb_reader_t *reader);
 int nb_waitset_detach_reader(nb_waitset_t *waitset, nb_reader_t *reader);
 
 /* ---- Legacy aliases (pre-spine spelling) ---- */
+#include <nb/service_history.h>
 #include <nb/publish.h>
 #include <nb/subscribe.h>
 
