@@ -1,6 +1,7 @@
 /* 传输抽象层的便捷包装。 */
 #include "transport_internal.h"
 
+#include <stddef.h>
 #include <stdlib.h>
 
 int nb_transport_start(nb_transport_t *t)
@@ -96,4 +97,25 @@ void nb_transport_unsubscribe(nb_transport_t *t, const char *service, const char
         return;
     }
     t->provider->ops->unregister_method(t->provider_instance, service, method);
+}
+
+int nb_transport_register_topic(nb_transport_t *t, const char *topic, uint32_t roles)
+{
+    const nb_transport_provider_ops_t *ops;
+
+    if (!t || !t->provider || !t->provider_instance || !topic || !topic[0]) {
+        return NB_ERR_NOT_SUPPORTED;
+    }
+    ops = t->provider->ops;
+    /* register_topic is the last slot: only reach it when the provider's
+     * struct_size covers it. A provider built against an older header (or one
+     * that does not set struct_size) cannot carry the pub/sub spine. */
+    if (ops->struct_size < offsetof(nb_transport_provider_ops_t, register_topic) +
+                               sizeof(ops->register_topic)) {
+        return NB_ERR_NOT_SUPPORTED;
+    }
+    if (!ops->register_topic) {
+        return NB_ERR_NOT_SUPPORTED;
+    }
+    return ops->register_topic(t->provider_instance, topic, roles);
 }

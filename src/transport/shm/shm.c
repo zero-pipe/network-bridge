@@ -568,7 +568,27 @@ static void nb_shm_op_release_loan(nb_transport_instance_t *instance, void *loan
     nb_shmseg_chunk_free(inst->seg, off);
 }
 
+/* 原生主题：读者把主题名原样登记为订阅键；写者无需登记，事件发布按 route
+ * （主题名）在段内扇出。主题名不含 '.'，因此不会与 RPC 的 "service.method"
+ * 路由混淆。 */
+static int nb_shm_op_register_topic(nb_transport_instance_t *instance,
+                                    const char *topic,
+                                    uint32_t roles)
+{
+    nb_shm_instance_t *inst = (nb_shm_instance_t *)instance;
+
+    if (!inst || !inst->seg || !topic || !topic[0]) {
+        return NB_ERR_INVALID;
+    }
+    if (roles & NB_PS_TOPIC_READER) {
+        return nb_shmseg_subscribe(inst->seg, topic) == 0 ? NB_OK : NB_ERR_NOMEM;
+    }
+    return (roles & NB_PS_TOPIC_WRITER) ? NB_OK : NB_ERR_INVALID;
+}
+
 static const nb_transport_provider_ops_t nb_g_shm_ops = {
+    .abi_version = NB_TRANSPORT_PROVIDER_ABI_VERSION,
+    .struct_size = sizeof(nb_transport_provider_ops_t),
     .create = nb_shm_op_create,
     .start = nb_shm_op_start,
     .stop = nb_shm_op_stop,
@@ -577,6 +597,7 @@ static const nb_transport_provider_ops_t nb_g_shm_ops = {
     .reply = nb_shm_op_reply,
     .register_method = nb_shm_op_register_method,
     .unregister_method = nb_shm_op_unregister_method,
+    .register_topic = nb_shm_op_register_topic,
     .loan = nb_shm_op_loan,
     .send_loan = nb_shm_op_send_loan,
     .release_loan = nb_shm_op_release_loan,

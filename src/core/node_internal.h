@@ -106,6 +106,10 @@ struct nb_node {
     nb_service_t *services;
     ntk_mutex *services_lock;                         /* 保护 services/methods 链表（注册 vs 请求分发） */
     ntk_mutex *codecs_lock;                           /* 保护 codecs 链表 */
+    /* 发布/订阅面：主题读者登记。pubsub.c 拥有这些结构，由 ps_lock 保护；
+     * node 不直接解释它们。 */
+    void *ps_readers;
+    ntk_mutex *ps_lock;
     nb_discovery_state_t discovery;
     nb_pending_t *pending;                            /* 全部 pending 槽位（按需分配） */
     nb_pending_t *pending_hash;                       /* request_id -> pending，O(1) 查找 */
@@ -136,6 +140,11 @@ int nb_node_poller_index(const nb_node_t *node, ntk_poller *poller);
 /* 当前线程是否为 node 的专用发送通道线程。 */
 int nb_node_is_send_thread(const nb_node_t *node);
 void nb_node_on_message(nb_node_t *node, nb_transport_t *transport, nb_message_t *message);
+/* pubsub.c：按主题把入站 EVENT 交给登记过的读者；命中任一读者返回 1（已消费），
+ * 没有读者返回 0，交回服务分发。 */
+int nb_ps_handle_event(nb_node_t *node, nb_transport_t *transport, nb_message_t *message);
+/* pubsub.c：释放节点上的主题读者登记（node 销毁时调用）。 */
+void nb_ps_node_destroy(nb_node_t *node);
 /* 按目标端点选配传输（scheme / kind / CUSTOM host 匹配）；无匹配返回 NULL。 */
 nb_transport_t *nb_node_find_transport(nb_node_t *node, const nb_endpoint_t *target);
 int nb_node_send(nb_node_t *node, const nb_endpoint_t *target, const nb_message_t *message);

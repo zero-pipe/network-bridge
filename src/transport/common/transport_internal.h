@@ -110,6 +110,8 @@ int nb_transport_send_loan(nb_transport_t *t,
 void nb_transport_release_loan(nb_transport_t *t, void *loan);
 int nb_transport_subscribe(nb_transport_t *t, const char *service, const char *method);
 void nb_transport_unsubscribe(nb_transport_t *t, const char *service, const char *method);
+/* Pub/sub topic registration by the topic's own name (see provider ops). */
+int nb_transport_register_topic(nb_transport_t *t, const char *topic, uint32_t roles);
 const nb_transport_provider_t *nb_transport_provider_find(const char *scheme);
 
 #ifdef __cplusplus

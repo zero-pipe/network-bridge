@@ -282,9 +282,10 @@ int nb_node_create(const nb_node_config_t *cfg, nb_node_t **out)
     node->codecs_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     node->pending_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     node->rate_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    node->ps_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     node->discovery.targets_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
     if (!node->services_lock || !node->codecs_lock || !node->pending_lock || !node->rate_lock ||
-        !node->discovery.targets_lock) {
+        !node->ps_lock || !node->discovery.targets_lock) {
         nb_node_destroy(node);
         return NB_ERR_NOMEM;
     }
@@ -620,6 +621,11 @@ void nb_node_destroy(nb_node_t *node)
     }
     if (node->id_lock) {
         ntk_mutex_destroy(node->id_lock);
+    }
+    nb_ps_node_destroy(node);
+    if (node->ps_lock) {
+        ntk_mutex_destroy(node->ps_lock);
+        node->ps_lock = NULL;
     }
     if (node->services_lock) {
         ntk_mutex_destroy(node->services_lock);

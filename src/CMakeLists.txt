@@ -35,6 +35,7 @@ set(NB_SOURCES
     core/transport_factory.c
     core/dispatch.c
     core/service.c
+    core/pubsub.c
     core/sample_queue.c
     core/waitset.c
     core/reply.c

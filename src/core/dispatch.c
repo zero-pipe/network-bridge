@@ -306,6 +306,14 @@ static void nb_node_dispatch(nb_node_t *node, nb_transport_t *transport, nb_mess
             }
             return;
         }
+        /*
+         * 发布/订阅面：EVENT 的 route 可能是主题名（不含 '.'），由 pubsub.c
+         * 的主题读者登记接管；没有匹配读者时再回到服务分发，保持 RPC 事件
+         * （"service.method"）行为不变。
+         */
+        if (msg->kind == KIND_EVENT && nb_ps_handle_event(node, transport, msg)) {
+            return;
+        }
         if (msg->has_stream) {
             nb_service_handle_stream_chunk(node, transport, msg);
         } else {

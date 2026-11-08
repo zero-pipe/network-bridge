@@ -47,6 +47,11 @@ typedef void (*nb_transport_receive_fn)(void *user,
 typedef nb_transport_receive_fn transport_receive_fn;
 
 /* ---- Provider lifecycle and operations ---- */
+
+/* Roles for nb_transport_provider_ops.register_topic. */
+#define NB_PS_TOPIC_WRITER 0x1u
+#define NB_PS_TOPIC_READER 0x2u
+
 typedef struct nb_transport_provider_options {
     const char *scheme;              /* provider scheme, e.g. "dds" */
     const char *endpoint;            /* binding endpoint URI */
@@ -154,9 +159,23 @@ typedef struct nb_transport_provider_ops {
      * snapshot, so providers never race with each other.
      */
     void (*metrics_read)(nb_transport_instance_t *instance, struct nb_metrics *out);
+    /*
+     * Optional: pub/sub topic registration by the topic's own name.
+     *
+     * The pub/sub spine (participant / topic / writer / reader) calls this
+     * instead of register_method: `topic` is the application's topic name
+     * verbatim, not a "service.method" route, and a provider with native
+     * topics names the native topic after it instead of deriving a
+     * "<route>_evt" name. roles is a bitmask of NB_PS_TOPIC_WRITER /
+     * NB_PS_TOPIC_READER and the call is idempotent per (topic, role).
+     *
+     * RPC-only links leave this NULL. A provider that leaves it NULL cannot
+     * carry the pub/sub spine.
+     */
+    int (*register_topic)(nb_transport_instance_t *instance, const char *topic, uint32_t roles);
 } nb_transport_provider_ops_t;
 
-#define NB_TRANSPORT_PROVIDER_ABI_VERSION 1u
+#define NB_TRANSPORT_PROVIDER_ABI_VERSION 2u
 
 /* Static descriptor registered with nb_transport_provider_register. */
 struct nb_transport_provider {

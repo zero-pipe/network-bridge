@@ -55,6 +55,11 @@ typedef struct nb_dds_endpoint {
     int have_requester;
     int have_publisher;
     int local_event;
+    /* Native pub/sub topic endpoint: the DDS topic is named after the topic
+     * itself (no "_evt" suffix) and the reader role is independent of the RPC
+     * responder role. */
+    int topic_mode;
+    int have_topic_reader;
     nb_dds_instance_t *owner;
 } nb_dds_endpoint_t;
 
@@ -443,6 +448,90 @@ static nb_dds_endpoint_t *nb_dds_endpoint_ensure(nb_dds_instance_t *inst, const 
     return ep;
 }
 
+/* Native pub/sub topic: the DDS topic carries the topic name verbatim and the
+ * reader role is separate from the RPC responder role. */
+static nb_dds_endpoint_t *nb_dds_endpoint_ensure_topic(nb_dds_instance_t *inst,
+                                                       const char *topic,
+                                                       uint32_t roles)
+{
+    nb_dds_endpoint_t *ep = NULL;
+    char name[NB_DDS_TOPIC_MAX];
+    size_t i;
+
+    if (!inst || !topic || !topic[0]) {
+        return NULL;
+    }
+    nb_dds_sanitize(topic, name, sizeof(name));
+    if (!name[0]) {
+        return NULL;
+    }
+    ntk_mutex_lock(inst->lock);
+    for (i = 0; i < inst->endpoint_count; ++i) {
+        if (inst->endpoints[i].used && strcmp(inst->endpoints[i].method, name) == 0) {
+            ep = &inst->endpoints[i];
+            break;
+        }
+    }
+    if (ep && !ep->topic_mode) {
+        ntk_mutex_unlock(inst->lock);
+        return NULL;
+    }
+    if (!ep) {
+        if (inst->endpoint_count >= NB_DDS_MAX_ENDPOINTS) {
+            ntk_mutex_unlock(inst->lock);
+            return NULL;
+        }
+        ep = &inst->endpoints[inst->endpoint_count++];
+        nb_dds_endpoint_init(ep, inst, name);
+        /* The event topic is the topic itself, not "<route>_evt". */
+        nb_copy_str(ep->topic_evt, sizeof(ep->topic_evt), name, "");
+        ep->topic_mode = 1;
+    }
+    if (ep->topic_evt_ent == DDS_ENTITY_NIL) {
+        ep->topic_evt_ent = nb_dds_make_topic(inst, ep->topic_evt);
+        if (ep->topic_evt_ent < 0) {
+            ntk_mutex_unlock(inst->lock);
+            return NULL;
+        }
+    }
+    if ((roles & NB_PS_TOPIC_WRITER) && !ep->have_publisher) {
+        if (inst->options.intra_process != NB_INTRA_PROCESS_ONLY) {
+            ep->wr_evt = nb_dds_make_writer(inst, ep->topic_evt_ent);
+            if (ep->wr_evt < 0) {
+                ntk_mutex_unlock(inst->lock);
+                return NULL;
+            }
+        }
+        ep->have_publisher = 1;
+    }
+    if ((roles & NB_PS_TOPIC_READER) && !ep->have_topic_reader) {
+        if (inst->options.intra_process != NB_INTRA_PROCESS_OFF) {
+            ep->local_event = 1;
+        }
+        if (inst->options.intra_process != NB_INTRA_PROCESS_ONLY) {
+            if (!ep->listener) {
+                ep->listener = dds_create_listener(ep);
+                if (!ep->listener) {
+                    ntk_mutex_unlock(inst->lock);
+                    return NULL;
+                }
+                dds_lset_data_available(ep->listener, nb_dds_on_data);
+            }
+            ep->rd_evt = nb_dds_make_reader(inst,
+                                            ep->topic_evt_ent,
+                                            ep->listener,
+                                            inst->options.intra_process == NB_INTRA_PROCESS_AUTO);
+            if (ep->rd_evt < 0) {
+                ntk_mutex_unlock(inst->lock);
+                return NULL;
+            }
+        }
+        ep->have_topic_reader = 1;
+    }
+    ntk_mutex_unlock(inst->lock);
+    return ep;
+}
+
 static int nb_dds_publish(nb_dds_instance_t *inst, dds_entity_t writer, const nb_transport_message_t *message)
 {
     nb_envelope_t env;
@@ -726,7 +815,25 @@ static void nb_dds_op_unregister_method(nb_transport_instance_t *instance,
     (void)method;
 }
 
+static int nb_dds_op_register_topic(nb_transport_instance_t *instance,
+                                    const char *topic,
+                                    uint32_t roles)
+{
+    nb_dds_instance_t *inst = (nb_dds_instance_t *)instance;
+
+    if (!inst || !topic || !topic[0]) {
+        return NB_ERR_INVALID;
+    }
+    roles &= (NB_PS_TOPIC_WRITER | NB_PS_TOPIC_READER);
+    if (roles == 0) {
+        return NB_ERR_INVALID;
+    }
+    return nb_dds_endpoint_ensure_topic(inst, topic, roles) ? NB_OK : NB_ERR_NOMEM;
+}
+
 static const nb_transport_provider_ops_t nb_g_dds_ops = {
+    .abi_version = NB_TRANSPORT_PROVIDER_ABI_VERSION,
+    .struct_size = sizeof(nb_transport_provider_ops_t),
     .create = nb_dds_op_create,
     .start = nb_dds_op_start,
     .stop = nb_dds_op_stop,
@@ -735,6 +842,7 @@ static const nb_transport_provider_ops_t nb_g_dds_ops = {
     .reply = nb_dds_op_reply,
     .register_method = nb_dds_op_register_method,
     .unregister_method = nb_dds_op_unregister_method,
+    .register_topic = nb_dds_op_register_topic,
 };
 
 static const nb_transport_provider_t nb_g_dds_provider = {

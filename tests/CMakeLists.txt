@@ -136,6 +136,11 @@ nb_add_test(test_rtps_transport e2e.rtps_transport
     INCLUDES ${NB_SRC_DIR}/rtps/internal
     TIMEOUT 60)
 
+# Pub/sub spine: participant / topic / writer / reader over the RTPS backend.
+nb_add_test(test_pubsub e2e.pubsub
+    LABELS "e2e;rtps;pubsub"
+    TIMEOUT 90)
+
 nb_add_test(test_buffer unit.buffer LABELS "unit;buffer" LIBRARIES nb_base)
 nb_add_test(test_buf_concurrency unit.buf_concurrency
     LABELS "unit;concurrency"

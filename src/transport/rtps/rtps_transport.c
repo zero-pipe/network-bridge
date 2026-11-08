@@ -95,6 +95,11 @@ typedef struct nb_rtps_transport_endpoint {
     int have_responder;
     int have_requester;
     int have_publisher;
+    /* Native pub/sub topic endpoint: the event topic is named after the topic
+     * itself (no "_evt" suffix) and the reader role is independent of the RPC
+     * responder role. */
+    int topic_mode;
+    int have_topic_reader;
 } nb_rtps_transport_endpoint_t;
 
 struct nb_rtps_transport {
@@ -399,6 +404,74 @@ static nb_rtps_transport_endpoint_t *nb_rtps_transport_ensure(
             return NULL;
         }
         ep->have_publisher = 1;
+    }
+    ntk_mutex_unlock(inst->lock);
+    return ep;
+}
+
+/* Native pub/sub topic: the same endpoint table, but the event topic carries
+ * the topic name verbatim and a reader role that is separate from the RPC
+ * responder role. */
+static nb_rtps_transport_endpoint_t *nb_rtps_transport_ensure_topic(
+    nb_rtps_transport_t *inst,
+    const char *topic,
+    uint32_t roles)
+{
+    nb_rtps_transport_endpoint_t *ep = NULL;
+    char name[NB_GLOBAL_MAX_ROUTE_BYTES];
+    size_t i;
+
+    if (!inst || !topic || !topic[0]) {
+        return NULL;
+    }
+    nb_rtps_transport_method(topic, name, sizeof(name));
+    if (!name[0]) {
+        return NULL;
+    }
+    ntk_mutex_lock(inst->lock);
+    for (i = 0; i < inst->endpoint_count; ++i) {
+        if (inst->endpoints[i].used && strcmp(inst->endpoints[i].method, name) == 0) {
+            ep = &inst->endpoints[i];
+            break;
+        }
+    }
+    if (ep && !ep->topic_mode) {
+        /* The name is already used by an RPC endpoint; topic names and route
+         * names must stay disjoint. */
+        ntk_mutex_unlock(inst->lock);
+        return NULL;
+    }
+    if (!ep) {
+        ep = nb_rtps_transport_endpoint_init(inst, name);
+        if (!ep) {
+            ntk_mutex_unlock(inst->lock);
+            return NULL;
+        }
+        nb_copy_str(ep->topic_evt, sizeof(ep->topic_evt), name, "");
+        ep->topic_mode = 1;
+    }
+    if (!ep->t_evt) {
+        ep->t_evt = nb_rtps_transport_topic(inst, ep->topic_evt);
+        if (!ep->t_evt) {
+            ntk_mutex_unlock(inst->lock);
+            return NULL;
+        }
+    }
+    if ((roles & NB_PS_TOPIC_WRITER) && !ep->have_publisher) {
+        ep->wr_evt = nb_rtps_transport_writer(inst, ep->t_evt);
+        if (!ep->wr_evt) {
+            ntk_mutex_unlock(inst->lock);
+            return NULL;
+        }
+        ep->have_publisher = 1;
+    }
+    if ((roles & NB_PS_TOPIC_READER) && !ep->have_topic_reader) {
+        ep->rd_evt = ep->rd_evt ? ep->rd_evt : nb_rtps_transport_reader(inst, ep->t_evt);
+        if (!ep->rd_evt) {
+            ntk_mutex_unlock(inst->lock);
+            return NULL;
+        }
+        ep->have_topic_reader = 1;
     }
     ntk_mutex_unlock(inst->lock);
     return ep;
@@ -1118,6 +1191,22 @@ static void nb_rtps_op_unregister_method(nb_transport_instance_t *instance,
     (void)method;
 }
 
+static int nb_rtps_op_register_topic(nb_transport_instance_t *instance,
+                                     const char *topic,
+                                     uint32_t roles)
+{
+    nb_rtps_transport_t *inst = (nb_rtps_transport_t *)instance;
+
+    if (!inst || !topic || !topic[0]) {
+        return NB_ERR_INVALID;
+    }
+    roles &= (NB_PS_TOPIC_WRITER | NB_PS_TOPIC_READER);
+    if (roles == 0) {
+        return NB_ERR_INVALID;
+    }
+    return nb_rtps_transport_ensure_topic(inst, topic, roles) ? NB_OK : NB_ERR_NOMEM;
+}
+
 static size_t nb_rtps_op_discovery_read(nb_transport_instance_t *instance,
                                         int topic,
                                         nb_discovery_sample_t *out,
@@ -1216,6 +1305,7 @@ static const nb_transport_provider_ops_t nb_g_rtps_ops = {
     .reply = nb_rtps_op_reply,
     .register_method = nb_rtps_op_register_method,
     .unregister_method = nb_rtps_op_unregister_method,
+    .register_topic = nb_rtps_op_register_topic,
     .discovery_read = nb_rtps_op_discovery_read,
     .metrics_read = nb_rtps_op_metrics_read,
 };
