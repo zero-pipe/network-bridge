@@ -81,7 +81,7 @@ static void on_receive(void *user, void *reply_token, const nb_transport_message
         response.payload.data = pong;
         response.payload.len = sizeof(pong) - 1u;
         response.payload.encoding = message->payload.encoding;
-        (void)ctx->provider->ops->reply(
+        (void)ctx->provider->ops->rpc->reply(
             ctx->instance, reply_token, message->peer, &response);
     } else if (message->kind == NB_MSG_KIND_RESPONSE) {
         peer_record(ctx, message, &ctx->responses);
@@ -189,8 +189,8 @@ static void test_request_response_and_event(void)
     }
     CHECK(provider->ops->start(a) == NB_OK);
     CHECK(provider->ops->start(b) == NB_OK);
-    CHECK(provider->ops->register_method(a, "svc", "echo") == NB_OK);
-    CHECK(provider->ops->register_method(b, "svc", "tick") == NB_OK);
+    CHECK(provider->ops->ps->register_method(a, "svc", "echo") == NB_OK);
+    CHECK(provider->ops->ps->register_method(b, "svc", "tick") == NB_OK);
 
     /* Request/response: b asks, a answers through the reply token. */
     memset(&message, 0, sizeof(message));
@@ -200,7 +200,7 @@ static void test_request_response_and_event(void)
     message.payload.data = ping;
     message.payload.len = sizeof(ping) - 1u;
     for (i = 0; i < 120 && peer_count(&ctx_b, &ctx_b.responses) == 0; i++) {
-        (void)provider->ops->send(b, NULL, &message);
+        (void)provider->ops->rpc->send(b, NULL, &message);
         ntk_sleep_ms(100);
     }
     CHECK(peer_count(&ctx_a, &ctx_a.requests) > 0);
@@ -217,7 +217,7 @@ static void test_request_response_and_event(void)
     message.payload.data = tick;
     message.payload.len = sizeof(tick) - 1u;
     for (i = 0; i < 120 && peer_count(&ctx_b, &ctx_b.events) == 0; i++) {
-        (void)provider->ops->send(a, NULL, &message);
+        (void)provider->ops->rpc->send(a, NULL, &message);
         ntk_sleep_ms(100);
     }
     CHECK(peer_count(&ctx_b, &ctx_b.events) > 0);
@@ -285,8 +285,8 @@ static void test_tcp_query_binding(void)
     }
     CHECK(provider->ops->start(a) == NB_OK);
     CHECK(provider->ops->start(b) == NB_OK);
-    CHECK(provider->ops->register_method(a, "svc", "echo") == NB_OK);
-    CHECK(provider->ops->register_method(b, "svc", "echo") == NB_OK);
+    CHECK(provider->ops->ps->register_method(a, "svc", "echo") == NB_OK);
+    CHECK(provider->ops->ps->register_method(b, "svc", "echo") == NB_OK);
 
     memset(&message, 0, sizeof(message));
     message.kind = NB_MSG_KIND_REQUEST;
@@ -295,7 +295,7 @@ static void test_tcp_query_binding(void)
     message.payload.data = ping;
     message.payload.len = sizeof(ping) - 1u;
     for (i = 0; i < 120 && peer_count(&ctx_b, &ctx_b.responses) == 0; i++) {
-        (void)provider->ops->send(b, NULL, &message);
+        (void)provider->ops->rpc->send(b, NULL, &message);
         ntk_sleep_ms(100);
     }
     CHECK(peer_count(&ctx_a, &ctx_a.requests) > 0);
@@ -358,7 +358,7 @@ static void test_status_events(void)
     }
     CHECK(provider->ops->start(a) == NB_OK);
     CHECK(provider->ops->start(b) == NB_OK);
-    CHECK(provider->ops->register_method(a, "svc", "echo") == NB_OK);
+    CHECK(provider->ops->ps->register_method(a, "svc", "echo") == NB_OK);
 
     /* Sending a request turns b into the requester for this method, which gives
      * it the request writer and response reader that pair with a's endpoints. */
@@ -369,7 +369,7 @@ static void test_status_events(void)
     message.payload.data = ping;
     message.payload.len = sizeof(ping) - 1u;
     for (i = 0; i < 150 && (status_events(&ctx_a) == 0 || status_events(&ctx_b) == 0); i++) {
-        (void)provider->ops->send(b, NULL, &message);
+        (void)provider->ops->rpc->send(b, NULL, &message);
         ntk_sleep_ms(100);
     }
     CHECK(status_events(&ctx_a) > 0);

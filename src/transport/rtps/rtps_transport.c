@@ -1294,6 +1294,18 @@ static void nb_rtps_op_metrics_read(nb_transport_instance_t *instance, nb_metric
     out->rtps_subscriptions = metrics.subscriptions;
 }
 
+static const nb_rpc_transport_ops_t nb_g_rtps_rpc = {
+    .send = nb_rtps_op_send,
+    .reply = nb_rtps_op_reply,
+};
+
+static const nb_ps_backend_ops_t nb_g_rtps_ps = {
+    .register_topic = nb_rtps_op_register_topic,
+    .register_method = nb_rtps_op_register_method,
+    .unregister_method = nb_rtps_op_unregister_method,
+    .discovery_read = nb_rtps_op_discovery_read,
+};
+
 static const nb_transport_provider_ops_t nb_g_rtps_ops = {
     .abi_version = NB_TRANSPORT_PROVIDER_ABI_VERSION,
     .struct_size = sizeof(nb_transport_provider_ops_t),
@@ -1301,13 +1313,9 @@ static const nb_transport_provider_ops_t nb_g_rtps_ops = {
     .start = nb_rtps_op_start,
     .stop = nb_rtps_op_stop,
     .destroy = nb_rtps_op_destroy,
-    .send = nb_rtps_op_send,
-    .reply = nb_rtps_op_reply,
-    .register_method = nb_rtps_op_register_method,
-    .unregister_method = nb_rtps_op_unregister_method,
-    .register_topic = nb_rtps_op_register_topic,
-    .discovery_read = nb_rtps_op_discovery_read,
     .metrics_read = nb_rtps_op_metrics_read,
+    .rpc = &nb_g_rtps_rpc,
+    .ps = &nb_g_rtps_ps,
 };
 
 static const nb_transport_provider_t nb_g_rtps_provider = {

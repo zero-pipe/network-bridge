@@ -13,18 +13,32 @@ static size_t nb_g_provider_count;
 int nb_transport_provider_register(const nb_transport_provider_t *provider)
 {
     size_t i;
-    if (!provider || !provider->scheme || !provider->scheme[0] || !provider->ops ||
-        !provider->ops->create || !provider->ops->start || !provider->ops->stop ||
-        !provider->ops->destroy || !provider->ops->send || !provider->ops->reply) {
+    const nb_transport_provider_ops_t *ops;
+
+    if (!provider || !provider->scheme || !provider->scheme[0] || !provider->ops) {
         return NB_ERR_INVALID;
     }
-    /* A provider built against an older header stays usable: the core only
-     * reaches an appended slot when the provider's struct_size covers it. */
-    if (provider->ops->abi_version > NB_TRANSPORT_PROVIDER_ABI_VERSION) {
+    ops = provider->ops;
+    if (!ops->create || !ops->start || !ops->stop || !ops->destroy) {
+        return NB_ERR_INVALID;
+    }
+    /* A provider must implement at least one spine, and each declared role
+     * must be complete. */
+    if (!ops->rpc && !ops->ps) {
+        return NB_ERR_INVALID;
+    }
+    if (ops->rpc && (!ops->rpc->send || !ops->rpc->reply)) {
+        return NB_ERR_INVALID;
+    }
+    if (ops->ps && !ops->ps->register_topic) {
+        return NB_ERR_INVALID;
+    }
+    /* The ops layout changed with the role split; only a provider built against
+     * this header can be interpreted. */
+    if (ops->abi_version != NB_TRANSPORT_PROVIDER_ABI_VERSION) {
         return NB_ERR_NOT_SUPPORTED;
     }
-    if (provider->ops->struct_size != 0u &&
-        provider->ops->struct_size < offsetof(nb_transport_provider_ops_t, register_topic)) {
+    if (ops->struct_size != 0u && ops->struct_size < sizeof(*ops)) {
         return NB_ERR_INVALID;
     }
     for (i = 0; i < nb_g_provider_count; i++) {

@@ -53,9 +53,14 @@ static void nb_provider_op_stop(nb_transport_t *t)
 
 static int nb_provider_op_send(nb_transport_t *t, const nb_message_t *message)
 {
+    const nb_rpc_transport_ops_t *rpc;
     nb_endpoint_t target;
     if (!t || !t->provider || !message) {
         return NB_ERR_INVALID;
+    }
+    rpc = t->provider->ops->rpc;
+    if (!rpc || !rpc->send) {
+        return NB_ERR_NOT_SUPPORTED;
     }
     if (nb_endpoint_from_parts(&target,
                                t->scheme,
@@ -64,14 +69,19 @@ static int nb_provider_op_send(nb_transport_t *t, const nb_message_t *message)
                                nb_transport_kind_from_scheme(t->scheme)) != NB_OK) {
         return NB_ERR_INVALID;
     }
-    return t->provider->ops->send(t->provider_instance, &target, message);
+    return rpc->send(t->provider_instance, &target, message);
 }
 
 static int nb_provider_op_reply(nb_transport_t *t, const nb_message_t *message)
 {
+    const nb_rpc_transport_ops_t *rpc;
     nb_endpoint_t peer;
     if (!t || !t->provider || !message) {
         return NB_ERR_INVALID;
+    }
+    rpc = t->provider->ops->rpc;
+    if (!rpc || !rpc->reply) {
+        return NB_ERR_NOT_SUPPORTED;
     }
     if (nb_endpoint_from_parts(&peer,
                                t->scheme,
@@ -80,10 +90,10 @@ static int nb_provider_op_reply(nb_transport_t *t, const nb_message_t *message)
                                nb_transport_kind_from_scheme(t->scheme)) != NB_OK) {
         return NB_ERR_INVALID;
     }
-    return t->provider->ops->reply(t->provider_instance,
-                                   message->reply_token,
-                                   &peer,
-                                   message);
+    return rpc->reply(t->provider_instance,
+                      message->reply_token,
+                      &peer,
+                      message);
 }
 
 static int nb_provider_op_peer_stats(nb_transport_t *t,
@@ -105,10 +115,16 @@ static int nb_provider_op_loan(nb_transport_t *t,
                                uint32_t *payload_capacity_out,
                                void **loan)
 {
-    if (!t || !t->provider || !t->provider->ops->loan) {
+    const nb_rpc_transport_ops_t *rpc;
+
+    if (!t || !t->provider) {
         return NB_ERR_NOT_SUPPORTED;
     }
-    return t->provider->ops->loan(
+    rpc = t->provider->ops->rpc;
+    if (!rpc || !rpc->loan) {
+        return NB_ERR_NOT_SUPPORTED;
+    }
+    return rpc->loan(
         t->provider_instance, route, payload_capacity, payload_data, payload_capacity_out, loan);
 }
 
@@ -117,16 +133,28 @@ static int nb_provider_op_send_loan(nb_transport_t *t,
                                     void *loan,
                                     const nb_message_t *message)
 {
-    if (!t || !t->provider || !t->provider->ops->send_loan) {
+    const nb_rpc_transport_ops_t *rpc;
+
+    if (!t || !t->provider) {
         return NB_ERR_NOT_SUPPORTED;
     }
-    return t->provider->ops->send_loan(t->provider_instance, route, loan, message);
+    rpc = t->provider->ops->rpc;
+    if (!rpc || !rpc->send_loan) {
+        return NB_ERR_NOT_SUPPORTED;
+    }
+    return rpc->send_loan(t->provider_instance, route, loan, message);
 }
 
 static void nb_provider_op_release_loan(nb_transport_t *t, void *loan)
 {
-    if (t && t->provider && t->provider->ops->release_loan) {
-        t->provider->ops->release_loan(t->provider_instance, loan);
+    const nb_rpc_transport_ops_t *rpc;
+
+    if (!t || !t->provider) {
+        return;
+    }
+    rpc = t->provider->ops->rpc;
+    if (rpc && rpc->release_loan) {
+        rpc->release_loan(t->provider_instance, loan);
     }
 }
 

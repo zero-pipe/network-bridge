@@ -81,17 +81,13 @@ struct nb_reader {
 
 static int nb_ps_provider_supports_topics(const nb_transport_t *t)
 {
-    const nb_transport_provider_ops_t *ops;
+    const nb_ps_backend_ops_t *ps;
 
     if (!t || !t->provider || !t->provider->ops) {
         return 0;
     }
-    ops = t->provider->ops;
-    if (ops->struct_size < offsetof(nb_transport_provider_ops_t, register_topic) +
-                               sizeof(ops->register_topic)) {
-        return 0;
-    }
-    return ops->register_topic != NULL;
+    ps = t->provider->ops->ps;
+    return ps != NULL && ps->register_topic != NULL;
 }
 
 static void nb_ps_reader_entry_free(nb_ps_reader_entry_t *entry)

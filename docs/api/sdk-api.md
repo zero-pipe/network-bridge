@@ -408,10 +408,22 @@ nb_transport_provider_register(&my_provider);
 
 provider 描述符和 ops 必须有静态生命周期。
 
+ops 按角色拆分：`create/start/stop/destroy` 与可选的 `metrics_read` 是生命周期
+和观测，`rpc` / `ps` 是两条主干各自需要的角色接口，至少实现一个：
+
+- `rpc`（点对点 RPC 链路）：`send`、`reply` 必填，`loan/send_loan/release_loan`
+  可选（零拷贝发布）。
+- `ps`（发布/订阅后端）：`register_topic` 必填；`register_method` /
+  `unregister_method` 是 RPC-over-PS 桥的钩子，可选的 `discovery_read` 提供
+  DCPS 内置主题视图。
+
+核心按需要的角色取用，角色缺失时返回 `NB_ERR_NOT_SUPPORTED`，不再在调用点
+逐个判断 NULL。`shm` 同时实现两个角色。
+
 ops 和 options 结构体开头都有 version/size 字段，便于跨版本安全注册：
 
-- `nb_transport_provider_ops_t.abi_version` 必须是
-  `NB_TRANSPORT_PROVIDER_ABI_VERSION`（0 视为旧版 provider，仍然接受）
+- `nb_transport_provider_ops_t.abi_version` 必须等于
+  `NB_TRANSPORT_PROVIDER_ABI_VERSION`（角色拆分改变了布局，旧版本不再接受）
 - `nb_transport_provider_ops_t.struct_size` 必须是
   `sizeof(nb_transport_provider_ops_t)`
 - `nb_transport_provider_options_t.struct_size` 必须是

@@ -17,26 +17,16 @@ size_t nb_node_discovery_read(nb_node_t *node,
     }
     for (i = 0; i < node->transport_count && total < max; i++) {
         nb_transport_t *transport = node->transports[i];
-        const nb_transport_provider_ops_t *ops;
+        const nb_ps_backend_ops_t *ps;
 
         if (!transport || !transport->provider) {
             continue;
         }
-        ops = transport->provider->ops;
-        if (!ops || !ops->discovery_read) {
+        ps = transport->provider->ops->ps;
+        if (!ps || !ps->discovery_read) {
             continue;
         }
-        /*
-         * External providers compiled against an older ops table report their
-         * real size; do not read past the end of what they exported.
-         */
-        if (ops->struct_size != 0 &&
-            ops->struct_size <
-                offsetof(nb_transport_provider_ops_t, discovery_read) +
-                    sizeof(ops->discovery_read)) {
-            continue;
-        }
-        total += ops->discovery_read(
+        total += ps->discovery_read(
             transport->provider_instance, (int)topic, out + total, max - total);
     }
     return total;

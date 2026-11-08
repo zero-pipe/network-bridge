@@ -81,41 +81,42 @@ void nb_transport_release_loan(nb_transport_t *t, void *loan)
 
 int nb_transport_subscribe(nb_transport_t *t, const char *service, const char *method)
 {
+    const nb_ps_backend_ops_t *ps;
+
     if (!t || !service || !method) {
         return NB_ERR_INVALID;
     }
-    if (!t->provider || !t->provider_instance || !t->provider->ops->register_method) {
+    ps = (t->provider && t->provider->ops) ? t->provider->ops->ps : NULL;
+    if (!t->provider_instance || !ps || !ps->register_method) {
         return NB_OK;
     }
-    return t->provider->ops->register_method(t->provider_instance, service, method);
+    return ps->register_method(t->provider_instance, service, method);
 }
 
 void nb_transport_unsubscribe(nb_transport_t *t, const char *service, const char *method)
 {
-    if (!t || !service || !method || !t->provider || !t->provider_instance ||
-        !t->provider->ops->unregister_method) {
+    const nb_ps_backend_ops_t *ps;
+
+    if (!t || !service || !method) {
         return;
     }
-    t->provider->ops->unregister_method(t->provider_instance, service, method);
+    ps = (t->provider && t->provider->ops) ? t->provider->ops->ps : NULL;
+    if (!t->provider_instance || !ps || !ps->unregister_method) {
+        return;
+    }
+    ps->unregister_method(t->provider_instance, service, method);
 }
 
 int nb_transport_register_topic(nb_transport_t *t, const char *topic, uint32_t roles)
 {
-    const nb_transport_provider_ops_t *ops;
+    const nb_ps_backend_ops_t *ps;
 
-    if (!t || !t->provider || !t->provider_instance || !topic || !topic[0]) {
+    if (!t || !t->provider || !t->provider->ops || !t->provider_instance || !topic || !topic[0]) {
         return NB_ERR_NOT_SUPPORTED;
     }
-    ops = t->provider->ops;
-    /* register_topic is the last slot: only reach it when the provider's
-     * struct_size covers it. A provider built against an older header (or one
-     * that does not set struct_size) cannot carry the pub/sub spine. */
-    if (ops->struct_size < offsetof(nb_transport_provider_ops_t, register_topic) +
-                               sizeof(ops->register_topic)) {
+    ps = t->provider->ops->ps;
+    if (!ps || !ps->register_topic) {
         return NB_ERR_NOT_SUPPORTED;
     }
-    if (!ops->register_topic) {
-        return NB_ERR_NOT_SUPPORTED;
-    }
-    return ops->register_topic(t->provider_instance, topic, roles);
+    return ps->register_topic(t->provider_instance, topic, roles);
 }

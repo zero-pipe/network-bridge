@@ -586,6 +586,20 @@ static int nb_shm_op_register_topic(nb_transport_instance_t *instance,
     return (roles & NB_PS_TOPIC_WRITER) ? NB_OK : NB_ERR_INVALID;
 }
 
+static const nb_rpc_transport_ops_t nb_g_shm_rpc = {
+    .send = nb_shm_op_send,
+    .reply = nb_shm_op_reply,
+    .loan = nb_shm_op_loan,
+    .send_loan = nb_shm_op_send_loan,
+    .release_loan = nb_shm_op_release_loan,
+};
+
+static const nb_ps_backend_ops_t nb_g_shm_ps = {
+    .register_topic = nb_shm_op_register_topic,
+    .register_method = nb_shm_op_register_method,
+    .unregister_method = nb_shm_op_unregister_method,
+};
+
 static const nb_transport_provider_ops_t nb_g_shm_ops = {
     .abi_version = NB_TRANSPORT_PROVIDER_ABI_VERSION,
     .struct_size = sizeof(nb_transport_provider_ops_t),
@@ -593,14 +607,8 @@ static const nb_transport_provider_ops_t nb_g_shm_ops = {
     .start = nb_shm_op_start,
     .stop = nb_shm_op_stop,
     .destroy = nb_shm_op_destroy,
-    .send = nb_shm_op_send,
-    .reply = nb_shm_op_reply,
-    .register_method = nb_shm_op_register_method,
-    .unregister_method = nb_shm_op_unregister_method,
-    .register_topic = nb_shm_op_register_topic,
-    .loan = nb_shm_op_loan,
-    .send_loan = nb_shm_op_send_loan,
-    .release_loan = nb_shm_op_release_loan,
+    .rpc = &nb_g_shm_rpc,
+    .ps = &nb_g_shm_ps,
 };
 
 static const nb_transport_provider_t nb_g_shm_provider = {

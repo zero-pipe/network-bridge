@@ -831,6 +831,17 @@ static int nb_dds_op_register_topic(nb_transport_instance_t *instance,
     return nb_dds_endpoint_ensure_topic(inst, topic, roles) ? NB_OK : NB_ERR_NOMEM;
 }
 
+static const nb_rpc_transport_ops_t nb_g_dds_rpc = {
+    .send = nb_dds_op_send,
+    .reply = nb_dds_op_reply,
+};
+
+static const nb_ps_backend_ops_t nb_g_dds_ps = {
+    .register_topic = nb_dds_op_register_topic,
+    .register_method = nb_dds_op_register_method,
+    .unregister_method = nb_dds_op_unregister_method,
+};
+
 static const nb_transport_provider_ops_t nb_g_dds_ops = {
     .abi_version = NB_TRANSPORT_PROVIDER_ABI_VERSION,
     .struct_size = sizeof(nb_transport_provider_ops_t),
@@ -838,11 +849,8 @@ static const nb_transport_provider_ops_t nb_g_dds_ops = {
     .start = nb_dds_op_start,
     .stop = nb_dds_op_stop,
     .destroy = nb_dds_op_destroy,
-    .send = nb_dds_op_send,
-    .reply = nb_dds_op_reply,
-    .register_method = nb_dds_op_register_method,
-    .unregister_method = nb_dds_op_unregister_method,
-    .register_topic = nb_dds_op_register_topic,
+    .rpc = &nb_g_dds_rpc,
+    .ps = &nb_g_dds_ps,
 };
 
 static const nb_transport_provider_t nb_g_dds_provider = {
