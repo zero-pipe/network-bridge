@@ -207,7 +207,7 @@ int nb_proxy_open_client_stream(nb_proxy_t *proxy,
                       const char *service,
                       const char *method,
                       const nb_call_options_t *options,
-                      response_fn cb,
+                      nb_response_fn cb,
                       void *user,
                       nb_stream_t **out_stream)
 {
@@ -259,8 +259,8 @@ int nb_proxy_open_bidi_stream(nb_proxy_t *proxy,
                            const char *service,
                            const char *method,
                            const nb_call_options_t *options,
-                           response_chunk_fn on_chunk,
-                           stream_done_fn on_done,
+                           nb_response_chunk_fn on_chunk,
+                           nb_stream_done_fn on_done,
                            void *user,
                            nb_stream_t **out_stream)
 {

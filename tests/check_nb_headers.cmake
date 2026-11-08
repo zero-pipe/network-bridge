@@ -7,7 +7,7 @@ endif()
 
 if(EXISTS "${HEADER_DIR}/stub.h")
     message(FATAL_ERROR
-        "${HEADER_DIR}/stub.h is public; stub is internal (src/core/stub_internal.h)")
+        "${HEADER_DIR}/stub.h is public; stub is internal (src/rpc/stub_internal.h)")
 endif()
 
 file(GLOB headers "${HEADER_DIR}/*.h")
@@ -64,13 +64,13 @@ foreach(spine rpc pubsub)
     endif()
 endforeach()
 
-# The RPC spine must not drag in pub/sub-only types: reader history on a service
-# method moved to nb/service_history.h, which rpc.h does not include.
+# The RPC spine must not drag in pub/sub-only types: reader history is a
+# pub/sub concept (nb_reader_t), not part of the service API.
 file(READ "${HEADER_DIR}/service.h" service_content)
 string(FIND "${service_content}" "#include <nb/sample.h>" service_sample)
 if(NOT service_sample EQUAL -1)
     message(FATAL_ERROR
-        "nb/service.h includes nb/sample.h; reader history belongs to nb/service_history.h")
+        "nb/service.h includes nb/sample.h; reader history belongs to nb/pubsub.h")
 endif()
 
 file(READ "${HEADER_DIR}/rpc.h" rpc_content)

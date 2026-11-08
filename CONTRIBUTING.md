@@ -61,7 +61,7 @@ in-place initializers, `_release` for explicit cleanup, and `_create` /
 ### Include guards
 
 Every header uses `NB_<PATH>_H`, for example `include/nb/proxy.h` ->
-`NB_PROXY_H`, `src/core/node_internal.h` -> `NB_NODE_INTERNAL_H`.
+`NB_PROXY_H`, `src/runtime/node_internal.h` -> `NB_NODE_INTERNAL_H`.
 
 ### Header layout
 
@@ -79,7 +79,9 @@ installed.
 ```text
 include/nb/     public API
 src/base/       dependency-free primitives (nb_base library)
-src/core/       node, dispatch, service, proxy, stream, pending
+src/runtime/    shared runtime: node, inbound dispatch, binding assembly
+src/rpc/        RPC spine: service, proxy, stub, stream, pending, retransmit
+src/pubsub/     pub/sub spine: pubsub objects, reader history, wait sets
 src/message/    wire framing and envelope
 src/transport/  common framing + udp / tcp / shm / dds drivers
 src/router/     static routes and mesh resolution

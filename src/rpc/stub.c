@@ -16,9 +16,9 @@ typedef struct nb_stub_task {
     nb_stub_t *stub;
     nb_request_id_t id;
     uint64_t timeout_ms;
-    response_fn cb;
-    response_chunk_fn chunk_cb;
-    stream_done_fn done_cb;
+    nb_response_fn cb;
+    nb_response_chunk_fn chunk_cb;
+    nb_stream_done_fn done_cb;
     int streaming;
     int event;
     void *user;
@@ -135,9 +135,9 @@ static void nb_stub_call_now(nb_stub_t *stub,
                           const uint8_t *data,
                           size_t len,
                           uint8_t encoding,
-                          response_fn cb,
-                          response_chunk_fn chunk_cb,
-                          stream_done_fn done_cb,
+                          nb_response_fn cb,
+                          nb_response_chunk_fn chunk_cb,
+                          nb_stream_done_fn done_cb,
                           int streaming,
                           void *user,
                           uint64_t timeout_ms,
@@ -614,9 +614,9 @@ static int nb_stub_call_impl(nb_stub_t *stub,
                              const char *method,
                              const nb_payload_t *payload,
                              nb_owned_payload_t *move,
-                             response_fn cb,
-                             response_chunk_fn chunk_cb,
-                             stream_done_fn done_cb,
+                             nb_response_fn cb,
+                             nb_response_chunk_fn chunk_cb,
+                             nb_stream_done_fn done_cb,
                              int streaming,
                              void *user,
                              uint64_t timeout_ms,
@@ -709,9 +709,9 @@ int nb_stub_call_ex(nb_stub_t *stub,
                      const char *service,
                      const char *method,
                      const nb_payload_t *payload,
-                     response_fn cb,
-                     response_chunk_fn chunk_cb,
-                     stream_done_fn done_cb,
+                     nb_response_fn cb,
+                     nb_response_chunk_fn chunk_cb,
+                     nb_stream_done_fn done_cb,
                      int streaming,
                      void *user,
                      uint64_t timeout_ms,
@@ -738,9 +738,9 @@ int nb_stub_call_owned(nb_stub_t *stub,
                        const char *method,
                        nb_owned_payload_t *payload,
                        const nb_metadata_t *metadata,
-                       response_fn cb,
-                       response_chunk_fn chunk_cb,
-                       stream_done_fn done_cb,
+                       nb_response_fn cb,
+                       nb_response_chunk_fn chunk_cb,
+                       nb_stream_done_fn done_cb,
                        bool streaming,
                        void *user,
                        uint64_t timeout_ms,

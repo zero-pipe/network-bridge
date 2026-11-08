@@ -124,7 +124,7 @@ static void nb_pending_recycle(nb_node_t *node, nb_pending_t *p)
 
 void nb_pending_invoke(nb_pending_t *p, int status, const nb_response_t *resp)
 {
-    response_fn cb;
+    nb_response_fn cb;
     void *user;
     nb_node_t *node;
     if (!p || !p->used) {
@@ -155,7 +155,7 @@ void nb_pending_invoke(nb_pending_t *p, int status, const nb_response_t *resp)
         }
     }
     if (p->streaming) {
-        stream_done_fn done = p->done_cb;
+        nb_stream_done_fn done = p->done_cb;
         void *stream_user = p->stream_user;
         p->chunk_cb = NULL;
         p->done_cb = NULL;
@@ -203,7 +203,7 @@ void nb_pending_release(nb_pending_t *p)
 
 nb_pending_t *nb_pending_add(nb_node_t *node,
                                nb_request_id_t id,
-                               response_fn cb,
+                               nb_response_fn cb,
                                void *user,
                                uint64_t timeout_ms,
                                ntk_poller *poller,

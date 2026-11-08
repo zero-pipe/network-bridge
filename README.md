@@ -111,7 +111,9 @@ int main(void)
 ```text
 include/nb/   公共 API（总入口：<nb/nb.h>）
 src/base/     无外部依赖的基础设施（nb_base 库）
-src/core/     node、dispatch、service、proxy、stream、pending
+src/runtime/  两条主干共享的运行时：node、入站分发、binding 装配
+src/rpc/      RPC 主干：service、proxy、stub、stream、pending、重传
+src/pubsub/   发布/订阅主干：participant/topic/writer/reader、history、waitset
 src/message/  线上组帧与信封
 src/transport/ 通用组帧以及 udp / tcp / shm / dds 驱动
 src/router/   静态路由与 mesh 解析

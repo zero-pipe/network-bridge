@@ -16,8 +16,7 @@
  * union of two unrelated APIs; see docs/architecture-split.md.
  *
  * Contents: error codes, base types, endpoints, buffers and allocators,
- * logging, metrics, payload views, the provider-SPI message shape, and the
- * shared service/method declaration table.
+ * logging, metrics, payload views, and the provider-SPI message shape.
  */
 
 #include <nb/alloc.h>
@@ -29,7 +28,6 @@
 #include <nb/message.h>
 #include <nb/message_view.h>
 #include <nb/metrics.h>
-#include <nb/service_table.h>
 #include <nb/types.h>
 
 #endif /* NB_BASE_H */

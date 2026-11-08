@@ -284,22 +284,6 @@ static int disc_buf_put(disc_buf_t *b, const void *data, size_t len)
     return NTK_DISC_OK;
 }
 
-static int disc_buf_u16(disc_buf_t *b, uint16_t v)
-{
-    uint8_t tmp[2];
-
-    disc_put_u16(tmp, v);
-    return disc_buf_put(b, tmp, sizeof(tmp));
-}
-
-static int disc_buf_u32(disc_buf_t *b, uint32_t v)
-{
-    uint8_t tmp[4];
-
-    disc_put_u32(tmp, v);
-    return disc_buf_put(b, tmp, sizeof(tmp));
-}
-
 static int disc_buf_tlv(disc_buf_t *b, uint8_t type, const void *data, size_t len)
 {
     int rc;

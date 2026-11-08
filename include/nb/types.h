@@ -256,14 +256,6 @@ typedef void (*nb_response_fn)(int status, const nb_response_t *resp, void *user
 typedef void (*nb_response_chunk_fn)(int status, const nb_chunk_t *chunk, void *user);
 typedef void (*nb_stream_done_fn)(int status, void *user);
 
-/* Deprecated spellings kept for source compatibility. New code should use the
- * nb_-prefixed typedefs above. */
-#ifndef NB_NO_DEPRECATED_API
-typedef nb_response_fn response_fn;
-typedef nb_response_chunk_fn response_chunk_fn;
-typedef nb_stream_done_fn stream_done_fn;
-#endif
-
 /* ---- Version ---- */
 /*
  * API version of these headers. Struct layouts and enum values are not
@@ -303,25 +295,5 @@ typedef nb_stream_done_fn stream_done_fn;
 #ifdef __cplusplus
 }
 #endif
-
-/* ---- Deprecated enum spellings ---------------------------------------- */
-/*
- * These aliases keep older sources compiling after the 0.2 naming cleanup:
- * enum constants now follow NB_<TYPE>_<VALUE>. Define NB_NO_DEPRECATED_API to
- * hide them and catch stale names at compile time.
- */
-#ifndef NB_NO_DEPRECATED_API
-#define NB_MODE_MESH          NB_NODE_MODE_MESH
-#define NB_MODE_STATIC        NB_NODE_MODE_STATIC
-#define NB_INTRA_OFF          NB_INTRA_PROCESS_OFF
-#define NB_INTRA_AUTO         NB_INTRA_PROCESS_AUTO
-#define NB_INTRA_ONLY         NB_INTRA_PROCESS_ONLY
-#define NB_TRANSPORT_UDP      NB_TRANSPORT_KIND_UDP
-#define NB_TRANSPORT_TCP      NB_TRANSPORT_KIND_TCP
-#define NB_TRANSPORT_CUSTOM   NB_TRANSPORT_KIND_CUSTOM
-#define NB_STREAM_FIRST       NB_STREAM_FLAG_FIRST
-#define NB_STREAM_LAST        NB_STREAM_FLAG_LAST
-#define NB_STREAM_CANCEL      NB_STREAM_FLAG_CANCEL
-#endif /* NB_NO_DEPRECATED_API */
 
 #endif /* NB_TYPES_H */

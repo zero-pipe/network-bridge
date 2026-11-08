@@ -34,9 +34,9 @@ struct nb_stream {
     char service[NB_SERVICE_NAME_MAX];
     char method[NB_METHOD_NAME_MAX];
     nb_endpoint_t endpoint;
-    response_fn cb;
-    response_chunk_fn chunk_cb;
-    stream_done_fn done_cb;
+    nb_response_fn cb;
+    nb_response_chunk_fn chunk_cb;
+    nb_stream_done_fn done_cb;
     void *user;
     int bidi;
     uint64_t timeout_ms;

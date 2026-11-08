@@ -2,7 +2,7 @@
 #define NB_PUBSUB_INTERNAL_H
 
 /*
- * Core-internal access to the pub/sub spine (src/core/pubsub.c).
+ * Core-internal access to the pub/sub spine (src/pubsub/pubsub.c).
  *
  * The public pubsub.h keeps nb_reader_t opaque. Wait sets (waitset.c) need the
  * reader's history queue to attach to it, so they come through this header

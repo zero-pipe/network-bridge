@@ -29,7 +29,7 @@ if(NB_BUILD_GTESTS)
         ${GOOGLE_GTEST_ROOT}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/message
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/transport/common
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/core)
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/runtime)
     target_link_libraries(test_gtest_modules PRIVATE nb ${GTEST_MAIN_LIB}
         ${GTEST_LIB})
     if(MSVC)

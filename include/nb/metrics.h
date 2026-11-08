@@ -159,11 +159,4 @@ size_t nb_metric_latency_bounds(const uint32_t **bounds);
 }
 #endif
 
-/* ---- Deprecated enum spellings ---------------------------------------- */
-#ifndef NB_NO_DEPRECATED_API
-#define NB_METRIC_COUNTER    NB_METRIC_TYPE_COUNTER
-#define NB_METRIC_GAUGE      NB_METRIC_TYPE_GAUGE
-#define NB_METRIC_HISTOGRAM  NB_METRIC_TYPE_HISTOGRAM
-#endif /* NB_NO_DEPRECATED_API */
-
 #endif /* NB_METRICS_H */

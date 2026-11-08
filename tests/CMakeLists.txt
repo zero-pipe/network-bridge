@@ -58,7 +58,8 @@ nb_add_test(test_reliable unit.reliable
 nb_add_test(test_poller_alloc unit.poller_alloc
     LABELS "unit;poller_alloc"
     INCLUDES
-        ${NB_SRC_DIR}/core
+        ${NB_SRC_DIR}/runtime
+        ${NB_SRC_DIR}/rpc
         ${NB_SRC_DIR}/utils
         ${NB_SRC_DIR}/discovery
         ${NB_SRC_DIR}/message
@@ -68,7 +69,7 @@ nb_add_test(test_poller_alloc unit.poller_alloc
         ${CMAKE_SOURCE_DIR}/3rdparty/uthash)
 nb_add_test(test_iobuf unit.iobuf
     LABELS "unit;iobuf"
-    INCLUDES ${NB_SRC_DIR}/core ${NB_SRC_DIR}/utils)
+    INCLUDES ${NB_SRC_DIR}/utils)
 nb_add_test(test_rtps_wire unit.rtps_wire
     LABELS "unit;rtps"
     INCLUDES ${NB_SRC_DIR}/rtps/internal)
@@ -157,7 +158,7 @@ nb_add_test(test_stream e2e.stream LABELS "e2e;stream" TIMEOUT 300)
 nb_add_test(test_api e2e.api LABELS "e2e;api")
 nb_add_test(test_sample_queue unit.sample_queue
     LABELS "unit;dds"
-    INCLUDES ${NB_SRC_DIR}/core
+    INCLUDES ${NB_SRC_DIR}/pubsub
     TIMEOUT 60)
 nb_add_test(test_move e2e.move LABELS "e2e;move")
 nb_add_test(test_worker e2e.worker LABELS "e2e;worker")

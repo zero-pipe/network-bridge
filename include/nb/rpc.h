@@ -16,9 +16,6 @@
  *
  * What does NOT belong here: topics, samples, reader histories, waitsets,
  * DDS status events and the DDS QoS policy set. Those live in <nb/pubsub.h>.
- * The aliases in publish.h / subscribe.h are the legacy spelling of the
- * pub/sub spine and are kept only for source compatibility; new code should
- * use <nb/pubsub.h>.
  */
 
 #include <nb/base.h>

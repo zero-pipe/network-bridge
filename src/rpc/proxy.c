@@ -175,7 +175,7 @@ int nb_proxy_set_target_uri(nb_proxy_t *proxy, const char *endpoint)
 
 typedef struct nb_proxy_cb_ctx {
     nb_proxy_t *proxy;
-    response_fn cb;
+    nb_response_fn cb;
     void *user;
 } nb_proxy_cb_ctx_t;
 
@@ -214,13 +214,13 @@ int nb_proxy_call_async(nb_proxy_t *proxy,
                         const char *method,
                         const nb_payload_t *payload,
                         const nb_call_options_t *options,
-                        response_fn cb,
+                        nb_response_fn cb,
                         void *user)
 {
     const nb_metadata_t *use_meta = options ? options->metadata : NULL;
     nb_metadata_t meta;
     nb_proxy_cb_ctx_t *ctx = NULL;
-    response_fn use_cb = cb;
+    nb_response_fn use_cb = cb;
     void *use_user = user;
     uint64_t timeout = options ? options->timeout_ms : 0;
     nb_request_id_t *out_request_id = options ? options->out_request_id : NULL;
@@ -275,13 +275,13 @@ int nb_proxy_call_async_owned(nb_proxy_t *proxy,
                               const char *method,
                               nb_owned_payload_t *payload,
                               const nb_call_options_t *options,
-                              response_fn cb,
+                              nb_response_fn cb,
                               void *user)
 {
     const nb_metadata_t *use_meta = options ? options->metadata : NULL;
     nb_metadata_t meta;
     nb_proxy_cb_ctx_t *ctx = NULL;
-    response_fn use_cb = cb;
+    nb_response_fn use_cb = cb;
     void *use_user = user;
     uint64_t timeout = options ? options->timeout_ms : 0;
     nb_request_id_t *out_request_id = options ? options->out_request_id : NULL;
@@ -428,8 +428,8 @@ int nb_proxy_call_server_stream(nb_proxy_t *proxy,
                                 const char *method,
                                 const nb_payload_t *payload,
                                 const nb_call_options_t *options,
-                                response_chunk_fn on_chunk,
-                                stream_done_fn on_done,
+                                nb_response_chunk_fn on_chunk,
+                                nb_stream_done_fn on_done,
                                 void *user)
 {
     if (!proxy || !proxy->node || !proxy->stub || !service || !method || !on_chunk || !on_done) {

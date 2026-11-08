@@ -373,7 +373,7 @@ static void nb_node_dispatch(nb_node_t *node, nb_transport_t *transport, nb_mess
             }
             p->expected_offset = chunk.offset + chunk.len;
             if (chunk.flags & NB_STREAM_FLAG_LAST) {
-                stream_done_fn done = p->done_cb;
+                nb_stream_done_fn done = p->done_cb;
                 void *stream_user = p->stream_user;
                 nb_pending_record_latency(node, p);
                 p->chunk_cb = NULL;

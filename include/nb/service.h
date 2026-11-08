@@ -58,13 +58,6 @@ typedef void (*nb_chunk_handler_fn)(nb_call_t *call,
                                  const nb_chunk_t *chunk,
                                  void *user);
 
-/* Deprecated spellings kept for source compatibility. */
-#ifndef NB_NO_DEPRECATED_API
-typedef nb_handler_fn handler_fn;
-typedef nb_sync_handler_fn sync_handler_fn;
-typedef nb_chunk_handler_fn chunk_handler_fn;
-#endif
-
 /* ---- Method execution modes ---- */
 
 typedef enum nb_service_exec_mode {
@@ -215,9 +208,6 @@ int nb_reply_stream(nb_call_t *call, int status, const nb_chunk_t *chunk);
 typedef int (*nb_service_interceptor_fn)(nb_call_t *call,
                                          const nb_request_t *req,
                                          void *user);
-#ifndef NB_NO_DEPRECATED_API
-typedef nb_service_interceptor_fn service_interceptor_fn;
-#endif
 int nb_service_set_interceptor(nb_service_t *service, nb_service_interceptor_fn interceptor, void *user);
 
 /* ---- Call context ---- */
@@ -240,15 +230,5 @@ bool nb_call_canceled(const nb_call_t *call);
 #ifdef __cplusplus
 }
 #endif
-
-/* ---- Deprecated enum spellings ---------------------------------------- */
-#ifndef NB_NO_DEPRECATED_API
-#define NB_SERVICE_EXEC_INLINE    NB_SERVICE_EXEC_MODE_INLINE
-#define NB_SERVICE_EXEC_WORKER    NB_SERVICE_EXEC_MODE_WORKER
-#define NB_SERVICE_EXEC_EXECUTOR  NB_SERVICE_EXEC_MODE_EXECUTOR
-#define NB_METHOD_UNARY           NB_METHOD_KIND_UNARY
-#define NB_METHOD_SYNC            NB_METHOD_KIND_SYNC
-#define NB_METHOD_STREAM          NB_METHOD_KIND_STREAM
-#endif /* NB_NO_DEPRECATED_API */
 
 #endif /* NB_SERVICE_H */

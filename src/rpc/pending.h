@@ -22,7 +22,7 @@ typedef struct nb_pending {
     uint32_t gen;                     /* 槽位复用代际，tick 迭代时用于识别被复用的槽位 */
     const void *owner;                /* 创建该调用的 stub；用于 stub/proxy 销毁时批量取消 */
     nb_request_id_t request_id;
-    response_fn cb;
+    nb_response_fn cb;
     void *user;
     uint64_t started_ms;              /* 调用发起时刻，用于端到端延迟统计 */
     uint64_t deadline_ms;
@@ -31,8 +31,8 @@ typedef struct nb_pending {
     /* 请求 payload/metadata 副本是否已保存，供 RTO / backpressure 重发 */
     int replay_ready;
     int streaming;
-    response_chunk_fn chunk_cb;
-    stream_done_fn done_cb;
+    nb_response_chunk_fn chunk_cb;
+    nb_stream_done_fn done_cb;
     void *stream_user;
     uint64_t expected_offset;
     uint32_t bp_retries;
@@ -59,7 +59,7 @@ typedef struct nb_pending {
 
 nb_pending_t *nb_pending_add(nb_node_t *node,
                                nb_request_id_t id,
-                               response_fn cb,
+                               nb_response_fn cb,
                                void *user,
                                uint64_t timeout_ms,
                                ntk_poller *poller,

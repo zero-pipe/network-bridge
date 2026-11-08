@@ -5,9 +5,9 @@
  * Stub: the internal call engine under proxy.
  *
  * This is not part of the public API. The public client surface is
- * <nb/proxy.h>; proxy.c installs its routing send hook here, and nothing
- * outside src/core may include this header. Providers that need a custom
- * transport extend <nb/transport_provider.h> instead of this layer.
+ * <nb/proxy.h>; proxy.c installs its routing send hook here, and only the RPC
+ * internals under src/rpc may include this header. Providers that need a
+ * custom transport extend <nb/transport_provider.h> instead of this layer.
  */
 
 #include <nb/types.h>
@@ -76,9 +76,9 @@ int nb_stub_call_ex(nb_stub_t *stub,
                     const char *service,
                     const char *method,
                     const nb_payload_t *payload,
-                    response_fn cb,
-                    response_chunk_fn chunk_cb,
-                    stream_done_fn done_cb,
+                    nb_response_fn cb,
+                    nb_response_chunk_fn chunk_cb,
+                    nb_stream_done_fn done_cb,
                     int streaming,
                     void *user,
                     uint64_t timeout_ms,
@@ -91,9 +91,9 @@ int nb_stub_call_owned(nb_stub_t *stub,
                        const char *method,
                        nb_owned_payload_t *payload,
                        const nb_metadata_t *metadata,
-                       response_fn cb,
-                       response_chunk_fn chunk_cb,
-                       stream_done_fn done_cb,
+                       nb_response_fn cb,
+                       nb_response_chunk_fn chunk_cb,
+                       nb_stream_done_fn done_cb,
                        bool streaming,
                        void *user,
                        uint64_t timeout_ms,

@@ -1,7 +1,7 @@
 /*
  * Reader history (the queue behind a pub/sub history reader): KEEP_LAST,
  * state masks, instance filtering, borrowed read vs owned take. This is a pure
- * unit test of src/core/sample_queue.c; the end-to-end reader path is covered
+ * unit test of src/pubsub/sample_queue.c; the end-to-end reader path is covered
  * by test_pubsub.c.
  */
 #include "sample_queue.h"

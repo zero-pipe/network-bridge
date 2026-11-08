@@ -6,7 +6,7 @@ add_executable(fuzz_envelope fuzz_envelope.c)
 target_include_directories(fuzz_envelope PRIVATE
     ${CMAKE_SOURCE_DIR}/src/transport/common
     ${CMAKE_SOURCE_DIR}/src/message
-    ${CMAKE_SOURCE_DIR}/src/core)
+    ${CMAKE_SOURCE_DIR}/src/runtime)
 target_link_libraries(fuzz_envelope PRIVATE nb)
 target_compile_options(fuzz_envelope PRIVATE -fsanitize=fuzzer,address,undefined)
 target_link_options(fuzz_envelope PRIVATE -fsanitize=fuzzer,address,undefined)
@@ -19,7 +19,7 @@ target_link_options(fuzz_metadata PRIVATE -fsanitize=fuzzer,address,undefined)
 add_executable(fuzz_framing fuzz_framing.c)
 target_include_directories(fuzz_framing PRIVATE
     ${CMAKE_SOURCE_DIR}/src/transport/common
-    ${CMAKE_SOURCE_DIR}/src/core)
+    ${CMAKE_SOURCE_DIR}/src/runtime)
 target_link_libraries(fuzz_framing PRIVATE nb)
 target_compile_options(fuzz_framing PRIVATE -fsanitize=fuzzer,address,undefined)
 target_link_options(fuzz_framing PRIVATE -fsanitize=fuzzer,address,undefined)

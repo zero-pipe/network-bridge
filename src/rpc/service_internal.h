@@ -14,8 +14,8 @@
 typedef struct nb_method {
     struct nb_method *next;
     char name[NB_METHOD_NAME_MAX];
-    handler_fn fn;
-    chunk_handler_fn stream_fn;
+    nb_handler_fn fn;
+    nb_chunk_handler_fn stream_fn;
     void *user;
     int owns_user;                         /* user 由框架分配（如 sync 桥接结构），销毁时释放 */
     int run_in_worker;                     /* 非 0 时 unary handler 调度到 node->handler_pool */
@@ -27,7 +27,7 @@ struct nb_service {
     nb_node_t *node;
     char name[NB_SERVICE_NAME_MAX];
     nb_method_t *methods;
-    service_interceptor_fn interceptor;
+    nb_service_interceptor_fn interceptor;
     void *interceptor_user;
     int removed; /* nb_service_destroy 后置位：不再匹配新请求，内存留到 node 销毁 */
 };
@@ -79,7 +79,7 @@ typedef struct nb_recv_stream {
     int closing;
     int canceled;
     int intercepted;
-    service_interceptor_fn interceptor;
+    nb_service_interceptor_fn interceptor;
     void *interceptor_user;
     nb_metadata_t *metadata; /* 请求 metadata 解码副本，按需分配；无则为 NULL */
     uint64_t deadline_ms;
@@ -115,5 +115,8 @@ void nb_worker_call_free(nb_node_t *node, nb_call_t *call);
 
 /* nb_reply.c：错误状态回包（路由/分配失败时直接发送，无 call 上下文）。 */
 void nb_service_send_status(nb_transport_t *transport, const nb_message_t *request, int status);
+
+/* service.c：客户端 timeout_ms 换算成绝对 deadline（接收时刻起算，0 = 无）。 */
+uint64_t nb_service_deadline_from_timeout(uint32_t timeout_ms);
 
 #endif /* NB_SERVICE_INTERNAL_H */

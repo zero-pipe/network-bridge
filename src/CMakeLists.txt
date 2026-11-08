@@ -30,28 +30,34 @@ install(TARGETS nb_base
 )
 
 set(NB_SOURCES
-    core/node.c
-    core/node_access.c
-    core/transport_factory.c
-    core/dispatch.c
-    core/service.c
-    core/pubsub.c
-    core/sample_queue.c
-    core/waitset.c
-    core/reply.c
-    core/proxy.c
-    core/loan.c
-    core/stub.c
-    core/stream.c
-    core/message_view.c
-    core/metadata.c
-    core/service_table.c
-    core/sync.c
-    core/pending.c
-    core/dedup.c
-    core/codec.c
-    core/payload.c
-    core/discovery_view.c
+    # shared runtime: node lifecycle, inbound dispatch, binding assembly
+    runtime/node.c
+    runtime/node_access.c
+    runtime/transport_factory.c
+    runtime/dispatch.c
+    runtime/codec.c
+    runtime/metadata.c
+    runtime/message_view.c
+    runtime/payload.c
+    # RPC spine
+    rpc/service.c
+    rpc/service_dispatch.c
+    rpc/service_stream.c
+    rpc/call_cancel.c
+    rpc/proxy.c
+    rpc/stub.c
+    rpc/reply.c
+    rpc/loan.c
+    rpc/stream.c
+    rpc/service_table.c
+    rpc/sync.c
+    rpc/pending.c
+    rpc/dedup.c
+    # pub/sub spine
+    pubsub/pubsub.c
+    pubsub/sample_queue.c
+    pubsub/waitset.c
+    pubsub/discovery_view.c
     utils/error.c
     utils/metrics.c
     utils/util.c
@@ -195,7 +201,9 @@ target_include_directories(nb
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/base
-        ${CMAKE_CURRENT_SOURCE_DIR}/core
+        ${CMAKE_CURRENT_SOURCE_DIR}/runtime
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc
+        ${CMAKE_CURRENT_SOURCE_DIR}/pubsub
         ${CMAKE_CURRENT_SOURCE_DIR}/utils
         ${CMAKE_CURRENT_SOURCE_DIR}/utils/json
         ${CMAKE_CURRENT_SOURCE_DIR}/message
