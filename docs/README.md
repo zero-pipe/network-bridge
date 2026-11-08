@@ -2,6 +2,8 @@
 
 - [SDK API](api/sdk-api.md)：对象模型、生命周期、线程模型与所有权。
 - [架构](architecture.md)：endpoint / message / QoS / mesh / provider 的分层。
+- [RPC 与发布/订阅的分层拆分](architecture-split.md)：为什么把"一层抽象集成所有
+  链路"改成"两条并列主干 + 共享底座"，以及分阶段的重构计划。
 - [架构总览](architecture-overview.html)：单页中文概览——ntk 运行时、服务发现、
   UDP/TCP/SHM、RTPS 与三方依赖，带分层和数据路径图。
 - [RTPS 协议手册](rtps-protocol.html)：用大白话讲报文格式、SPDP/SEDP 流程、QoS

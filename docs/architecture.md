@@ -22,6 +22,13 @@ provider
 依赖只能向下。传输 provider 看不到 service/proxy 概念，也不解析业务载荷；
 核心层从不依赖某个 scheme 私有的地址格式。
 
+> **正在拆分。** 上面的分层把 RPC 和发布/订阅放在同一个 `service/proxy` 面上，
+> 这会让 DDS 专属能力（topic/type、实例、历史、状态）以并集方式堆进应用接口。
+> 目标结构、硬规则和分阶段计划见
+> [RPC 与发布/订阅的分层拆分](architecture-split.md)。公共头已经按主干分成
+> `<nb/base.h>` / `<nb/rpc.h>` / `<nb/pubsub.h>`，`<nb/nb.h>` 只做并集；
+> 内部设施移到了 `include/nb/internal/` 且不再安装。
+
 ## Endpoint（端点）
 
 `nb_endpoint_t` 是唯一的地址表示，字段固定：
@@ -62,15 +69,17 @@ provider
 
 ## QoS（服务质量）
 
-`nb_qos_t`（`include/nb/qos.h`）对齐 DDS 策略；字段默认为 INHERIT，因此不会
-覆盖 provider 默认值。当前映射：
+`nb_ps_qos_t`（`include/nb/qos.h`）对齐 DDS 策略，属于发布/订阅面；字段默认
+为 INHERIT，因此不会覆盖 provider 默认值。点对点 RPC 链路（udp/tcp/shm）不
+读取这些策略。当前映射：
 
 - reliability / durability / history / depth
 - deadline / lifespan / latency budget
 - liveliness / lease duration / ownership / partition
 
 DDS provider 在创建 reader/writer 时应用 binding QoS。UDP/TCP/SHM 保留配置
-供应用读取，但不改变消息语义。没有显式 QoS 的 binding 继承 `transport.qos`。
+供应用读取，但不改变消息语义。没有显式 QoS 的 binding 继承
+`pubsub.default_qos`。
 
 ## 状态事件
 

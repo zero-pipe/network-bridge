@@ -7,6 +7,124 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Refactoring toward two semantic spines over one shared base (see
+  `docs/architecture-split.md`). Milestone M1: the public headers are grouped
+  as `<nb/base.h>` (model-neutral), `<nb/rpc.h>` and `<nb/pubsub.h>`; `<nb/nb.h>`
+  is now only their union and must not gain declarations of its own. Internal
+  facilities (`nb/poolset.h`, `nb/slotpool.h`, `nb/iobuf.h`,
+  `nb/poller_alloc.h`) moved to `include/nb/internal/` and are no longer
+  included by the umbrella header or installed. `contract.nb_headers` enforces
+  both rules. Source-compatible for applications that include `<nb/nb.h>` or the
+  individual public headers.
+- Milestone M2 (naming layer): the DDS policy set is now `nb_ps_qos_t` with
+  `nb_ps_qos_init/inherit/is_default/validate/validate_reason`, making it
+  explicit that these policies belong to the pub/sub spine and are never read
+  by point-to-point RPC links. `nb_qos_t` and the `nb_qos_*` functions remain as
+  source-compatible aliases (hidden by `NB_NO_DEPRECATED_API`). The config and
+  provider structs now spell the type as `nb_ps_qos_t`; layout is unchanged.
+- Milestone M3/M4: a first-class pub/sub spine next to RPC. `include/nb/pubsub.h`
+  now declares `nb_participant_t`, `nb_topic_t`, `nb_writer_t` and
+  `nb_reader_t`: participants attach to a topic-capable binding, topics carry a
+  name + advisory type name + QoS, writers publish samples, and readers are
+  either callbacks or a KEEP_LAST history drained with `nb_reader_read` /
+  `nb_reader_take`. Native topic names are used verbatim on the wire (no
+  `<Service>_<method>_evt` suffix); topic names may not contain '.', so the
+  receive path can route topics and RPC events without a per-message flag.
+  Providers gain an optional `register_topic(instance, topic, roles)` op with
+  `NB_PS_TOPIC_WRITER` / `NB_PS_TOPIC_READER` roles; the `dds`, `rtps` and
+  `shm` providers implement it, the provider ABI version is now 2, and a
+  provider built against an older header cannot carry the spine. Wait sets can
+  now observe reader histories with `nb_waitset_attach_reader` /
+  `nb_waitset_detach_reader` (a callback reader has no history and is rejected).
+  The legacy `nb_publisher_*` / `nb_subscriber_*` aliases still ride the RPC
+  path and keep working; `tests/test_pubsub.c` covers callback, history
+  read/take, wait-set attachment, the wire topic name, and both the RTPS and
+  Cyclone DDS backends.
+- The reader-history calls on a service method (`nb_service_add_queue_method`,
+  `nb_service_set_queue`, `nb_service_read`, `nb_service_take`,
+  `nb_service_queue_size`, `nb_service_queue_dropped`) moved from
+  `<nb/service.h>` to `<nb/service_history.h>`, included by `<nb/pubsub.h>` and
+  `<nb/nb.h>`. `<nb/rpc.h>` no longer pulls in `<nb/sample.h>` or declares the
+  reader-history APIs; `contract.nb_headers` now enforces that. Sources that
+  include `<nb/nb.h>` or `<nb/pubsub.h>` are unaffected.
+- The provider SPI is split by role. `nb_transport_provider_ops_t` keeps the
+  lifecycle (`create/start/stop/destroy`) and the optional shared
+  `metrics_read`, and adds two role interfaces: `rpc` (`send`, `reply`, and the
+  optional `loan/send_loan/release_loan`) and `ps` (`register_topic` required,
+  `register_method/unregister_method` for the RPC-over-PS bridge, optional
+  `discovery_read`). A provider must implement at least one complete role; the
+  core asks for the role it needs and returns `NB_ERR_NOT_SUPPORTED` when it is
+  absent. The `dds`, `rtps` and `shm` providers implement both roles. This is a
+  breaking change to the ops layout: `NB_TRANSPORT_PROVIDER_ABI_VERSION` is now
+  3 and a provider must rebuild against the matching header.
+- The two DDS-shaped providers now share their route/topic naming and envelope
+  wrapping through `src/transport/common/dds_bridge.c` (`nb_bridge_topic_key`,
+  `nb_bridge_route_topics`, `nb_bridge_frame_size`, `nb_bridge_frame_encode`)
+  instead of each carrying its own copy. No wire change.
+- The configuration is split by spine. `nb_node_transport_config_t` is replaced
+  by `nb_rpc_config_t` (mode, link tuning, discovery, routes, peers), and
+  `nb_node_config_t` is now `runtime + rpc + bindings + pubsub + metrics + log`.
+  Bindings moved to the top level because both spines share one transport
+  instance; each binding declares `roles` (`"rpc"` / `"ps"`, absent = provider
+  default) and carries `ps_qos` instead of `qos`. `pubsub.default_qos` is the
+  inherited pub/sub default. JSON moves `mode`, `transport` tuning, `discovery`
+  and `routes` under `rpc`, and `transport.bindings` to the top-level
+  `bindings`. A role the transport cannot implement fails node creation with
+  `NB_ERR_NOT_SUPPORTED`. `docs/config.schema.json` and
+  `docs/api/config.md` were rewritten; no legacy keys are accepted.
+- Examples were reduced from 15 directories to four that mirror common RPC and
+  DDS habits: `01_rpc` (unary sync + async, server/client), `02_rpc_streaming`
+  (client streaming in one process), `03_dds_pubsub` (topic/writer/reader with
+  callback and history readers over `dds`, `rtps` or `shm`) and `04_config`
+  (JSON-configured server/client). The build lists, install rules and
+  `docs/examples.md` were updated; the old numbered examples were removed.
+- Source layout now mirrors the two spines. The former `src/core/` grab bag is
+  split into `src/runtime/` (node, inbound dispatch, binding assembly, shared
+  message helpers), `src/rpc/` (service, proxy, stub, pending, dedup, reply,
+  stream, sync, loan, service table, cancel table) and `src/pubsub/` (pubsub
+  objects, reader history, wait sets, discovery view). `service.c` was split
+  into registration (`service.c`), request execution (`service_dispatch.c`),
+  server streams (`service_stream.c`) and the cancel table (`call_cancel.c`).
+  The remaining pre-0.2 spellings were deleted: the `response_fn` /
+  `handler_fn` / `service_interceptor_fn` typedefs, the `NB_MODE_*` /
+  `NB_INTRA_*` / `NB_TRANSPORT_*` / `NB_STREAM_*` enum aliases and the
+  `NB_METRIC_*` aliases. Two unused discovery helpers were removed.
+- Configuration files were redesigned around how they are used: `threads`,
+  `limits`, `rpc` (`mode`, `listen`, `udp`, `discovery`, `routes`), `pubsub`
+  (`backends`, `default_qos`), `metrics` and `log`. Endpoints are plain URIs
+  under `rpc.listen` / `pubsub.backends` instead of the previous abstract
+  binding objects, and durations accept `"250ms"` / `"2s"`. The same endpoint
+  in both lists is one transport serving both spines. `config.c` was split into
+  parsing (`config.c`) and defaults/validation (`config_defaults.c`); the
+  unused `codec_json` helper was removed.
+- Provider options are split by role: the pub/sub QoS and the DDS status
+  callback now live in `nb_transport_provider_options_t.ps`
+  (`nb_ps_backend_options_t`), which is NULL for an RPC-only binding. The
+  provider ABI version is now 4.
+- `nb_message_t.sample` became `nb_message_t.ps_sample`, a callback-scoped
+  pointer, so RPC messages no longer embed DDS instance/view state.
+
+### Removed
+
+- The pre-spine pub/sub spelling is gone. Removed headers: `<nb/publish.h>`,
+  `<nb/subscribe.h>` and `<nb/service_history.h>`. Removed APIs:
+  `nb_publisher_*`, `nb_subscriber_*`,
+  `nb_service_add_queue_method` / `nb_service_set_queue` / `nb_service_read` /
+  `nb_service_take` / `nb_service_queue_size` / `nb_service_queue_dropped`,
+  `nb_waitset_attach` / `nb_waitset_detach` (service/method), and the
+  `nb_qos_t` / `nb_qos_*` aliases. Use `nb_participant_t` / `nb_topic_t` /
+  `nb_writer_t` / `nb_reader_t`, `nb_reader_read` / `nb_reader_take`,
+  `nb_waitset_attach_reader`, `nb_ps_qos_t` and `nb_ps_qos_*` instead.
+  Zero-copy publish moved to the RPC spine as `nb_proxy_loan` /
+  `nb_proxy_publish_loan` / `nb_proxy_loan_release` in `<nb/proxy.h>`, and
+  `nb_reader_dropped` was added for the history drop counter. The deprecated
+  `NB_QOS_BEST_EFFORT` / `NB_QOS_RELIABLE` / `NB_QOS_VOLATILE` /
+  `NB_QOS_TRANSIENT_LOCAL` / `NB_QOS_KEEP_LAST` / `NB_QOS_KEEP_ALL` enum
+  spellings are gone; use the `NB_QOS_RELIABILITY_*`, `NB_QOS_DURABILITY_*` and
+  `NB_QOS_HISTORY_*` names.
+
 ### Added
 
 - RTPS standard-alignment work: the receive path now parses INFO_SRC and
