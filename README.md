@@ -88,10 +88,9 @@ int main(void)
 | [架构](docs/architecture.md) | endpoint、message、QoS、mesh 与 provider 分层 |
 | [配置](docs/api/config.md) | JSON 字段、默认值与校验 |
 | [错误码](docs/api/error-codes.md) | 稳定数值、名称、描述与重试语义 |
+| [RTPS 公共接口](docs/rtps-api.md) | 内建 RTPS 引擎的对象模型、QoS 与读写语义 |
 | [示例](docs/examples.md) | 按场景索引 |
-| [测试](docs/testing.md) | unit / e2e / perf / stability / fuzz 门禁 |
-| [性能](docs/performance.md) | 延迟测量方法与尖峰分析 |
-| [RTPS 标准对照](docs/rtps-standard-alignment.md) | 对照 RTPS 2.5 的实现程度与 Cyclone/Fast DDS 互通评估 |
+| [测试](docs/testing.md) | unit / e2e / perf / stability 门禁 |
 
 ### 头文件
 
@@ -160,7 +159,6 @@ NB_BUILD_TOOLS       构建压测客户端和基准服务端（默认 ON）
 NB_BUILD_EXAMPLES    构建示例（默认 ON）
 NB_BUILD_GTESTS      构建 GoogleTest 模块测试（默认 OFF）
 NB_BUILD_BENCHMARKS  构建 Google Benchmark 微基准（默认 OFF）
-NB_BUILD_FUZZERS     构建 libFuzzer 目标（默认 OFF，需要 Clang）
 NB_ENABLE_DDS        启用 Cyclone DDS provider（默认 ON，从 3rdparty/cyclonedds 构建）
 NB_SANITIZE          address | undefined | thread | address,undefined
 ```
@@ -202,8 +200,7 @@ python3 tools/gate.py all
 ## 性能
 
 吞吐、延迟和尖峰场景由 `tools/gate.py perf` 和 `tools/gate.py stability`
-驱动，底层使用 `tools/bench_server` 和 `tools/loadgen`。测量方法和已记录的
-结果见 [docs/performance.md](docs/performance.md)。
+驱动，底层使用 `tools/bench_server` 和 `tools/loadgen`。
 
 ## 许可证
 

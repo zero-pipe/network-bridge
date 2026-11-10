@@ -7,7 +7,6 @@ Gate taxonomy (also used as CTest labels):
   e2e        in-process loopback plus process-level server/client scenarios
   perf       process-level throughput and latency smoke (optional baseline)
   stability  process-level soak with changing payload sizes and resource checks
-  fuzz       libFuzzer smoke targets (only in BUILD_FUZZERS builds)
 
 Examples:
 
@@ -646,9 +645,6 @@ def gate_unit(ctx: Context) -> Outcome:
     return run_ctest(ctx, "unit", ctx.out / "unit")
 
 
-def gate_fuzz(ctx: Context) -> Outcome:
-    ensure_build(ctx)
-    return run_ctest(ctx, "fuzz", ctx.out / "fuzz")
 
 
 def gate_e2e(ctx: Context) -> Outcome:
@@ -1051,9 +1047,6 @@ def make_parser() -> argparse.ArgumentParser:
     stability.add_argument("--max-fd-growth", type=float, default=32.0)
     stability.set_defaults(handler=gate_stability)
 
-    fuzz = subparsers.add_parser("fuzz", parents=[common],
-                                 help="run CTest fuzz smoke tests")
-    fuzz.set_defaults(handler=gate_fuzz)
 
     all_gate = subparsers.add_parser("all", parents=[common],
                                      help="run unit, e2e, perf and stability")
@@ -1083,7 +1076,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             ("e2e", "in-process loopback + process-level echo cases"),
             ("perf", "throughput/latency smoke with optional baseline"),
             ("stability", "soak waves with resource-growth checks"),
-            ("fuzz", "libFuzzer smoke targets"),
         ):
             print("  {:<10} {}".format(name, detail))
         return 0

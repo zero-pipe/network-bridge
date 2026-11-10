@@ -1,8 +1,7 @@
 # Fast DDS 互通验证夹具
 
 下面的源文件用于手工验证本仓库的 RTPS 实现与 Fast DDS 的互通，**不参与常规
-CMake 构建**。验证结果记录在
-[`docs/rtps-standard-alignment.md`](../../docs/rtps-standard-alignment.md) 第 6 节。
+CMake 构建**。验证结果见下表。
 
 - `rtps_interop.c`：本仓库侧，使用公共 `rtps_*` API，topic
   `hello_world_topic`、type `HelloWorld`，CDR1 载荷。
@@ -154,9 +153,7 @@ Fast DDS 2.5.0 + fastddsgen 2.1，和 3.x 源码树有几处差异，验证时�
 
 2026-11-06 在 Ubuntu 22.04 + 发行版 Fast DDS 2.5.0 上按上表复验，结果全部
 一致（含 1 KB / 200 KB、TRANSIENT_LOCAL 晚加入、重启、多 participant、
-标准端口）；同时发现并修复了本仓库可靠 reader 在大样本上的首包竞态，
-细节见 [`docs/rtps-standard-alignment.md`](../../docs/rtps-standard-alignment.md)
-第 6.5 节。
+标准端口）；同时发现并修复了本仓库可靠 reader 在大样本上的首包竞态。
 
 注意：Fast DDS 默认 DataWriter 为 RELIABLE，但在 SEDP 中省略
 `PID_RELIABILITY`；按 DDS/RTPS 默认值这会被理解为 BEST_EFFORT，因此本仓库的

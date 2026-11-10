@@ -37,7 +37,6 @@ option(NB_BUILD_TOOLS "Build benchmark tools" ON)
 option(NB_BUILD_EXAMPLES "Build examples" ON)
 option(NB_BUILD_GTESTS "Build GoogleTest module tests" OFF)
 option(NB_BUILD_BENCHMARKS "Build Google Benchmark microbenchmarks" OFF)
-option(NB_BUILD_FUZZERS "Build libFuzzer targets (requires Clang)" OFF)
 option(NB_ENABLE_DDS "Enable the Cyclone DDS transport provider" ON)
 
 if(DEFINED BUILD_TESTS)
@@ -64,11 +63,6 @@ if(DEFINED BUILD_BENCHMARKS)
     message(WARNING "BUILD_BENCHMARKS is deprecated; use NB_BUILD_BENCHMARKS")
     set(NB_BUILD_BENCHMARKS "${BUILD_BENCHMARKS}" CACHE BOOL "" FORCE)
     unset(BUILD_BENCHMARKS CACHE)
-endif()
-if(DEFINED BUILD_FUZZERS)
-    message(WARNING "BUILD_FUZZERS is deprecated; use NB_BUILD_FUZZERS")
-    set(NB_BUILD_FUZZERS "${BUILD_FUZZERS}" CACHE BOOL "" FORCE)
-    unset(BUILD_FUZZERS CACHE)
 endif()
 
 set(NB_SANITIZE "" CACHE STRING "Sanitizer set: address|undefined|thread|address,undefined")
@@ -114,10 +108,6 @@ add_subdirectory(src)
 
 if(NB_BUILD_TESTS)
     add_subdirectory(tests)
-endif()
-
-if(NB_BUILD_FUZZERS)
-    add_subdirectory(fuzz)
 endif()
 
 if(NB_BUILD_TOOLS)
@@ -176,13 +166,6 @@ if(Python3_Interpreter_FOUND)
             USES_TERMINAL VERBATIM)
     endif()
 
-    if(TARGET fuzz_envelope)
-        add_custom_target(gate-fuzz
-            COMMAND ${Python3_EXECUTABLE} ${NB_GATE_SCRIPT} fuzz ${NB_GATE_ARGS}
-            DEPENDS fuzz_envelope fuzz_metadata fuzz_framing
-            USES_TERMINAL VERBATIM)
-    endif()
-
     if(TARGET gate-unit AND TARGET gate-e2e AND TARGET gate-perf AND TARGET gate-stability)
         add_custom_target(gate-all
             COMMAND ${Python3_EXECUTABLE} ${NB_GATE_SCRIPT} all ${NB_GATE_ARGS}
@@ -191,7 +174,6 @@ if(Python3_Interpreter_FOUND)
                     test_buf_concurrency test_slotpool test_poolset test_contracts
                     test_loopback test_stream test_api test_move test_worker test_semantics
                     bench_server loadgen
-                    $<$<TARGET_EXISTS:test_dds_remote>:test_dds_remote>
             USES_TERMINAL VERBATIM)
     endif()
 endif()

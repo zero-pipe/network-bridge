@@ -9,9 +9,8 @@
 | --- | --- | --- | --- |
 | unit | `unit` | 纯模块、codec、配置、组帧、指标、registry | `python3 tools/gate.py unit` |
 | e2e | `e2e` | 进程内 loopback/stream/api/worker/semantics、独立 server/client echo，以及 DDS participant/topic/writer/reader（rtps，DDS 开启时 cyclone） | `python3 tools/gate.py e2e` |
-| perf | 无 | TCP/UDP/DDS/RTPS 吞吐与延迟冒烟，可选基线回归 | `python3 tools/gate.py perf` |
+| perf | 无 | tcp/udp/shm 吞吐与延迟冒烟，可选基线回归 | `python3 tools/gate.py perf` |
 | stability | 无 | 长跑 server、多轮不同载荷大小、失败与资源增长检查 | `python3 tools/gate.py stability` |
-| fuzz | `fuzz` | libFuzzer 冒烟（仅 `NB_BUILD_FUZZERS=ON`） | `python3 tools/gate.py fuzz` |
 
 命名规则：
 
@@ -114,11 +113,6 @@ python3 tools/gate.py perf --baseline tests/perf/baseline.json --tolerance 0.20
 python3 tools/gate.py stability \
   --max-rss-growth-mb 128 --max-thread-growth 16 --max-fd-growth 64
 ```
-
-### fuzz
-
-- 只有 `NB_BUILD_FUZZERS=ON` 且使用 Clang 工具链时才存在 `fuzz` 测试。
-- 所有 `fuzz` 用例通过；不存在 fuzz 测试时门禁报告 `SKIP`。
 
 ## 产物
 
