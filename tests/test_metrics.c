@@ -1,6 +1,6 @@
 #include "metric_macros.h"
 
-#include <nb/metrics.h>
+#include <nb/base/metrics.h>
 
 #include <stdint.h>
 #include <stdio.h>

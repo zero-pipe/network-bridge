@@ -14,14 +14,14 @@
  * 访问用每分片一把锁，热路径无全局争用。
  */
 
-#include <nb/types.h>
+#include <nb/rpc/types.h>
 
 #include <ntk.h>
 
 #include <stddef.h>
 #include <stdint.h>
 
-#include <nb/message.h>
+#include <nb/rpc/message.h>
 #include "transport_internal.h"
 
 #ifdef __cplusplus

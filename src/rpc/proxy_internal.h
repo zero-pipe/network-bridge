@@ -3,7 +3,7 @@
 
 /* 客户端内部结构：proxy、stub、流式会话与调用上下文。 */
 
-#include <nb/proxy.h>
+#include <nb/rpc/proxy.h>
 
 #include <stddef.h>
 #include <stdint.h>

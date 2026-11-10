@@ -2,32 +2,23 @@
 #define NB_BASE_H
 
 /*
- * Model-neutral base of the SDK.
+ * Model-neutral base of the SDK: buffers/allocators, errors, logging, metrics,
+ * opaque payloads and the API version.
  *
- * Everything reachable from this header is shared by both spines:
+ * Everything here is shared by both spines:
  *
- *   <nb/rpc.h>     request/response calls (node, service, proxy, call)
- *   <nb/pubsub.h>  topic publish/subscribe (participant, topic, writer, reader)
+ *   <nb/rpc.h>  request/response calls (node, service, proxy, call)
+ *   <nb/dds.h>  topics, writers/readers, DDS QoS and status
  *
- * This header deliberately contains no call-model or topic-model declaration:
- * no node, service, proxy, QoS, sample, status or discovery-view type. If a
- * type is meaningful to only one spine it belongs in that spine's header, not
- * here. Keeping the base neutral is what stops <nb/nb.h> from growing as a
- * union of two unrelated APIs; see docs/architecture-split.md.
- *
- * Contents: error codes, base types, endpoints, buffers and allocators,
- * logging, metrics, payload views, and the provider-SPI message shape.
+ * Call-model and topic-model declarations deliberately do not appear here.
  */
 
-#include <nb/alloc.h>
-#include <nb/buf.h>
-#include <nb/codec.h>
-#include <nb/endpoint.h>
-#include <nb/error.h>
-#include <nb/log.h>
-#include <nb/message.h>
-#include <nb/message_view.h>
-#include <nb/metrics.h>
-#include <nb/types.h>
+#include <nb/base/alloc.h>
+#include <nb/base/buf.h>
+#include <nb/base/error.h>
+#include <nb/base/log.h>
+#include <nb/base/metrics.h>
+#include <nb/base/sample_info.h>
+#include <nb/base/types.h>
 
 #endif /* NB_BASE_H */

@@ -1,7 +1,7 @@
-#include <nb/alloc.h>
+#include <nb/base/alloc.h>
 #include "atomic.h"
 
-#include <nb/error.h>
+#include <nb/base/error.h>
 
 #include <stdlib.h>
 #include <string.h>

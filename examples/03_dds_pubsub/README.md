@@ -1,23 +1,25 @@
 # 03 DDS 发布/订阅
 
-和常见 DDS 应用一样的对象模型：`participant → topic → writer / reader`。
+DDS 是独立的通信面：`participant → topic → writer / reader`，不依赖 RPC node、
+binding、路由或 ntk_discovery。
 
 ```bash
-./example_03_dds_pubsub          # dds://0，Cyclone DDS
-./example_03_dds_pubsub rtps     # rtps://0，内建 RTPS 引擎
+./example_03_dds_pubsub          # 默认 rtps 后端（内建 RTPS 引擎）
+./example_03_dds_pubsub cyclone  # Cyclone DDS 后端（需要 NB_ENABLE_DDS=ON）
 ```
 
 要点：
 
-- `nb_topic_create(participant, "chat", "text", qos, &topic)`：topic 名就是
-  线上名字，不会被加上任何前缀或后缀。
-- reader 有两种：回调（`on_data` 非空）和 history（`on_data` 为空、depth
-  非 0，用 `nb_reader_read` / `nb_reader_take` 取）。
-- QoS 写在 binding 的 `ps_qos` 上（或作为 `pubsub.default_qos` 让所有 binding
-  继承）；TCP/UDP 的 RPC 链路不读取这些策略。
-- 同一个 topic 可以同时有多个 reader；provider 只建一条底层订阅，核心按
-  注册的 reader 分发。
-- 换成 `shm` backend 时把 binding 改成 `shm://<channel>:<id>`，IPC 零拷贝；
-  `shm` 目前只在 Linux 上构建。
-- 想让两个进程互通：双方使用相同的 domain 和 topic 名即可，Cyclone DDS /
-  RTPS 的发现会自动匹配；`shm` 则需要同一 channel 且 node id 不同。
+- `nb_dds_participant_create({backend, domain, partition, prefix, default_qos})`
+  创建 domain；后端自己做 SPDP/SEDP 发现。
+- `nb_dds_topic_create(participant, "chat", "text", qos, &topic)`：`chat` 是应用
+  名，线上名会带上 participant 的 `prefix`（本示例为 `example/chat`）。
+- reader 有两种：回调（`on_data` 非空）和 history（`on_data` 为空，用
+  `nb_dds_reader_read` / `nb_dds_reader_take` 取，`take` 后调用
+  `nb_dds_sample_release`）。
+- QoS 写在 participant 默认值、topic、writer/reader 上，逐级继承；两个后端使用
+  同一套 DDS 默认值。
+- 同一个 participant 上的 writer/reader 由框架做进程内投递，后端只负责远端；
+  两个进程互通时使用相同的 domain、partition 和 topic 名即可。
+- `backend` 用枚举选择：`NB_DDS_BACKEND_RTPS` / `NB_DDS_BACKEND_CYCLONE`；
+  Cyclone 未编译时创建 participant 返回 `NB_ERR_NOT_SUPPORTED`。

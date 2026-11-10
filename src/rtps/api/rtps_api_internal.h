@@ -20,8 +20,8 @@
 
 #include <rtps/rtps.h>
 
-#include <nb/error.h>
-#include <nb/message.h>
+#include <nb/base/error.h>
+#include <nb/base/sample_info.h>
 
 #include <ntk.h>
 

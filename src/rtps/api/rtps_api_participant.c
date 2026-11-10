@@ -275,7 +275,7 @@ int rtps_participant_set_status_callback(rtps_participant_t *participant,
 
 /* ---- discovery and metrics --------------------------------------------- */
 
-static void copy_discovery(const nb_discovery_sample_t *src,
+static void copy_discovery(const nb_dds_discovery_sample_t *src,
                            rtps_discovery_sample_t *dst)
 {
     memset(dst, 0, sizeof(*dst));
@@ -307,14 +307,14 @@ size_t rtps_participant_discovery_read(rtps_participant_t *participant,
                                        rtps_discovery_sample_t *out,
                                        size_t max)
 {
-    nb_discovery_sample_t *tmp;
+    nb_dds_discovery_sample_t *tmp;
     size_t count;
     size_t i;
 
     if (!participant || !out || max == 0) {
         return 0;
     }
-    tmp = (nb_discovery_sample_t *)calloc(max, sizeof(*tmp));
+    tmp = (nb_dds_discovery_sample_t *)calloc(max, sizeof(*tmp));
     if (!tmp) {
         return 0;
     }

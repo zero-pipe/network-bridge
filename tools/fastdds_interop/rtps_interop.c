@@ -9,7 +9,7 @@
  * CDR body: u32 index, u32 string-length (including NUL), chars, NUL, pad.
  */
 #include <rtps/rtps.h>
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 #include <stdio.h>
 #include <stdlib.h>

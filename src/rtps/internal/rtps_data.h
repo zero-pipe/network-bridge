@@ -23,8 +23,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <nb/error.h>
-#include <nb/message.h>
+#include <nb/base/error.h>
+#include <nb/base/sample_info.h>
 
 #define NB_RTPS_DDS_MESSAGE_TOPIC "dds/Message"
 #define NB_RTPS_DDS_MESSAGE_TYPE "dds::Message"

@@ -1,12 +1,12 @@
 /* Streaming RPC：分片上传请求，服务端逐 chunk 回调并在 LAST 回复。 */
-#include <nb/proxy.h>
-#include <nb/node.h>
-#include <nb/service.h>
+#include <nb/rpc/proxy.h>
+#include <nb/rpc/node.h>
+#include <nb/rpc/service.h>
 #include <platform.h>
 #include <thread/sem.h>
 
 #define NB_LOG_TAG "test"
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 #include <stdio.h>
 #include <string.h>

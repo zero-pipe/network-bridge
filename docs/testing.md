@@ -8,7 +8,7 @@
 | 门禁 | CTest 标签 | 覆盖范围 | 命令 |
 | --- | --- | --- | --- |
 | unit | `unit` | 纯模块、codec、配置、组帧、指标、registry | `python3 tools/gate.py unit` |
-| e2e | `e2e` | 进程内 loopback/stream/api/worker/semantics、独立 server/client echo，以及独立的 DDS 发布者/Cyclone 订阅者 | `python3 tools/gate.py e2e` |
+| e2e | `e2e` | 进程内 loopback/stream/api/worker/semantics、独立 server/client echo，以及 DDS participant/topic/writer/reader（rtps，DDS 开启时 cyclone） | `python3 tools/gate.py e2e` |
 | perf | 无 | TCP/UDP/DDS/RTPS 吞吐与延迟冒烟，可选基线回归 | `python3 tools/gate.py perf` |
 | stability | 无 | 长跑 server、多轮不同载荷大小、失败与资源增长检查 | `python3 tools/gate.py stability` |
 | fuzz | `fuzz` | libFuzzer 冒烟（仅 `NB_BUILD_FUZZERS=ON`） | `python3 tools/gate.py fuzz` |
@@ -211,13 +211,3 @@ ctest -C Debug -L e2e
   `loadgen_command`、`run_scenario` 和 `evaluate_result`。
 - 不要再新增独立 shell 脚本，否则产物路径和失败标准又会分散。
 
-## CI
-
-`.github/workflows/ci.yml` 运行三个 job：
-
-- `linux`：GCC、Release，构建后运行 `ctest -L unit` 和 `ctest -L e2e`。
-- `windows`：MSVC、Debug，构建后运行 `ctest -L unit`。
-- `sanitizers`：GCC 加 `NB_SANITIZE=address,undefined`，关闭 DDS，运行 unit
-  和 e2e。
-
-CI 的性能数字不是跨机器的硬阈值；CI 只验证流水线能正常跑完、不失败、不崩溃。

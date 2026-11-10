@@ -1,29 +1,32 @@
 # Network Bridge
 
-[![CI](https://github.com/zero-pipe/network_bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/zero-pipe/network_bridge/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-Network Bridge 是一个面向异构网络的 C99 通信框架。它在可插拔的传输 provider
-之上提供统一的 `node / service / proxy / payload` 模型，并在其上叠加 RPC、
-消息、路由、服务发现和流式能力。传输、序列化和寻址都是可替换的实现细节。
+Network Bridge 是一个面向异构网络的 C99 通信框架，由**两条并列的语义主干 + 一个共享底座**组成：
 
-内建传输：UDP、TCP、POSIX 共享内存（SHM）、Cyclone DDS 和内置 RTPS。
+- **RPC 主干**：`node / service / proxy`，参考 brpc/gRPC 的调用模型；底层传输可选
+  **tcp / udp / shm**，控制面用静态路由或广播式 `ntk_discovery`。
+- **DDS 主干**：`participant / topic / writer / reader`，参考 ROS 2 的对象模型；
+  `domain / partition / prefix / QoS` 是一等公民，后端可选 **内建 RTPS** 或
+  **Cyclone DDS**，不需要 RPC node 或广播发现。
+- **共享底座**：缓冲区/分配器、日志、指标、错误码、payload 视图和 JSON 读取器。
+
+两条主干在目录、库目标、公共头和配置上都相互独立；应用可以只用其中一条，也可以
+同时使用。
 
 ## 特性
 
-- **异构传输。** UDP、TCP、SHM、Cyclone DDS 和 RTPS 共用一套 provider 接口；
-  自定义传输无需改动核心代码即可接入。
-- **三种调用形式。** `nb_proxy_call_async`、`nb_proxy_call_sync` 和
-  `nb_proxy_call_event`，并支持客户端流、服务端流和双向流。
-- **默认不额外起线程。** 回调在 ntk poller 线程上执行；阻塞 handler 可以显式
+- **两条独立主干。** RPC（tcp/udp/shm）与 DDS（rtps/cyclone）不共享 node、
+  binding、发现或 QoS 模型，各自有独立的目录与静态库（`nb_rpc` / `nb_dds`）。
+- **RPC 调用形态。** `nb_proxy_call_async`、`nb_proxy_call_sync`、
+  `nb_proxy_call_event`，以及客户端流、服务端流和双向流。
+- **DDS 原生语义。** topic 名原样上线（可加 `prefix`），domain/partition/QoS
+  逐级继承；样本不再套 RPC 信封。
+- **默认不额外起线程。** RPC 回调在 ntk poller 线程上执行；阻塞 handler 可以显式
   选择 `WORKER` 线程池或调用方提供的 `EXECUTOR`。
-- **可组合的传输能力。** UDP 带分片、NACK/RTX 和 RTCP 反馈；TCP 使用长度前缀
+- **可组合的 RPC 传输。** UDP 带分片、NACK/RTX 和 RTCP 反馈；TCP 使用长度前缀
   分帧；SHM 支持零拷贝 loan/borrow。
-- **统一的 endpoint 模型。** 路由、发现、registry 和 provider 共享归一化 URI，
-  因此 SHM channel 和 DDS domain 可以端到端保留。
-- **载荷保持不透明。** 框架只转发字节和 `encoding` 标签；序列化通过
-  `nb_codec_t` 扩展。
-- **统一路由。** 静态路由和 mesh 发现写入同一张路由表。
+- **统一的 endpoint 模型。** RPC 路由、发现和 provider 共享归一化 URI。
 - **可观测性。** 指标、延迟分位数和运行期日志开关。
 - **稳定的错误码。** 数值、名称、描述、可重试标记，以及保留给应用错误的区间。
 
@@ -94,39 +97,42 @@ int main(void)
 
 | 头文件 | 使用场景 |
 | --- | --- |
-| `<nb/nb.h>` | 需要完整 API |
-| `<nb/node.h>` | node、调度、发现、路由、指标 |
-| `<nb/service.h>` | service、handler、reply、message view |
-| `<nb/proxy.h>` | proxy、异步/同步/事件/流式调用 |
-| `<nb/pubsub.h>` | participant、topic、writer、reader、QoS、status |
-| `<nb/endpoint.h>` | endpoint 与自定义传输 provider（`<nb/transport_provider.h>`） |
-| `<nb/codec.h>` | 载荷 codec、message view 和 service table |
-| `<nb/config.h>` | JSON 配置 |
+| `<nb/nb.h>` | 完整 API（base + rpc + dds） |
+| `<nb/base.h>` | 模型无关的底座：payload、错误、日志、指标、缓冲区 |
+| `<nb/rpc.h>` | RPC：node、service、proxy、stream、endpoint |
+| `<nb/dds.h>` | DDS：participant、topic、writer、reader、QoS、status |
+| `<nb/rpc/config.h>` | RPC JSON 配置 |
+| `<nb/dds/config.h>` | DDS JSON 配置 |
+| `<nb/rpc/transport_provider.h>` | 自定义 RPC 传输 provider |
+| `<nb/rtps/rtps.h>` | 内建 RTPS 引擎的独立公共 API |
 
-公共头文件只存在于 `<nb/...>` 下：`include/nb/` 是公共头文件的唯一位置，
-因此构建时的 include 路径和安装后的布局完全一致。
+公共头文件只存在于 `<nb/...>` 下，并按 `base/`、`rpc/`、`dds/` 分目录。
 
 ## 目录结构
 
 ```text
-include/nb/   公共 API（总入口：<nb/nb.h>）
-src/base/     无外部依赖的基础设施（nb_base 库）
-src/runtime/  两条主干共享的运行时：node、入站分发、binding 装配
-src/rpc/      RPC 主干：service、proxy、stub、stream、pending、重传
-src/pubsub/   发布/订阅主干：participant/topic/writer/reader、history、waitset
-src/message/  线上组帧与信封
-src/transport/ 通用组帧以及 udp / tcp / shm / dds 驱动
-src/router/   静态路由与 mesh 解析
-src/registry/ 本地服务注册表
-src/discovery/ 服务发现
-src/config/   JSON 配置模型与默认值
-src/utils/    日志、错误、指标、endpoint、JSON 编解码
-examples/     按场景分组的可运行程序
-docs/         API、配置、错误和测试文档
-tests/        单元与端到端测试
-tools/        质量门禁、压测客户端和基准服务端
-3rdparty/     ntk、elog、cJSON、uthash、Cyclone DDS（源码树）
+include/nb/
+  base.h rpc.h dds.h nb.h   三个聚合头与总入口
+  base/                     无模型依赖：alloc/buf/error/log/metrics/types
+  rpc/                      node/service/proxy/message/endpoint/config/transport
+  dds/                      participant/topic/writer/reader/qos/status/backend
+  internal/                 不安装
+include/rtps/                RTPS 引擎独立公共 API（不含 nb 头）
+src/base/                    共享基础设施 + JSON 读取器
+src/rpc/                     RPC 主干：runtime/service/proxy/message/router/
+                             registry/discovery/transport(tcp,udp,shm)/config
+src/dds/                     DDS 主干：participant/topic/writer/reader/history/
+                             waitset/qos/backend(rtps,cyclone)/config
+src/rtps/                    RTPS 协议引擎与 rtps_* API
+examples/                    01_rpc、02_rpc_streaming、03_dds_pubsub、04_config
+docs/                        API、配置、错误和测试文档
+tests/                       单元与端到端测试
+3rdparty/                    ntk、elog、cJSON、uthash、Cyclone DDS
 ```
+
+库目标：`nb_base`、`nb_json`、`nb_log`、`ntk_discovery`、`rtps_core`、`rtps`、
+`nb_rpc`、`nb_dds`，以及链接两条主干的便利目标 `nb`。`nb_rpc` 不链接
+`rtps`/`ddsc`，`nb_dds` 不链接 `ntk_discovery`。
 
 ## 构建
 
@@ -162,8 +168,7 @@ NB_SANITIZE          address | undefined | thread | address,undefined
 不带前缀的旧名称（`BUILD_TESTS`、`ZERO_RPC_SANITIZE` 等）仍然接受，但会输出
 弃用警告。
 
-库目标是 `nb`（别名 `nb::nb`）。历史目标名 `rpc` 仍保留为别名，供尚未迁移的
-下游项目使用。
+库目标是 `nb`（别名 `nb::nb`），也可以按主干链接 `nb_rpc` / `nb_dds`。
 
 ## 测试与质量门禁
 
@@ -194,8 +199,6 @@ python3 tools/gate.py all
   `nb_response_release` 释放。
 - 框架状态码和应用状态码位于不同字段，不要混用。
 
-完整约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
 ## 性能
 
 吞吐、延迟和尖峰场景由 `tools/gate.py perf` 和 `tools/gate.py stability`
@@ -205,5 +208,3 @@ python3 tools/gate.py all
 ## 许可证
 
 Apache License 2.0。见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。
-
-安全问题报告见 [SECURITY.md](SECURITY.md)。

@@ -16,9 +16,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <nb/error.h>
-#include <nb/discovery_view.h>
-#include <nb/metrics.h>
+#include <nb/base/error.h>
+#include <nb/dds/discovery_types.h>
+#include <nb/base/metrics.h>
 
 #include "rtps_data.h"
 #include "rtps_sedp.h"
@@ -284,14 +284,14 @@ size_t nb_rtps_participant_matched_count(const nb_rtps_participant_t *participan
 
 /*
  * Snapshot one of the DDS built-in topics (the DCPS* views). `topic` is an
- * nb_builtin_topic_t value; up to max entries are written to out and the
+ * nb_dds_builtin_topic_t value; up to max entries are written to out and the
  * number written is returned. Topics are derived from the participant's
  * local and remote endpoints, so DCPSTopic reports the discovered
  * (topic, type) pairs with their writer/reader counts.
  */
 size_t nb_rtps_participant_discovery_read(nb_rtps_participant_t *participant,
                                           int topic,
-                                          nb_discovery_sample_t *out,
+                                          nb_dds_discovery_sample_t *out,
                                           size_t max);
 
 /* RTPS over TCP. */

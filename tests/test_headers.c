@@ -6,16 +6,23 @@
 #include <nb/nb.h>
 #include <nb/base.h>
 #include <nb/rpc.h>
-#include <nb/pubsub.h>
-#include <nb/node.h>
-#include <nb/service.h>
-#include <nb/proxy.h>
-#include <nb/endpoint.h>
-#include <nb/transport_provider.h>
-#include <nb/codec.h>
-#include <nb/config.h>
-#include <nb/types.h>
 #include <nb/dds.h>
+#include <nb/rpc/node.h>
+#include <nb/rpc/service.h>
+#include <nb/rpc/proxy.h>
+#include <nb/rpc/shm.h>
+#include <nb/rpc/endpoint.h>
+#include <nb/rpc/transport_provider.h>
+#include <nb/rpc/codec.h>
+#include <nb/config.h>
+#include <nb/rpc/config.h>
+#include <nb/dds/config.h>
+#include <nb/rpc/types.h>
+#include <nb/dds/participant.h>
+#include <nb/dds/topic.h>
+#include <nb/dds/writer.h>
+#include <nb/dds/reader.h>
+#include <nb/dds/backend.h>
 
 int main(void)
 {

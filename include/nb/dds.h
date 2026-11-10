@@ -2,40 +2,29 @@
 #define NB_DDS_H
 
 /*
- * Cyclone DDS transport provider.
+ * DDS spine: participant / topic / writer / reader over a selectable backend.
  *
- * Register the provider before creating any node, then use a DDS binding URI of
- * the form "dds://<domain>". The host component selects the DDS domain; the
- * port is optional and ignored ("dds://<domain>:<n>" is accepted for
- * compatibility). DDS/other non-network schemes may omit the port; tcp/udp
- * URIs still require one.
+ *   <nb/dds/participant.h>  domain, backend selection, status, discovery
+ *   <nb/dds/topic.h>        name + type name + QoS
+ *   <nb/dds/writer.h>       publications
+ *   <nb/dds/reader.h>       subscriptions, history, wait sets
+ *   <nb/dds/qos.h>          DDS policy set
+ *   <nb/dds/backend.h>      backend SPI (rtps / cyclone)
  *
- * Topics are derived from the full "Service.method" route, so two services
- * that share a method name stay on distinct topics:
- *   <Service>_<method>_req  request topic
- *   <Service>_<method>_res  response topic
- *   <Service>_<method>_evt  one-way event / pub-sub topic
- * Characters outside [A-Za-z0-9_] are replaced with '_'.
- *
- * QoS is taken from nb_binding_config_t.ps_qos (or the inherited
- * pubsub.default_qos) and mapped to Cyclone DDS reader/writer policies; see
- * qos.h.
+ * The spine is independent of the RPC node: it owns its DDS domain and lets
+ * the backend run discovery (SPDP/SEDP). RPC links (tcp/udp/shm) never appear
+ * here, and DDS topics never appear in the RPC spine.
  */
 
-#include <nb/transport_provider.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-/* Idempotently register the built-in "dds" provider. */
-int nb_cyclone_dds_register(void);
-
-/* Static provider descriptor, for callers that prefer explicit registration. */
-const nb_transport_provider_t *nb_cyclone_dds_provider(void);
-
-#ifdef __cplusplus
-}
-#endif
+#include <nb/base.h>
+#include <nb/dds/qos.h>
+#include <nb/dds/sample.h>
+#include <nb/dds/status.h>
+#include <nb/dds/discovery_types.h>
+#include <nb/dds/participant.h>
+#include <nb/dds/topic.h>
+#include <nb/dds/writer.h>
+#include <nb/dds/reader.h>
+#include <nb/dds/backend.h>
 
 #endif /* NB_DDS_H */

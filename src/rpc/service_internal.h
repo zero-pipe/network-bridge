@@ -3,7 +3,7 @@
 
 /* 服务端内部结构：方法表、服务对象、调用上下文、流接收状态。 */
 
-#include <nb/service.h>
+#include <nb/rpc/service.h>
 
 #include <stddef.h>
 #include <stdint.h>

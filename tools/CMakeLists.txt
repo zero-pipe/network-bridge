@@ -1,9 +1,9 @@
 add_executable(bench_server bench_server.c)
-target_link_libraries(bench_server PRIVATE nb)
+target_link_libraries(bench_server PRIVATE nb_rpc)
 nb_copy_runtime_deps(bench_server)
 
 add_executable(loadgen loadgen.c)
-target_link_libraries(loadgen PRIVATE nb)
+target_link_libraries(loadgen PRIVATE nb_rpc)
 nb_copy_runtime_deps(loadgen)
 
 if(MSVC)

@@ -1,7 +1,7 @@
 /*
  * libFuzzer harness for metadata TLV decode (must never read out of bounds).
  */
-#include <nb/types.h>
+#include <nb/rpc/types.h>
 
 #include <stddef.h>
 #include <stdint.h>

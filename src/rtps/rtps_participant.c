@@ -1,7 +1,7 @@
 #include "rtps_participant.h"
 
 #define NB_LOG_TAG "rtps"
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -6569,19 +6569,19 @@ static void nb_rtps_discovery_copy(char *dst, size_t cap, const char *src)
     (void)snprintf(dst, cap, "%s", src);
 }
 
-static void nb_rtps_discovery_endpoint(nb_discovery_sample_t *sample,
+static void nb_rtps_discovery_endpoint(nb_dds_discovery_sample_t *sample,
                                        int topic,
                                        const nb_rtps_endpoint_info_t *info,
                                        int is_local)
 {
     memset(sample, 0, sizeof(*sample));
-    sample->topic = (nb_builtin_topic_t)topic;
-    memcpy(sample->handle, &info->endpoint_guid, NB_DISCOVERY_HANDLE_SIZE);
+    sample->topic = (nb_dds_builtin_topic_t)topic;
+    memcpy(sample->handle, &info->endpoint_guid, NB_DDS_DISCOVERY_HANDLE_SIZE);
     nb_rtps_discovery_copy(sample->name, sizeof(sample->name), info->topic_name);
     nb_rtps_discovery_copy(sample->type_name, sizeof(sample->type_name), info->type_name);
     nb_rtps_discovery_copy(sample->partition, sizeof(sample->partition), info->partition);
     sample->is_local = is_local;
-    sample->is_writer = topic == NB_BUILTIN_TOPIC_PUBLICATION;
+    sample->is_writer = topic == NB_DDS_BUILTIN_TOPIC_PUBLICATION;
     sample->reliability = info->reliability;
     sample->durability = info->durability;
     sample->history_kind = info->history_kind;
@@ -6594,7 +6594,7 @@ static void nb_rtps_discovery_endpoint(nb_discovery_sample_t *sample,
 }
 
 /* Fold one endpoint into the derived DCPSTopic table. */
-static void nb_rtps_discovery_topic_add(nb_discovery_sample_t *out,
+static void nb_rtps_discovery_topic_add(nb_dds_discovery_sample_t *out,
                                         size_t *count,
                                         size_t max,
                                         const nb_rtps_endpoint_info_t *info,
@@ -6626,7 +6626,7 @@ static void nb_rtps_discovery_topic_add(nb_discovery_sample_t *out,
         return;
     }
     memset(&out[*count], 0, sizeof(out[*count]));
-    out[*count].topic = NB_BUILTIN_TOPIC_TOPIC;
+    out[*count].topic = NB_DDS_BUILTIN_TOPIC_TOPIC;
     nb_rtps_discovery_copy(out[*count].name, sizeof(out[*count].name), info->topic_name);
     nb_rtps_discovery_copy(out[*count].type_name, sizeof(out[*count].type_name), info->type_name);
     out[*count].is_local = is_local;
@@ -6649,23 +6649,23 @@ static void nb_rtps_discovery_topic_add(nb_discovery_sample_t *out,
 
 size_t nb_rtps_participant_discovery_read(nb_rtps_participant_t *participant,
                                           int topic,
-                                          nb_discovery_sample_t *out,
+                                          nb_dds_discovery_sample_t *out,
                                           size_t max)
 {
     size_t count = 0;
     size_t i;
 
-    if (!participant || !out || max == 0 || topic < NB_BUILTIN_TOPIC_PARTICIPANT ||
-        topic > NB_BUILTIN_TOPIC_TOPIC) {
+    if (!participant || !out || max == 0 || topic < NB_DDS_BUILTIN_TOPIC_PARTICIPANT ||
+        topic > NB_DDS_BUILTIN_TOPIC_TOPIC) {
         return 0;
     }
     ntk_mutex_lock(participant->lock);
-    if (topic == NB_BUILTIN_TOPIC_PARTICIPANT) {
+    if (topic == NB_DDS_BUILTIN_TOPIC_PARTICIPANT) {
         if (count < max) {
-            nb_discovery_sample_t *sample = &out[count++];
+            nb_dds_discovery_sample_t *sample = &out[count++];
             memset(sample, 0, sizeof(*sample));
-            sample->topic = NB_BUILTIN_TOPIC_PARTICIPANT;
-            memcpy(sample->handle, &participant->local_guid, NB_DISCOVERY_HANDLE_SIZE);
+            sample->topic = NB_DDS_BUILTIN_TOPIC_PARTICIPANT;
+            memcpy(sample->handle, &participant->local_guid, NB_DDS_DISCOVERY_HANDLE_SIZE);
             nb_rtps_discovery_copy(sample->name, sizeof(sample->name), participant->name);
             nb_rtps_discovery_copy(
                 sample->host, sizeof(sample->host), participant->advertise_host);
@@ -6675,20 +6675,20 @@ size_t nb_rtps_participant_discovery_read(nb_rtps_participant_t *participant,
         }
         for (i = 0; i < participant->max_remotes && count < max; i++) {
             nb_rtps_remote_participant_t *remote = &participant->remotes[i];
-            nb_discovery_sample_t *sample;
+            nb_dds_discovery_sample_t *sample;
             if (!remote->used) {
                 continue;
             }
             sample = &out[count++];
             memset(sample, 0, sizeof(*sample));
-            sample->topic = NB_BUILTIN_TOPIC_PARTICIPANT;
-            memcpy(sample->handle, &remote->info.guid, NB_DISCOVERY_HANDLE_SIZE);
+            sample->topic = NB_DDS_BUILTIN_TOPIC_PARTICIPANT;
+            memcpy(sample->handle, &remote->info.guid, NB_DDS_DISCOVERY_HANDLE_SIZE);
             nb_rtps_discovery_copy(sample->name, sizeof(sample->name), remote->info.name);
             nb_rtps_discovery_copy(sample->host, sizeof(sample->host), remote->source_host);
             sample->port = remote->source_port;
             sample->lease_ms = remote->lease_ms;
         }
-    } else if (topic == NB_BUILTIN_TOPIC_TOPIC) {
+    } else if (topic == NB_DDS_BUILTIN_TOPIC_TOPIC) {
         for (i = 0; i < participant->max_local_endpoints; i++) {
             nb_rtps_local_endpoint_t *endpoint = &participant->local_endpoints[i];
             if (endpoint->used) {
@@ -6712,7 +6712,7 @@ size_t nb_rtps_participant_discovery_read(nb_rtps_participant_t *participant,
             }
         }
     } else {
-        nb_rtps_endpoint_kind_t kind = topic == NB_BUILTIN_TOPIC_PUBLICATION
+        nb_rtps_endpoint_kind_t kind = topic == NB_DDS_BUILTIN_TOPIC_PUBLICATION
                                            ? NB_RTPS_ENDPOINT_PUBLICATION
                                            : NB_RTPS_ENDPOINT_SUBSCRIPTION;
         for (i = 0; i < participant->max_local_endpoints && count < max; i++) {

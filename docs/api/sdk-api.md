@@ -15,37 +15,34 @@ proxy 和字节视图；载荷序列化由应用通过 codec 决定。
 
 | 头文件 | 用途 |
 | --- | --- |
-| `<nb/node.h>` | node、调度、发现、路由、指标 |
-| `<nb/service.h>` | service、handler、reply、message view |
-| `<nb/proxy.h>` | proxy、异步/同步/事件/流式调用、零拷贝发布 |
-| `<nb/pubsub.h>` | participant、topic、writer、reader、QoS、status、wait set |
-| `<nb/endpoint.h>` | endpoint 解析与自定义传输 provider |
-| `<nb/codec.h>` | codec、message view、service table |
-| `<nb/config.h>` | JSON 配置加载与 node 创建 |
+| `<nb/base.h>` | payload、错误、日志、指标、缓冲区 |
+| `<nb/rpc.h>` | RPC：node、service、proxy、stream、endpoint |
+| `<nb/dds.h>` | DDS：participant、topic、writer、reader、QoS、status、wait set |
+| `<nb/rpc/config.h>` | RPC JSON 配置 |
+| `<nb/dds/config.h>` | DDS JSON 配置 |
+| `<nb/rpc/transport_provider.h>` | 自定义 RPC 传输 provider |
+| `<nb/rpc/codec.h>` | codec 与 service table |
 
 `<nb/error.h>`、`<nb/types.h>`、`<nb/metrics.h>` 和 `<nb/log.h>` 由上述入口
 按需包含。公共头文件只存在于 `<nb/...>` 下，且只存在于 `include/nb/`，因此
 构建树里可用的 include 路径在安装后同样可用。中间没有聚合头：
-`<nb/service.h>` 就是 service API，不是一组角色头文件的打包。
+`<nb/rpc/service.h>` 就是 service API，不是一组角色头文件的打包。
 
 ## 对象模型
 
 ```text
-node                               运行时：线程、binding、发现
-  ├─ service                       注册方法、接收请求并回复
-  ├─ proxy                         发现/路由并发送调用：
-  │                                call_async / call_sync / call_event
-  └─ participant                  发布/订阅面，绑定一个 topic 后端
-       └─ topic → writer / reader  按 topic 名匹配；reader 可回调或带 history
+RPC 主干                             DDS 主干
+node                                 participant（domain + backend + 默认 QoS）
+  ├─ service（注册方法）               ├─ topic（name + type + QoS）
+  └─ proxy（调用 service.method）      └─ writer / reader（回调或 history）
 ```
 
-一个 node 可以同时承担客户端和服务端角色。proxy 借用 node 的 poller 和路由表，
-自己不创建线程。传输按 binding 选择；自定义传输通过
-`<nb/transport_provider.h>` 接入。
+两条主干互不依赖：RPC node 拥有线程、传输、发现和路由；DDS participant 拥有
+自己的 domain 和后端发现。一个进程可以只创建其中一种，也可以两个都创建。
 
-node 是运行时/participant 句柄（poller 池、binding、发现），不是 ROS 2 的
-node：它拥有线程和 socket，因此应用通常在整个生命周期内只创建一个。进程内
-仍支持多个 node，用于进程内测试和多租户场景。
+RPC node 可以同时承担客户端和服务端角色。proxy 借用 node 的 poller 和路由表，
+自己不创建线程。传输由 `rpc.listen` 的 URI scheme 选择；自定义传输通过
+`<nb/rpc/transport_provider.h>` 接入。
 
 推荐的创建/销毁顺序：
 
@@ -212,70 +209,61 @@ EXECUTOR。WORKER 要求 `runtime.handler_threads > 0`；否则方法会降级�
 - `nb_call_request_id` 读取请求关联 id，用于日志和追踪。
 - `nb_call_canceled` 支持 handler 协作式退出。
 
-### Reader history（read/take）与 wait set
+### DDS reader history（read/take）与 wait set
 
-发布/订阅用 `nb_participant_t` / `nb_topic_t` / `nb_reader_t`。reader 可以把
-样本投递给回调，也可以保存在 reader 侧 history 中：
+DDS 面使用 `nb_dds_participant_t` / `nb_dds_topic_t` / `nb_dds_reader_t`，
+不需要 RPC node：
 
 ```c
-#include <nb/pubsub.h>
+#include <nb/dds.h>
 
-nb_participant_t *part = NULL;
-nb_participant_options_t popt = { .node = node, .scheme = "dds" };
-nb_participant_create(&popt, &part);
+nb_dds_participant_options_t popt = { .backend = NB_DDS_BACKEND_RTPS, .domain = 0 };
+nb_dds_participant_t *part = NULL;
+nb_dds_participant_create(&popt, &part);
 
-nb_topic_t *ticks = NULL;
-nb_topic_create(part, "ticks", "Trade", NULL, &ticks);
+nb_dds_topic_t *ticks = NULL;
+nb_dds_topic_create(part, "ticks", "Trade", NULL, &ticks);
 
-nb_reader_t *rd = NULL;
-nb_reader_create(ticks, NULL, NULL, NULL, 16, &rd); /* KEEP_LAST 深度 16 */
+nb_dds_reader_t *rd = NULL;
+nb_dds_reader_create(ticks, NULL, NULL, NULL, &rd); /* on_data = NULL：history 读者 */
 
-nb_sample_t samples[8];
-nb_sample_filter_t filter = NB_SAMPLE_FILTER_ANY;
-size_t n = nb_reader_read(rd, &filter, samples, 8);
+nb_dds_sample_t samples[8];
+nb_dds_sample_filter_t filter = NB_DDS_SAMPLE_FILTER_ANY;
+size_t n = nb_dds_reader_read(rd, &filter, samples, 8);
 for (size_t i = 0; i < n; i++) {
     /* samples[i].data 是借用视图：有效到样本被 take 为止 */
     use(samples[i].data.data, samples[i].data.len, &samples[i].info);
 }
 
-n = nb_reader_take(rd, &filter, samples, 8);
+n = nb_dds_reader_take(rd, &filter, samples, 8);
 for (size_t i = 0; i < n; i++) {
     use(samples[i].data.data, samples[i].data.len, &samples[i].info);
-    nb_sample_release(&samples[i]); /* take() 返回的样本归调用方所有 */
 }
+nb_dds_sample_release(samples, n); /* take() 返回的样本归调用方所有 */
 ```
 
 语义：
 
-- history 是 DDS 的 `KEEP_LAST(depth)`；深度由 `nb_reader_create` 给出。溢出时
-  丢弃最旧的样本，并计入 `nb_reader_dropped`。
-- 回调读者（`on_data` 非 NULL）与 history 读者（`on_data` 为 NULL、depth 非 0）
-  二选一；回调在 provider 线程上运行，样本只在回调内有效。
-- 掩码组合 DDS 的三个维度
-  （`NB_STATE_SAMPLE_READ`/`_NOT_READ`、`NB_STATE_VIEW_NEW`/`_NOT_NEW`、
-  `NB_STATE_INSTANCE_ALIVE`/`_DISPOSED`/`_NO_WRITERS`）。某个维度只有设置了
-  对应位才约束结果；`0` 表示 `NB_STATE_ANY`，惯例默认值是
-  `NB_STATE_ANY_DATA_READER`。
-- `nb_sample_filter_t.instance` 用 16 字节句柄选择某个 DDS 实例；`NULL`
-  表示任意。没有句柄的样本永远不会匹配非 NULL 句柄。
+- history 深度来自 reader 的 QoS（`history` + `depth`；默认 KEEP_LAST 1）。
+  溢出时丢弃最旧的样本，并计入 `nb_dds_reader_dropped`。
+- 回调读者（`on_data` 非 NULL）与 history 读者（`on_data` 为 NULL）二选一；
+  回调在后端线程上运行，样本只在回调内有效。
+- 掩码组合 DDS 的三个维度（`NB_DDS_STATE_SAMPLE_*`、`NB_DDS_STATE_VIEW_*`、
+  `NB_DDS_STATE_INSTANCE_*`）。某个维度只有设置了对应位才约束结果；`0` 表示
+  `NB_DDS_STATE_ANY`。
+- `nb_dds_sample_filter_t.instance` 用 16 字节句柄选择某个 DDS 实例。
 
-wait set 可以阻塞等待一个或多个 reader history：
+wait set 可以等待一个或多个 reader history：
 
 ```c
-nb_waitset_t *ws = NULL;
-nb_waitset_create(node, &ws);
-nb_waitset_attach_reader(ws, rd);
+nb_dds_waitset_t *ws = NULL;
+nb_dds_waitset_create(part, &ws);
+nb_dds_waitset_attach_reader(ws, rd);
 
-if (nb_waitset_wait(ws, &filter, 500) == 1) {
-    n = nb_reader_take(rd, &filter, samples, 8);
+if (nb_dds_waitset_wait(ws, &filter, 500) == 1) {
+    n = nb_dds_reader_take(rd, &filter, samples, 8);
 }
 ```
-
-`nb_waitset_wait` 在挂载的 history 有匹配样本时返回 1，超时返回 0，其它情况
-返回负错误码。唤醒是事件驱动的：每次入队都会 post 一个许可，因此阻塞的等待者
-无需轮询延迟即可返回。`NB_WAITSET_INFINITE` 表示永久等待。wait set 只报告
-就绪；随后仍需从具体 reader 中取走数据。回调读者没有 history，挂载会返回
-`NB_ERR_INVALID`。
 
 ## Proxy（客户端）
 
@@ -337,7 +325,7 @@ nb_proxy_cancel(proxy, request_id);
 结束调用；已经运行的 handler 不会被抢占。
 
 除内建的 UDP/TCP/SHM/RTPS binding 外，传输可以实现
-`<nb/transport_provider.h>`，并由 node 的 binding 配置选择（或者由 proxy 的
+`<nb/rpc/transport_provider.h>`，并由 node 的 binding 配置选择（或者由 proxy 的
 `host:port` 目标选择）。
 
 ### 零拷贝发布（loan/borrow）
@@ -415,29 +403,15 @@ nb_transport_provider_register(&my_provider);
 
 provider 描述符和 ops 必须有静态生命周期。
 
-ops 按角色拆分：`create/start/stop/destroy` 与可选的 `metrics_read` 是生命周期
-和观测，`rpc` / `ps` 是两条主干各自需要的角色接口，至少实现一个：
+provider 接口只描述点对点 RPC 链路：
 
-- `rpc`（点对点 RPC 链路）：`send`、`reply` 必填，`loan/send_loan/release_loan`
-  可选（零拷贝发布）。
-- `ps`（发布/订阅后端）：`register_topic` 必填；`register_method` /
-  `unregister_method` 是 RPC-over-PS 桥的钩子，可选的 `discovery_read` 提供
-  DCPS 内置主题视图。
+- `create/start/stop/destroy` 是生命周期；`metrics_read` 可选。
+- `rpc` 接口必填：`send`、`reply`，以及可选的
+  `loan/send_loan/release_loan`（零拷贝发布）和 `subscribe/unsubscribe`
+  （按路由扇出 RPC EVENT，只有 shm 实现）。
 
-核心按需要的角色取用，角色缺失时返回 `NB_ERR_NOT_SUPPORTED`，不再在调用点
-逐个判断 NULL。`shm` 同时实现两个角色。
-
-ops 和 options 结构体开头都有 version/size 字段，便于跨版本安全注册：
-
-- `nb_transport_provider_ops_t.abi_version` 必须等于
-  `NB_TRANSPORT_PROVIDER_ABI_VERSION`（角色拆分改变了布局，旧版本不再接受）
-- `nb_transport_provider_ops_t.struct_size` 必须是
-  `sizeof(nb_transport_provider_ops_t)`
-- `nb_transport_provider_options_t.struct_size` 必须是
-  `sizeof(nb_transport_provider_options_t)`
-
-注册失败返回 `NB_ERR_INVALID`。用
-`nb_transport_provider_unregister(scheme)` 注销。
+`nb_transport_provider_ops_t` 不再包含发布/订阅角色、QoS 或 topic 注册；
+DDS 后端由 `nb_dds_backend_ops_t` 单独定义。
 
 指针生命周期规则：`options.endpoint` 在实例生命周期内有效；`message` 及其
 `payload`/`metadata` 指针只在当前回调内有效；`frame_owner` 归核心所有，由
@@ -446,129 +420,25 @@ provider 使用完后释放；`reply_token` 只能原样传回 `reply`；`peer`/
 
 provider SPI 只使用三个公共对象：
 
-- `nb_endpoint_t`：`send` 的目标和 `reply` 的对端；`scheme/host/port/path`
-  由 provider 自己解释，`uri` 是归一化形式。
+- `nb_endpoint_t`：`send` 的目标和 `reply` 的对端。
 - `nb_message_t`：与核心内部相同的消息结构；不存在第二份 provider 消息拷贝。
-- `nb_ps_qos_t`：发布/订阅 QoS，只有发布/订阅角色会看到：创建实例时通过
-  `nb_transport_provider_options_t.ps->qos` 传入（`ps` 为 NULL 表示该 binding
-  不服务发布/订阅面）。点对点 RPC 链路不读取这些策略。
+- `nb_metrics_t`：可选的计数合并。
 
-`nb_message_t.ps_sample` 是回调期 borrow 的 DDS 样本元数据指针：`state`
-（`NB_SAMPLE_STATE_VALID` / `DISPOSED` / `NO_WRITERS`，
-`nb_sample_info_valid_data()` 对应 DDS 的 `valid_data` 写法）、
-`instance_handle` 与 `has_instance_handle`、`source_timestamp_ns`、
-`reception_timestamp_ns`，以及 DDS 的实例/视图状态对：
-`instance_state`（`ALIVE` / `NOT_ALIVE_DISPOSED` /
-`NOT_ALIVE_NO_WRITERS`）和 `view_state`（实例的第一个样本，或重新注册后的
-第一个样本为 `NEW`，否则为 `NOT_NEW`），`generation_rank` 统计重新注册次数。
-RTPS provider 会指向这些字段；其它 provider 留 NULL，读起来就是“没有实例的
-有效数据”。它是指针而不是内嵌结构，避免每条 RPC 消息都背负 DDS 实例状态。
-实例状态需要实例句柄，RTPS reader 从 PID_KEY_HASH 中取得；样本
-不带 key hash 的类型投递时不带按实例的状态。
+## DDS 后端
 
-同一套元数据也适用于发送方向。消息设置了 `ps_sample->has_instance_handle`，并且
-`ps_sample->state` 为 `NB_SAMPLE_STATE_DISPOSED` 或
-`NB_SAMPLE_STATE_NO_WRITERS` 时，会作为 key-only 的 DDS 样本发布，而不是普通
-样本：句柄进入 inline QoS，状态位表示实例被 dispose 还是 unregister，payload
-被当作序列化 key，而不是编码后的信封。使用 `rtps` provider 时，DDS 层 reader
-（包括 Cyclone DDS）能看到状态变化；远端 `nb` 对端目前还看不到，因为 v2 信封
-没有可路由这些信息的样本字段。普通样本发送时会忽略 `ps_sample`。
+DDS 面不再经过 RPC provider。`nb_dds_participant_create` 用枚举选择后端：
 
 ```c
-static int my_send(nb_transport_instance_t *inst,
-                   const nb_endpoint_t *target,
-                   const nb_message_t *msg);
-static int my_reply(nb_transport_instance_t *inst,
-                    void *reply_token,
-                    const nb_endpoint_t *peer,
-                    const nb_message_t *msg);
+nb_dds_participant_options_t popt = { .backend = NB_DDS_BACKEND_CYCLONE, .domain = 0 };
+nb_dds_participant_create(&popt, &part);
 ```
 
-入站回调是 `on_receive(receiver, reply_token, message)`；来源端点位于
-`message->peer`，因此 provider 不再单独传 `host/port` 参数。
+- `NB_DDS_BACKEND_RTPS`：内建 RTPS 引擎，总是可用。
+- `NB_DDS_BACKEND_CYCLONE`：Cyclone DDS，需要 `NB_ENABLE_DDS=ON`；未编译时返回
+  `NB_ERR_NOT_SUPPORTED`。
 
-### 状态事件
-
-`nb_transport_provider_options_t.on_status` 是可选的第二个回调：能观察 DDS
-状态的 provider 用 `nb_status_event_t`（`<nb/status.h>`）上报，`user` 与
-`on_receive` 相同。不上报的 provider 保持 `NULL`。
-
-```c
-typedef struct nb_status_event {
-    nb_status_kind_t kind;          /* 匹配、deadline、liveliness、QoS */
-    char endpoint[NB_STATUS_ENDPOINT_MAX]; /* provider 名称，例如方法名 */
-    uint32_t count;                 /* 当前匹配数，或丢失计数 */
-    uint32_t total_count;           /* 累计匹配数 */
-    int alive;                      /* liveliness 方向 */
-    uint32_t alive_count;
-    uint32_t not_alive_count;
-    bool has_peer;
-    uint8_t peer_guid[NB_STATUS_GUID_SIZE];
-    char reason[NB_STATUS_REASON_MAX]; /* 匹配失败的 QoS 策略 */
-} nb_status_event_t;
-```
-
-RTPS provider 在本地端点增加或失去远端匹配时报告
-`NB_STATUS_PUBLICATION_MATCHED` 和 `NB_STATUS_SUBSCRIPTION_MATCHED`：
-`count` 是当前匹配数（下降表示对端消失），`total_count` 是累计数，对应
-DDS 的 `PublicationMatchedStatus`/`SubscriptionMatchedStatus`。topic 和 type
-相同但无法匹配的一对端点报告为 `NB_STATUS_QOS_INCOMPATIBLE`，`reason` 指出
-具体策略（`deadline`、`reliability` 等）。deadline 和 liveliness 事件使用
-同一套接口。
-
-`endpoint` 是 provider 对本地端点的命名：RTPS provider 使用端点所属的方法名，
-因此事件可以映射回 service，而不暴露 GUID。回调在 provider 自己的线程上运行，
-不能回调进 provider。
-
-## Cyclone DDS
-
-内建的 `dds` provider 把 v2 信封作为不透明 octet 样本经 Cyclone DDS 传输。
-注册后，在 binding 中使用 `dds://<domain>`（端口可以省略；旧的
-`dds://<domain>:1` 写法仍接受）：
-
-```c
-#include <nb/dds.h>
-
-nb_cyclone_dds_register();
-
-nb_binding_config_t binding = { "dds", "dds://0" };
-nb_node_config_t cfg;
-nb_node_config_default(&cfg);
-cfg.rpc.mode = NB_NODE_MODE_STATIC;
-cfg.bindings = &binding;
-cfg.binding_count = 1;
-```
-
-可以配置 binding 的发布/订阅 QoS；未设置的字段保留 Cyclone DDS 默认值：
-
-```c
-strcpy(binding.ps_qos.partition, "orders");
-binding.ps_qos.reliability = NB_QOS_RELIABILITY_RELIABLE;
-binding.ps_qos.history = NB_QOS_HISTORY_KEEP_LAST;
-binding.ps_qos.depth = 8;
-```
-
-topic 由完整的 `Service.method` 路由派生：
-
-- 请求：`<Service>_<method>_req`
-- 响应：`<Service>_<method>_res`
-- 事件/发布订阅：`<Service>_<method>_evt`
-
-发布/订阅推荐使用 `nb_writer_t` / `nb_reader_t`（`<nb/pubsub.h>`）：topic 名
-原样上线，不做路由派生。RPC 事件（`nb_proxy_call_event` 发布、
-`nb_service_add_method` 接收）仍按上面的 `<Service>_<method>_evt` 派生。
-注册服务端方法会创建请求/事件 reader 和响应 writer；第一次客户端请求会按需
-创建请求 writer 和响应 reader。
-
-DDS binding 的 `intra_process` 支持 `off` / `auto` / `only`。`auto` 先在进程
-内投递事件，再照常发布到 DDS；`only` 完全跳过 DDS 事件 writer/reader 和
-`dds_write`，只投递给同一 provider 的本地订阅者，投递过程中载荷零拷贝。
-
-provider 使用 Cyclone DDS 自己的数据面，因此同一 domain 上独立的 Cyclone
-reader 可以收到它的样本。样本类型是 `dds::Message`，即包含框架信封的不透明
-octet 序列；事件 topic 是 `<Service>_<method>_evt`。验证网络投递时请使用
-`intra_process=off` 或独立进程；`only` 会有意绕过 DDS。
-
+两个后端使用同一套 DDS 默认 QoS 和线上类型 `dds::Message`，因此可以互通。
+具体接口见 `<nb/dds.h>`。
 ## 发现视图
 
 DDS 在内建 topic `DCPSParticipant`、`DCPSPublication`、`DCPSSubscription` 和

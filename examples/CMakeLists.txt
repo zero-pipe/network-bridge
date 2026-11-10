@@ -17,10 +17,8 @@ endfunction()
 
 add_subdirectory(01_rpc)
 add_subdirectory(02_rpc_streaming)
+add_subdirectory(03_dds_pubsub)
 add_subdirectory(04_config)
-if(NB_ENABLE_DDS)
-    add_subdirectory(03_dds_pubsub)
-endif()
 
 set(NB_EXAMPLE_TARGETS
     example_01_rpc_server
@@ -28,14 +26,15 @@ set(NB_EXAMPLE_TARGETS
     example_02_rpc_streaming
     example_04_config_server
     example_04_config_client
+    example_04_config_dds
+    example_03_dds_pubsub
 )
-if(NB_ENABLE_DDS)
-    list(APPEND NB_EXAMPLE_TARGETS example_03_dds_pubsub)
-endif()
 install(TARGETS ${NB_EXAMPLE_TARGETS} RUNTIME DESTINATION bin)
 
 install(FILES
     04_config/server.json
     04_config/client.json
+    04_config/dds.json
+    04_config/full.json
     DESTINATION bin
 )

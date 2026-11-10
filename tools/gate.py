@@ -12,7 +12,7 @@ Gate taxonomy (also used as CTest labels):
 Examples:
 
   python3 tools/gate.py unit
-  python3 tools/gate.py e2e --transports tcp,udp,dds,rtps
+  python3 tools/gate.py e2e --transports tcp,udp,shm
   python3 tools/gate.py perf --duration 10
   python3 tools/gate.py stability --stability-duration 60
   python3 tools/gate.py all --no-build
@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BUILD_DIR = ROOT / "build"
 ARTIFACT_ROOT = ROOT / "artifacts" / "gate"
 IS_WINDOWS = os.name == "nt"
-ALL_TRANSPORTS = ("tcp", "udp", "dds", "shm", "rtps")
+ALL_TRANSPORTS = ("tcp", "udp", "shm")
 MIB = 1024 * 1024
 BENCH_SERVICE = "OrderService"
 BENCH_METHOD = "get"
@@ -110,7 +110,7 @@ class Context:
         self.shm_channel = "nb-shm-{}-{}".format(os.getpid(), random.randint(0, 1 << 30))
         if args.command == "stability" and not args.transports:
             # Soak is intentionally short by default; ask for more transports
-            # explicitly with --transports tcp,udp,dds,rtps.
+            # explicitly with --transports tcp,udp,shm.
             self.transports = [item for item in self.transports if item == "tcp"] or self.transports[:1]
         self.did_build = False
 
@@ -197,7 +197,7 @@ def child_env() -> Dict[str, str]:
 
 def select_transports(args: argparse.Namespace, dds_enabled: bool) -> List[str]:
     if getattr(args, "no_dds", False):
-        requested = [item for item in (args.transports or "tcp,udp,dds").split(",") if item]
+        requested = [item for item in (args.transports or "tcp,udp").split(",") if item]
         requested = [item for item in requested if item != "dds"]
     elif args.transports:
         requested = [item.strip() for item in args.transports.split(",") if item.strip()]
@@ -207,7 +207,7 @@ def select_transports(args: argparse.Namespace, dds_enabled: bool) -> List[str]:
     for item in requested:
         if item not in ALL_TRANSPORTS:
             raise GateError(
-                "unknown transport '{}'; expected tcp, udp, dds, shm or rtps".format(item))
+                "unknown transport '{}'; expected tcp, udp or shm".format(item))
         if item == "dds" and not dds_enabled:
             print("gate: skipping DDS (NB_ENABLE_DDS=OFF)")
             continue

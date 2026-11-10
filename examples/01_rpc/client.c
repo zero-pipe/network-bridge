@@ -7,10 +7,10 @@
  */
 
 #define NB_LOG_TAG "example"
-#include <nb/node.h>
-#include <nb/proxy.h>
+#include <nb/rpc/node.h>
+#include <nb/rpc/proxy.h>
 
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 #include <stdlib.h>
 #include <string.h>

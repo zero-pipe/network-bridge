@@ -1,12 +1,12 @@
 /* 覆盖新增抽象：service_table、message_view、proxy 与 sync 便捷层。 */
-#include <nb/proxy.h>
-#include <nb/node.h>
-#include <nb/codec.h>
-#include <nb/service.h>
+#include <nb/rpc/proxy.h>
+#include <nb/rpc/node.h>
+#include <nb/rpc/codec.h>
+#include <nb/rpc/service.h>
 #include <platform.h>
 
 #define NB_LOG_TAG "test"
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 #include <thread/sync.h>
 

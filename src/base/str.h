@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <string.h>
 
-#include <nb/error.h>
+#include <nb/base/error.h>
 
 /* 安全字符串拷贝：src 为空时用 def，始终 NUL 结尾。 */
 static inline void nb_copy_str(char *dst, size_t cap, const char *src, const char *def)

@@ -4,16 +4,14 @@
  *
  * 形状：单进程单"热连接"，同一时刻 1 个 outstanding RPC（对齐 gRPC 单 channel）。
  */
-#include <nb/proxy.h>
-#include <nb/node.h>
-#include <nb/dds.h>
-#include <nb/rtps.h>
-#include <nb/shm.h>
+#include <nb/rpc/proxy.h>
+#include <nb/rpc/node.h>
+#include <nb/rpc/shm.h>
 #include <platform.h>
 #include <thread/sem.h>
 
 #define NB_LOG_TAG "loadgen"
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -109,13 +107,8 @@ typedef struct options {
     int use_sync;
     const char *spike_log;        /* 尖峰样本落盘路径（诊断用，NULL 表示关闭） */
     uint64_t spike_threshold_us;  /* 记录阈值，默认 1000us */
-    int use_dds;
-    int dds_domain;
     int use_shm;
     const char *shm_channel;
-    int use_rtps;
-    const char *rtps_endpoint;
-    const char *rtps_target;
     nb_transport_kind_t transport;
     uint64_t window; /* 0 = 收一发一；>0 = 滑动窗口在途上限 */
 } options_t;
@@ -262,9 +255,8 @@ static int parse_size(const char *s, size_t *out)
 static void usage(const char *argv0)
 {
     nb_log_error("usage: %s [--service s] [--method m] [--duration-seconds n]\n"
-                  "          [--transport udp|tcp] [--dds] [--dds-domain n] "
-                  "[--shm] [--shm-channel name] [--rtps <binding-uri>] "
-                  "[--rtps-target <uri>] [--io-threads n]\n"
+                  "          [--transport udp|tcp] [--shm] [--shm-channel name] "
+                  "[--io-threads n]\n"
                   "          [--max-requests n] [--payload-bytes n] [--expect-response-bytes n]\n"
                   "          [--timeout-ms n] [--rate qps] [--window n] [--sync]\n"
                   "          [--spike-log path] [--spike-threshold-us n] [--verify-response]\n"
@@ -448,7 +440,6 @@ int main(int argc, char **argv)
     nb_node_config_t cfg;
     nb_node_t *node = NULL;
     nb_proxy_t *proxy = NULL;
-    nb_binding_config_t dds_binding;
     nb_binding_config_t shm_binding;
     ntk_sem *sem = NULL;
     callout_t co;
@@ -462,11 +453,8 @@ int main(int argc, char **argv)
     char *colon;
     char peer_host[64];
     char target_host[64];
-    char rtps_target_buf[64];
-    char dds_endpoint[32];
     char shm_endpoint[128];
     char shm_target[128];
-    nb_binding_config_t rtps_binding;
     int i;
     int rc;
     nb_node_mode_t mode = NB_NODE_MODE_MESH;
@@ -490,19 +478,10 @@ int main(int argc, char **argv)
             const char *t = argv[++i];
             opt.transport =
                 (strcmp(t, "tcp") == 0 || strcmp(t, "TCP") == 0) ? NB_TRANSPORT_KIND_TCP : NB_TRANSPORT_KIND_UDP;
-        } else if (strcmp(a, "--dds") == 0) {
-            opt.use_dds = 1;
-        } else if (strcmp(a, "--dds-domain") == 0 && i + 1 < argc) {
-            opt.dds_domain = atoi(argv[++i]);
         } else if (strcmp(a, "--shm") == 0) {
             opt.use_shm = 1;
         } else if (strcmp(a, "--shm-channel") == 0 && i + 1 < argc) {
             opt.shm_channel = argv[++i];
-        } else if (strcmp(a, "--rtps") == 0 && i + 1 < argc) {
-            opt.use_rtps = 1;
-            opt.rtps_endpoint = argv[++i];
-        } else if (strcmp(a, "--rtps-target") == 0 && i + 1 < argc) {
-            opt.rtps_target = argv[++i];
         } else if (strcmp(a, "--io-threads") == 0 && i + 1 < argc) {
             opt.io_threads = (unsigned)strtoul(argv[++i], NULL, 10);
         } else if (strcmp(a, "--service") == 0 && i + 1 < argc) {
@@ -587,25 +566,6 @@ int main(int argc, char **argv)
         }
     }
 
-    /* Custom transports are matched by their binding host, so the proxy target
-     * must reuse the RTPS authority (the domain id). */
-    if (opt.use_rtps && !opt.rtps_target) {
-        const char *sep = opt.rtps_endpoint ? strstr(opt.rtps_endpoint, "://") : NULL;
-        const char *host = sep ? sep + 3 : opt.rtps_endpoint;
-        size_t n = 0;
-
-        while (host && host[n] && host[n] != ':' && host[n] != '/' &&
-               n + 8 < sizeof(rtps_target_buf)) {
-            n++;
-        }
-        if (n == 0) {
-            nb_log_error("--rtps requires a binding URI");
-            return 1;
-        }
-        snprintf(rtps_target_buf, sizeof(rtps_target_buf), "rtps://%.*s:0", (int)n, host);
-        opt.rtps_target = rtps_target_buf;
-    }
-
     g_spike_path = opt.spike_log;
     g_spike_enabled = opt.spike_log != NULL;
     if (opt.spike_threshold_us > 0) {
@@ -627,10 +587,6 @@ int main(int argc, char **argv)
     cfg.rpc.max_msg_bytes = opt.max_msg_bytes;
     cfg.rpc.backpressure_bytes = opt.backpressure_bytes;
 
-    if ((opt.use_shm ? 1 : 0) + (opt.use_dds ? 1 : 0) + (opt.use_rtps ? 1 : 0) > 1) {
-        nb_log_error("--shm, --dds and --rtps are mutually exclusive");
-        return 1;
-    }
     if (opt.use_shm) {
         if (nb_shm_register() != NB_OK) {
             nb_log_error("shm provider register failed");
@@ -641,33 +597,7 @@ int main(int argc, char **argv)
         memset(&shm_binding, 0, sizeof(shm_binding));
         shm_binding.name = "shm";
         shm_binding.endpoint = shm_endpoint;
-        shm_binding.intra_process = NB_INTRA_PROCESS_OFF;
         cfg.bindings = &shm_binding;
-        cfg.binding_count = 1;
-        cfg.rpc.mode = NB_NODE_MODE_STATIC;
-    } else if (opt.use_dds) {
-        if (nb_cyclone_dds_register() != NB_OK) {
-            nb_log_error("dds provider register failed");
-            return 1;
-        }
-        snprintf(dds_endpoint, sizeof(dds_endpoint), "dds://%d", opt.dds_domain);
-        memset(&dds_binding, 0, sizeof(dds_binding));
-        dds_binding.name = "dds";
-        dds_binding.endpoint = dds_endpoint;
-        dds_binding.intra_process = NB_INTRA_PROCESS_OFF;
-        cfg.bindings = &dds_binding;
-        cfg.binding_count = 1;
-        cfg.rpc.mode = NB_NODE_MODE_STATIC;
-    } else if (opt.use_rtps) {
-        if (nb_rtps_transport_register() != NB_OK) {
-            nb_log_error("rtps provider register failed");
-            return 1;
-        }
-        memset(&rtps_binding, 0, sizeof(rtps_binding));
-        rtps_binding.name = "rtps";
-        rtps_binding.endpoint = opt.rtps_endpoint;
-        rtps_binding.intra_process = NB_INTRA_PROCESS_OFF;
-        cfg.bindings = &rtps_binding;
         cfg.binding_count = 1;
         cfg.rpc.mode = NB_NODE_MODE_STATIC;
     }
@@ -707,20 +637,6 @@ int main(int argc, char **argv)
             nb_node_destroy(node);
             return 1;
         }
-    } else if (opt.use_dds) {
-        rc = nb_proxy_set_target_uri(proxy, dds_endpoint);
-        if (rc != NB_OK) {
-            nb_log_error("proxy set dds endpoint failed: %d", rc);
-            nb_node_destroy(node);
-            return 1;
-        }
-    } else if (opt.use_rtps) {
-        rc = nb_proxy_set_target_uri(proxy, opt.rtps_target);
-        if (rc != NB_OK) {
-            nb_log_error("proxy set rtps endpoint failed: %d", rc);
-            nb_node_destroy(node);
-            return 1;
-        }
     } else if (opt.target_ip && opt.target_port) {
         (void)nb_proxy_set_target(proxy, opt.target_ip, opt.target_port, nb_node_transport(node));
     }
@@ -729,8 +645,7 @@ int main(int argc, char **argv)
     co.sem = sem;
 
     /* MESH：先等目标服务进入路由表（启动等待），再做预热。 */
-    if (!opt.use_shm && !opt.use_dds && !opt.use_rtps &&
-        !(opt.target_ip && opt.target_port)) {
+    if (!opt.use_shm && !(opt.target_ip && opt.target_port)) {
         (void)nb_node_wait_for_service(
             node, opt.service, (uint64_t)opt.connect_timeout_seconds * 1000ull);
     }
@@ -761,7 +676,7 @@ int main(int argc, char **argv)
             (void)ntk_sem_timedwait(sem, (unsigned)(opt.timeout_ms + 100));
             /* DDS discovery may still be converging: require a real reply. */
             if (co.status != NB_ERR_NOTFOUND &&
-                (!(opt.use_dds || opt.use_shm || opt.use_rtps) || co.status == NB_OK)) {
+                (!opt.use_shm || co.status == NB_OK)) {
                 warmed = 1;
                 break;
             }

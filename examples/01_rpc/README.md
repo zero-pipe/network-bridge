@@ -19,5 +19,5 @@
 - 本例用 `nb_node_add_static_route` 指向固定端点。把客户端改成
   `NB_NODE_MODE_MESH` 并调用 `nb_node_wait_for_service(node, "EchoService", 5000)`，
   客户端就不再需要知道服务端地址。
-- payload 对框架不透明：这里直接回显字节；业务对象可以用 `<nb/codec.h>`
+- payload 对框架不透明：这里直接回显字节；业务对象可以用 `<nb/rpc/codec.h>`
   注册 codec，或用 JSON/Protobuf 自己编解码。

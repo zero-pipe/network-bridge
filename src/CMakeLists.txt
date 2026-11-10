@@ -6,6 +6,9 @@ set(NB_BASE_SOURCES
     base/iobuf.c
     base/poller_alloc.c
     base/crc32.c
+    base/error.c
+    base/metrics.c
+    base/payload.c
 )
 
 add_library(nb_base STATIC ${NB_BASE_SOURCES})
@@ -15,6 +18,8 @@ target_include_directories(nb_base
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/3rdparty/cjson
 )
 
 set_target_properties(nb_base PROPERTIES
@@ -29,16 +34,38 @@ install(TARGETS nb_base
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-set(NB_SOURCES
-    # shared runtime: node lifecycle, inbound dispatch, binding assembly
-    runtime/node.c
-    runtime/node_access.c
-    runtime/transport_factory.c
-    runtime/dispatch.c
-    runtime/codec.c
-    runtime/metadata.c
-    runtime/message_view.c
-    runtime/payload.c
+# Shared JSON reader for both config parsers (cJSON lives here once).
+add_library(nb_json STATIC base/json.c ${CMAKE_SOURCE_DIR}/3rdparty/cjson/cJSON.c)
+add_library(nb::json ALIAS nb_json)
+target_include_directories(nb_json
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/base
+        ${CMAKE_SOURCE_DIR}/3rdparty/cjson
+)
+target_link_libraries(nb_json PUBLIC nb_base PRIVATE nb_log)
+set_target_properties(nb_json PROPERTIES
+    C_STANDARD 99
+    C_STANDARD_REQUIRED ON
+    OUTPUT_NAME nb_json)
+install(TARGETS nb_json
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+set(NB_RPC_SOURCES
+    # RPC runtime: node lifecycle, inbound dispatch, binding assembly
+    rpc/runtime/node.c
+    rpc/runtime/node_access.c
+    rpc/runtime/transport_factory.c
+    rpc/runtime/dispatch.c
+    rpc/runtime/codec.c
+    rpc/runtime/metadata.c
+    rpc/endpoint.c
+    rpc/message_view.c
+    rpc/util.c
     # RPC spine
     rpc/service.c
     rpc/service_dispatch.c
@@ -53,52 +80,52 @@ set(NB_SOURCES
     rpc/sync.c
     rpc/pending.c
     rpc/dedup.c
-    # pub/sub spine
-    pubsub/pubsub.c
-    pubsub/sample_queue.c
-    pubsub/waitset.c
-    pubsub/discovery_view.c
-    utils/error.c
-    utils/metrics.c
-    utils/util.c
-    utils/endpoint.c
-    utils/qos.c
-    message/frame.c
-    message/envelope.c
-    router/router.c
-    registry/registry.c
-    discovery/discovery.c
-    config/config.c
-    config/config_defaults.c
-    transport/common/framing.c
-    transport/common/dds_bridge.c
-    transport/common/transport.c
-    transport/common/provider.c
-    transport/common/rx_window.c
-    transport/common/reasm.c
-    transport/common/tx_ring.c
-    transport/udp/udp.c
-    transport/tcp/tcp.c
-    transport/rtps/rtps_transport.c
-    transport/shm/shm.c
-    transport/shm/shm_segment.c
-    ${CMAKE_SOURCE_DIR}/3rdparty/cjson/cJSON.c
+    rpc/message/frame.c
+    rpc/message/envelope.c
+    rpc/router/router.c
+    rpc/registry/registry.c
+    rpc/discovery/discovery.c
+    rpc/config/rpc_config.c
+    rpc/config/rpc_config_defaults.c
+    rpc/transport/common/framing.c
+    rpc/transport/common/transport.c
+    rpc/transport/common/provider.c
+    rpc/transport/common/rx_window.c
+    rpc/transport/common/reasm.c
+    rpc/transport/common/tx_ring.c
+    rpc/transport/udp/udp.c
+    rpc/transport/tcp/tcp.c
+    rpc/transport/shm/shm.c
+    rpc/transport/shm/shm_segment.c
+)
+
+set(NB_DDS_SOURCES
+    dds/sample_queue.c
+    dds/dds_qos.c
+    dds/dds_backend.c
+    dds/dds_participant.c
+    dds/dds_topic.c
+    dds/dds_writer.c
+    dds/dds_reader.c
+    dds/dds_waitset.c
+    dds/rtps_backend.c
+    dds/config/dds_config.c
 )
 
 if(NB_ENABLE_DDS)
-    list(APPEND NB_SOURCES
-        transport/dds/cyclone_dds.c
-        transport/dds/cy_dds_message.c)
+    list(APPEND NB_DDS_SOURCES
+        dds/cyclone_backend.c
+        dds/cyclone/cy_dds_message.c)
 endif()
 
 # ---- RTPS engine and public API -----------------------------------------
 # log.c is shared by the framework and the RTPS engine. Keeping it in a small
 # library lets the engine build without pulling in the framework: rtps_core
 # depends on nb_base, ntk, microcdr and nb_log only.
-add_library(nb_log STATIC utils/log.c)
+add_library(nb_log STATIC base/log.c)
 target_include_directories(nb_log
     PUBLIC ${CMAKE_SOURCE_DIR}/include
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/utils)
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/base)
 target_link_libraries(nb_log PRIVATE elog)
 set_target_properties(nb_log PROPERTIES
     C_STANDARD 99
@@ -190,38 +217,86 @@ install(TARGETS rtps
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-add_library(nb STATIC ${NB_SOURCES})
-add_library(nb::nb ALIAS nb)
-# Backward-compatible target name for downstreams that still link `rpc`.
-add_library(rpc ALIAS nb)
-
-target_include_directories(nb
+add_library(nb_rpc STATIC ${NB_RPC_SOURCES})
+add_library(nb::rpc ALIAS nb_rpc)
+target_include_directories(nb_rpc
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/base
-        ${CMAKE_CURRENT_SOURCE_DIR}/runtime
         ${CMAKE_CURRENT_SOURCE_DIR}/rpc
-        ${CMAKE_CURRENT_SOURCE_DIR}/pubsub
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc/runtime
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc/message
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc/router
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc/registry
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc/discovery
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc/transport/common
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc/transport/tcp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc/transport/udp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc/transport/shm
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc/config
         ${CMAKE_CURRENT_SOURCE_DIR}/utils
-        ${CMAKE_CURRENT_SOURCE_DIR}/message
-        ${CMAKE_CURRENT_SOURCE_DIR}/transport/common
-        ${CMAKE_CURRENT_SOURCE_DIR}/transport/dds
-        ${CMAKE_CURRENT_SOURCE_DIR}/router
-        ${CMAKE_CURRENT_SOURCE_DIR}/registry
-        ${CMAKE_CURRENT_SOURCE_DIR}/discovery
-        ${CMAKE_CURRENT_SOURCE_DIR}/rtps
-        ${CMAKE_CURRENT_SOURCE_DIR}/config
         ${CMAKE_SOURCE_DIR}/3rdparty/uthash
         ${CMAKE_SOURCE_DIR}/3rdparty/cjson
 )
+target_link_libraries(nb_rpc PUBLIC ntk nb_base PRIVATE nb_json nb_log ntk_discovery)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(nb_rpc PUBLIC rt)
+endif()
+set_target_properties(nb_rpc PROPERTIES
+    C_STANDARD 99
+    C_STANDARD_REQUIRED ON
+    OUTPUT_NAME nb_rpc)
+install(TARGETS nb_rpc
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+add_library(nb_dds STATIC ${NB_DDS_SOURCES})
+add_library(nb::dds ALIAS nb_dds)
+target_include_directories(nb_dds
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/base
+        ${CMAKE_CURRENT_SOURCE_DIR}/dds
+        ${CMAKE_CURRENT_SOURCE_DIR}/dds/config
+        ${CMAKE_CURRENT_SOURCE_DIR}/dds/cyclone
+        ${CMAKE_SOURCE_DIR}/3rdparty/cjson
+)
+target_link_libraries(nb_dds PUBLIC ntk nb_base rtps PRIVATE nb_json nb_log)
+if(NB_ENABLE_DDS)
+    target_link_libraries(nb_dds PUBLIC nb_cyclonedds)
+endif()
+set_target_properties(nb_dds PROPERTIES
+    C_STANDARD 99
+    C_STANDARD_REQUIRED ON
+    OUTPUT_NAME nb_dds)
+install(TARGETS nb_dds
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# Umbrella archive: keeps `nb` linkable while the real code lives in the two
+# spine libraries.
+add_library(nb STATIC base/version.c)
+add_library(nb::nb ALIAS nb)
+target_include_directories(nb
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_link_libraries(nb PUBLIC nb_rpc nb_dds)
+set_target_properties(nb PROPERTIES
+    C_STANDARD 99
+    C_STANDARD_REQUIRED ON
+    OUTPUT_NAME nb)
 install(TARGETS nb
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     # Internal facilities (poolset/slotpool/iobuf/poller_alloc) are compile-time
     # details of the library, not part of the installed SDK.

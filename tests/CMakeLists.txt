@@ -43,33 +43,33 @@ endfunction()
 # ---- unit ---------------------------------------------------------------
 nb_add_test(test_framing unit.framing
     LABELS "unit;framing"
-    INCLUDES ${NB_SRC_DIR}/transport/common ${NB_SRC_DIR}/message)
+    INCLUDES ${NB_SRC_DIR}/rpc/transport/common ${NB_SRC_DIR}/rpc/message)
 
 nb_add_test(test_config unit.config LABELS "unit;config")
 nb_add_test(test_metrics unit.metrics
     LABELS "unit;metrics"
-    INCLUDES ${NB_SRC_DIR}/utils)
+    INCLUDES ${NB_SRC_DIR}/base)
 nb_add_test(test_registry unit.registry
     LABELS "unit;registry"
-    INCLUDES ${NB_SRC_DIR}/registry)
+    INCLUDES ${NB_SRC_DIR}/rpc/registry)
 nb_add_test(test_reliable unit.reliable
     LABELS "unit;reliable"
-    INCLUDES ${NB_SRC_DIR}/transport/common)
+    INCLUDES ${NB_SRC_DIR}/rpc/transport/common)
 nb_add_test(test_poller_alloc unit.poller_alloc
     LABELS "unit;poller_alloc"
     INCLUDES
-        ${NB_SRC_DIR}/runtime
+        ${NB_SRC_DIR}/rpc/runtime
         ${NB_SRC_DIR}/rpc
-        ${NB_SRC_DIR}/utils
-        ${NB_SRC_DIR}/discovery
-        ${NB_SRC_DIR}/message
-        ${NB_SRC_DIR}/registry
-        ${NB_SRC_DIR}/router
-        ${NB_SRC_DIR}/transport/common
+        ${NB_SRC_DIR}/base
+        ${NB_SRC_DIR}/rpc/discovery
+        ${NB_SRC_DIR}/rpc/message
+        ${NB_SRC_DIR}/rpc/registry
+        ${NB_SRC_DIR}/rpc/router
+        ${NB_SRC_DIR}/rpc/transport/common
         ${CMAKE_SOURCE_DIR}/3rdparty/uthash)
 nb_add_test(test_iobuf unit.iobuf
     LABELS "unit;iobuf"
-    INCLUDES ${NB_SRC_DIR}/utils)
+    INCLUDES ${NB_SRC_DIR}/base)
 nb_add_test(test_rtps_wire unit.rtps_wire
     LABELS "unit;rtps"
     INCLUDES ${NB_SRC_DIR}/rtps/internal)
@@ -94,7 +94,7 @@ nb_add_test(test_ntk_discovery unit.ntk_discovery
 # Contract: the rtps transport provider may only use the public rtps_* API.
 add_test(NAME contract.rtps_provider_api
     COMMAND ${CMAKE_COMMAND}
-            -DFILE=${CMAKE_SOURCE_DIR}/src/transport/rtps/rtps_transport.c
+            -DFILE=${CMAKE_SOURCE_DIR}/src/dds/rtps_backend.c
             -P ${CMAKE_CURRENT_SOURCE_DIR}/check_rtps_provider.cmake)
 set_tests_properties(contract.rtps_provider_api PROPERTIES
     LABELS "unit;contract;rtps"
@@ -128,19 +128,43 @@ set_tests_properties(contract.rtps_symbols PROPERTIES
     LABELS "unit;contract;rtps"
     TIMEOUT 30)
 
+# The RPC archive must not define DDS/RTPS backend symbols, and the DDS archive
+# must not define RPC node/service symbols. Skipped when no nm is available.
+add_test(NAME contract.rpc_symbols
+    COMMAND ${CMAKE_COMMAND}
+            -DNM=${CMAKE_NM}
+            -DARCHIVE=$<TARGET_FILE:nb_rpc>
+            "-DFORBIDDEN=rtps_;dds_"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_spine_symbols.cmake)
+set_tests_properties(contract.rpc_symbols PROPERTIES
+    LABELS "unit;contract;rpc"
+    TIMEOUT 30)
+
+add_test(NAME contract.dds_symbols
+    COMMAND ${CMAKE_COMMAND}
+            -DNM=${CMAKE_NM}
+            -DARCHIVE=$<TARGET_FILE:nb_dds>
+            "-DFORBIDDEN=nb_node_;nb_service_;nb_proxy_;ntk_discovery_"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_spine_symbols.cmake)
+set_tests_properties(contract.dds_symbols PROPERTIES
+    LABELS "unit;contract;dds"
+    TIMEOUT 30)
+
 nb_add_test(test_rtps_api e2e.rtps_api
     LABELS "e2e;rtps;api"
     TIMEOUT 60)
 
-nb_add_test(test_rtps_transport e2e.rtps_transport
-    LABELS "e2e;rtps"
-    INCLUDES ${NB_SRC_DIR}/rtps/internal
-    TIMEOUT 60)
-
-# Pub/sub spine: participant / topic / writer / reader over the RTPS backend.
-nb_add_test(test_pubsub e2e.pubsub
-    LABELS "e2e;rtps;pubsub"
+# DDS spine (nb_dds_*) over the in-tree RTPS backend.
+nb_add_test(test_dds_api e2e.dds_api_rtps
+    LIBRARIES nb_dds
+    LABELS "e2e;dds;rtps"
     TIMEOUT 90)
+if(NB_ENABLE_DDS)
+    add_test(NAME e2e.dds_api_cyclone COMMAND test_dds_api cyclone)
+    set_tests_properties(e2e.dds_api_cyclone PROPERTIES
+        LABELS "e2e;dds;dds_cyclone"
+        TIMEOUT 120)
+endif()
 
 nb_add_test(test_buffer unit.buffer LABELS "unit;buffer" LIBRARIES nb_base)
 nb_add_test(test_buf_concurrency unit.buf_concurrency
@@ -158,7 +182,7 @@ nb_add_test(test_stream e2e.stream LABELS "e2e;stream" TIMEOUT 300)
 nb_add_test(test_api e2e.api LABELS "e2e;api")
 nb_add_test(test_sample_queue unit.sample_queue
     LABELS "unit;dds"
-    INCLUDES ${NB_SRC_DIR}/pubsub
+    INCLUDES ${NB_SRC_DIR}/dds
     TIMEOUT 60)
 nb_add_test(test_move e2e.move LABELS "e2e;move")
 nb_add_test(test_worker e2e.worker LABELS "e2e;worker")
@@ -168,19 +192,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     nb_add_test(test_shm e2e.shm LABELS "e2e;shm")
     nb_add_test(test_shmseg unit.shmseg
         LABELS "unit;shm"
-        INCLUDES ${NB_SRC_DIR}/transport/shm)
+        INCLUDES ${NB_SRC_DIR}/rpc/transport/shm)
     nb_add_test(test_shm_mesh e2e.shm_mesh LABELS "e2e;shm")
 endif()
 
 if(NB_ENABLE_DDS)
-    nb_add_test(test_dds_loan e2e.dds_loan LABELS "e2e;dds")
-    nb_add_test(test_dds_local e2e.dds_local LABELS "e2e;dds")
-    nb_add_test(test_dds_remote e2e.dds_remote
-        LABELS "e2e;dds"
-        INCLUDES ${NB_SRC_DIR}/transport/dds
-        TIMEOUT 30)
     nb_add_test(test_rtps_cyclone e2e.rtps_cyclone
         LABELS "e2e;dds;rtps"
-        INCLUDES ${NB_SRC_DIR}/rtps/internal ${NB_SRC_DIR}/transport/dds
+        INCLUDES ${NB_SRC_DIR}/rtps/internal ${NB_SRC_DIR}/dds/cyclone
         TIMEOUT 180)
 endif()

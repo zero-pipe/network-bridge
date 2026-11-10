@@ -8,7 +8,7 @@
 | [01_rpc](../examples/01_rpc/README.md) | 最小 RPC：服务端注册方法，客户端同步 + 异步调用 | 服务端 + 客户端 |
 | [02_rpc_streaming](../examples/02_rpc_streaming/README.md) | RPC 流式：分块上传 | 单进程 |
 | [03_dds_pubsub](../examples/03_dds_pubsub/README.md) | DDS 发布/订阅：topic、writer、回调/history reader | 单进程 |
-| [04_config](../examples/04_config/README.md) | JSON 配置驱动 node（生产常用形态） | 服务端 + 客户端 |
+| [04_config](../examples/04_config/README.md) | JSON 配置驱动 RPC node 与 DDS participant | 服务端 + 客户端，或单进程 DDS |
 
 ## 构建
 
@@ -24,9 +24,8 @@ cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ```
 
-示例可执行文件生成在构建树的 `examples/` 下。`04_config` 使用的两个 JSON
-文件会自动复制到可执行文件旁边。`03_dds_pubsub` 需要 `NB_ENABLE_DDS=ON`
-（默认开启）。
+示例可执行文件生成在构建树的 `examples/` 下。`04_config` 使用的 JSON
+文件会自动复制到可执行文件旁边。`03_dds_pubsub` 默认使用内建 RTPS 后端；`cyclone` 后端需要 `NB_ENABLE_DDS=ON`（默认开启）。
 
 ## 阅读顺序
 

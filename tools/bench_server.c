@@ -5,16 +5,14 @@
  * tests/perf/framework/rpc_bench_server.c (OrderService.get), so the same
  * load generator conventions apply. Not a shipped example.
  */
-#include <nb/service.h>
-#include <nb/node.h>
-#include <nb/dds.h>
-#include <nb/rtps.h>
-#include <nb/shm.h>
+#include <nb/rpc/service.h>
+#include <nb/rpc/node.h>
+#include <nb/rpc/shm.h>
 #include <platform.h>
 #include <thread/thread_pool.h>
 
 #define NB_LOG_TAG "bench"
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 #include <signal.h>
 #include <stdio.h>
@@ -110,17 +108,10 @@ int main(int argc, char **argv)
     int rc;
     int index;
     int use_worker = 0;
-    int use_dds = 0;
     int use_shm = 0;
-    int use_rtps = 0;
-    const char *rtps_endpoint = NULL;
-    int dds_domain = 0;
     const char *shm_channel = "nb-shm-bench";
-    char dds_endpoint[32];
     char shm_endpoint[128];
-    nb_binding_config_t dds_binding;
     nb_binding_config_t shm_binding;
-    nb_binding_config_t rtps_binding;
     unsigned main_executor_threads = 0;
     int block_worker = 0;
     size_t block_delay_ms = 0;
@@ -158,17 +149,10 @@ int main(int argc, char **argv)
             node_cfg.runtime.handler_max_concurrency = (unsigned)strtoul(argv[++index], NULL, 10);
         } else if (strcmp(argv[index], "--worker") == 0) {
             use_worker = 1;
-        } else if (strcmp(argv[index], "--dds") == 0) {
-            use_dds = 1;
         } else if (strcmp(argv[index], "--shm") == 0) {
             use_shm = 1;
-        } else if (strcmp(argv[index], "--rtps") == 0 && index + 1 < argc) {
-            use_rtps = 1;
-            rtps_endpoint = argv[++index];
         } else if (strcmp(argv[index], "--shm-channel") == 0 && index + 1 < argc) {
             shm_channel = argv[++index];
-        } else if (strcmp(argv[index], "--dds-domain") == 0 && index + 1 < argc) {
-            dds_domain = atoi(argv[++index]);
         } else if (strcmp(argv[index], "--executor") == 0 && index + 1 < argc) {
             main_executor_threads = (unsigned)strtoul(argv[++index], NULL, 10);
         } else if (strcmp(argv[index], "--block-method") == 0 && index + 1 < argc) {
@@ -224,8 +208,7 @@ int main(int argc, char **argv)
                           "[--mode static|mesh] "
                           "[--service <name>] [--method <name>] [--bind <ip>] [--io-threads <n>] "
                           "[--handler-threads <n>] [--handler-max-concurrency <n>] [--worker] "
-                          "[--dds] [--dds-domain <n>] [--shm] [--shm-channel <name>] "
-                          "[--rtps <binding-uri>] "
+                          "[--shm] [--shm-channel <name>] "
                           "[--executor <threads>] "
                           "[--discovery-port <p>] [--data-port <p>] [--max-msg-bytes <n>] "
                           "[--backpressure-bytes <n>] [--peer <ip:port>]",
@@ -237,10 +220,6 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if ((use_shm ? 1 : 0) + (use_dds ? 1 : 0) + (use_rtps ? 1 : 0) > 1) {
-        nb_log_error("--shm, --dds and --rtps are mutually exclusive");
-        return 1;
-    }
     if (use_shm) {
         if (nb_shm_register() != NB_OK) {
             nb_log_error("shm provider register failed");
@@ -250,33 +229,7 @@ int main(int argc, char **argv)
         memset(&shm_binding, 0, sizeof(shm_binding));
         shm_binding.name = "shm";
         shm_binding.endpoint = shm_endpoint;
-        shm_binding.intra_process = NB_INTRA_PROCESS_OFF;
         node_cfg.bindings = &shm_binding;
-        node_cfg.binding_count = 1;
-        mode = NB_NODE_MODE_STATIC;
-    } else if (use_dds) {
-        if (nb_cyclone_dds_register() != NB_OK) {
-            nb_log_error("dds provider register failed");
-            return 1;
-        }
-        snprintf(dds_endpoint, sizeof(dds_endpoint), "dds://%d", dds_domain);
-        memset(&dds_binding, 0, sizeof(dds_binding));
-        dds_binding.name = "dds";
-        dds_binding.endpoint = dds_endpoint;
-        dds_binding.intra_process = NB_INTRA_PROCESS_OFF;
-        node_cfg.bindings = &dds_binding;
-        node_cfg.binding_count = 1;
-        mode = NB_NODE_MODE_STATIC;
-    } else if (use_rtps) {
-        if (nb_rtps_transport_register() != NB_OK) {
-            nb_log_error("rtps provider register failed");
-            return 1;
-        }
-        memset(&rtps_binding, 0, sizeof(rtps_binding));
-        rtps_binding.name = "rtps";
-        rtps_binding.endpoint = rtps_endpoint;
-        rtps_binding.intra_process = NB_INTRA_PROCESS_OFF;
-        node_cfg.bindings = &rtps_binding;
         node_cfg.binding_count = 1;
         mode = NB_NODE_MODE_STATIC;
     }
@@ -351,8 +304,7 @@ int main(int argc, char **argv)
                  service_name,
                  method_name,
                  block_method_name ? block_method_name : "-",
-                 use_shm ? "shm" : (use_dds ? "dds" : (use_rtps ? "rtps" :
-                     (nb_node_transport(node) == NB_TRANSPORT_KIND_TCP ? "tcp" : "udp"))),
+                 use_shm ? "shm" : (nb_node_transport(node) == NB_TRANSPORT_KIND_TCP ? "tcp" : "udp"),
                  (unsigned)nb_node_data_port(node),
                  (unsigned)nb_node_discovery_port(node),
                  node_cfg.runtime.handler_threads,

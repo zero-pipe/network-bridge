@@ -15,13 +15,17 @@
  * this spine, not to the backend.
  *
  * What does NOT belong here: topics, samples, reader histories, waitsets,
- * DDS status events and the DDS QoS policy set. Those live in <nb/pubsub.h>.
+ * DDS status events and the DDS QoS policy set. Those live in <nb/dds.h>.
  */
 
 #include <nb/base.h>
-#include <nb/config.h>
-#include <nb/node.h>
-#include <nb/proxy.h>
-#include <nb/service.h>
+#include <nb/rpc/types.h>
+#include <nb/rpc/endpoint.h>
+#include <nb/rpc/message.h>
+#include <nb/rpc/message_view.h>
+#include <nb/rpc/config.h>
+#include <nb/rpc/node.h>
+#include <nb/rpc/proxy.h>
+#include <nb/rpc/service.h>
 
 #endif /* NB_RPC_H */

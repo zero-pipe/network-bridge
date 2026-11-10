@@ -1,0 +1,1009 @@
+/* 节点：生命周期、传输装配、线程/发现配置与阻塞运行（分发见 nb_dispatch.c）。 */
+#include "node_internal.h"
+
+#include <nb/config.h>
+
+#include "metric_macros.h"
+#include "defaults.h"
+#include <nb/internal/poller_alloc.h>
+#include "transport_factory.h"
+#include "util.h"
+
+#include <nb/base/log.h>
+
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+uint64_t nb_now_ms(void)
+{
+    return ntk_monotonic_ms();
+}
+
+/* 出站分片：按 key 稳定选择 poller；未启用池时回退到 node->poller。 */
+ntk_poller *nb_node_pick_poller(const nb_node_t *node, uint64_t key)
+{
+    ntk_poller *poller = NULL;
+    if (!node) {
+        return NULL;
+    }
+    if (node->pool) {
+        poller = ntk_poller_pool_get_by_key((ntk_poller_pool *)node->pool, key);
+    }
+    return poller ? poller : node->poller;
+}
+
+/* poller 在 node 出站分片中的下标；找不到返回 -1。 */
+int nb_node_poller_index(const nb_node_t *node, ntk_poller *poller)
+{
+    unsigned i;
+    if (!node || !poller) {
+        return -1;
+    }
+    for (i = 0; i < node->io_count; i++) {
+        if (node->io_pollers[i] == poller) {
+            return (int)i;
+        }
+    }
+    if (node->poller == poller) {
+        return 0;
+    }
+    return -1;
+}
+
+int nb_node_is_send_thread(const nb_node_t *node)
+{
+    return node && node->send_poller && ntk_poller_is_current_thread(node->send_poller);
+}
+
+/* 线程安全 xorshift：CAS 推进共享种子，避免并发 nb_node_create 时竞争/重复 id。 */
+static uint32_t nb_rand(void)
+{
+    static uint32_t st;
+    uint32_t expected = nb_atomic_load_u32(&st);
+
+    for (;;) {
+        uint32_t cur = expected;
+        uint32_t next;
+
+        if (cur == 0) {
+            cur = (uint32_t)ntk_monotonic_ms() ^ 0x9e3779b9u;
+            if (cur == 0) {
+                cur = 0x9e3779b9u;
+            }
+        }
+        next = cur;
+        next ^= next << 13;
+        next ^= next >> 17;
+        next ^= next << 5;
+        /* expected 必须保持共享状态本身；cur 只用于生成候选值。 */
+        if (nb_atomic_cas_u32(&st, &expected, next)) {
+            return next;
+        }
+    }
+}
+
+/* ---- 定长对象复用池 ---- */
+
+int nb_obj_pool_init(nb_obj_pool_t *pool, unsigned limit)
+{
+    if (!pool) {
+        return NB_ERR_INVALID;
+    }
+    memset(pool, 0, sizeof(*pool));
+    pool->limit = limit ? limit : 256;
+    pool->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    return pool->lock ? NB_OK : NB_ERR_NOMEM;
+}
+
+void nb_obj_pool_destroy(nb_obj_pool_t *pool)
+{
+    void *obj;
+    if (!pool) {
+        return;
+    }
+    obj = pool->free_list;
+    while (obj) {
+        void *next = *(void **)obj;
+        free(obj);
+        obj = next;
+    }
+    pool->free_list = NULL;
+    pool->count = 0;
+    if (pool->lock) {
+        ntk_mutex_destroy(pool->lock);
+        pool->lock = NULL;
+    }
+}
+
+void *nb_obj_pool_alloc(nb_obj_pool_t *pool, size_t size)
+{
+    void *obj = NULL;
+    if (!pool || !pool->lock) {
+        return malloc(size);
+    }
+    if (ntk_mutex_trylock(pool->lock) == NTK_OK) {
+        if (pool->free_list) {
+            obj = pool->free_list;
+            pool->free_list = *(void **)obj;
+            if (pool->count > 0) {
+                pool->count--;
+            }
+        }
+        ntk_mutex_unlock(pool->lock);
+    }
+    return obj ? obj : malloc(size);
+}
+
+void nb_obj_pool_free(nb_obj_pool_t *pool, void *obj)
+{
+    if (!obj) {
+        return;
+    }
+    if (pool && pool->lock && ntk_mutex_trylock(pool->lock) == NTK_OK) {
+        if (pool->count < pool->limit) {
+            *(void **)obj = pool->free_list;
+            pool->free_list = obj;
+            pool->count++;
+            obj = NULL;
+        }
+        ntk_mutex_unlock(pool->lock);
+    }
+    if (obj) {
+        free(obj);
+    }
+}
+
+/* ---- 定时器 ---- */
+
+static void nb_hello_timer_cb(void *user)
+{
+    nb_node_t *node = (nb_node_t *)user;
+    if (node && node->registry_backend && node->registry_backend->ops->announce) {
+        node->registry_backend->ops->announce(node, 0);
+    }
+}
+
+static void nb_node_timer_cb(void *user)
+{
+    nb_node_t *node = (nb_node_t *)user;
+    uint64_t now = nb_now_ms();
+    if (node->registry_backend && node->registry_backend->ops->tick) {
+        node->registry_backend->ops->tick(node, now);
+    }
+    nb_service_expire_streams(node, now);
+    nb_node_expire_cancels(node, now);
+    nb_dedup_expire(&node->dedup, now);
+}
+
+/* 每个 poller 各自驱动本 lane 上 pending 的超时/重传。 */
+static void nb_pending_timer_cb(void *user)
+{
+    nb_node_t *node = (nb_node_t *)user;
+    nb_pending_tick(node, nb_now_ms(), ntk_poller_current());
+}
+
+/* ---- 公共 API ---- */
+
+int nb_node_create(const nb_node_config_t *cfg, nb_node_t **out)
+{
+    nb_node_t *node;
+    nb_node_config_t local;
+    ntk_poller_pool_opts_t popts;
+    static uint32_t platform_inited = 0;
+
+    if (!cfg || !out) {
+        return NB_ERR_INVALID;
+    }
+    local = *cfg;
+    nb_node_config_normalize(&local);
+    cfg = &local;
+    if (!cfg->rpc.bind_host[0]) {
+        return NB_ERR_INVALID;
+    }
+    if (nb_str_fits(cfg->name, NB_NAME_MAX) != NB_OK ||
+        nb_str_fits(cfg->rpc.bind_host, NB_HOST_MAX) != NB_OK ||
+        nb_str_fits(cfg->rpc.discovery.broadcast_host, NB_HOST_MAX) != NB_OK) {
+        return NB_ERR_TOOBIG;
+    }
+    *out = NULL;
+    node = (nb_node_t *)calloc(1, sizeof(*node));
+    if (!node) {
+        return NB_ERR_NOMEM;
+    }
+    if (cfg->rpc.service_table && nb_service_table_install(cfg->rpc.service_table) != NB_OK) {
+        free(node);
+        return NB_ERR_INVALID;
+    }
+    nb_copy_str(node->name, sizeof(node->name), cfg->name, NULL);
+    nb_copy_str(node->bind_host, sizeof(node->bind_host), cfg->rpc.bind_host, NULL);
+    nb_copy_str(node->discovery_host, sizeof(node->discovery_host), cfg->rpc.discovery.broadcast_host, NULL);
+    node->discovery_port = cfg->rpc.discovery.port;
+    node->io_threads = cfg->runtime.io_threads;
+    node->send_lanes = cfg->runtime.send_lanes;
+    node->hello_interval_ms = cfg->rpc.discovery.hello_interval_ms;
+    node->node_ttl_ms = cfg->rpc.discovery.node_ttl_ms;
+    node->mode = cfg->rpc.mode;
+    node->frag_bytes = cfg->rpc.frag_bytes;
+    node->max_msg_bytes = cfg->rpc.max_msg_bytes;
+    node->bp_high_water = cfg->rpc.backpressure_bytes;
+    node->rtcp_interval_ms = cfg->rpc.rtcp_interval_ms;
+    node->disable_rtcp = cfg->rpc.disable_rtcp;
+    node->max_recv_streams = cfg->runtime.max_streams;
+    node->rate_limit_pps = cfg->runtime.peer_rate_limit_pps;
+    node->handler_max_concurrency = cfg->runtime.handler_max_concurrency;
+    node->max_inflight = cfg->runtime.max_inflight;
+    /*
+     * metrics / log 运行期开关：关闭后热路径只多一次全局标志判断（见 atomic.h /
+     * log.h）。sample_every 只作用于延迟直方图采样。
+     */
+    nb_metrics_enabled = cfg->metrics.disable ? 0 : 1;
+    nb_latency_enabled = (cfg->metrics.disable || cfg->metrics.disable_latency_histogram) ? 0 : 1;
+    nb_metrics_sample_every = cfg->metrics.sample_every;
+    nb_log_configure(cfg->log.disable ? 0 : 1, cfg->log.level);
+    {
+        const char *dp = getenv("DROP_PERCENT");
+        int v = dp ? atoi(dp) : 0;
+        if (v < 0) {
+            v = 0;
+        }
+        if (v > 50) {
+            v = 50;
+        }
+        node->drop_percent = (uint8_t)v;
+    }
+    node->node_id = nb_rand();
+    if (node->node_id == 0) {
+        node->node_id = 1;
+    }
+    node->next_request_id = 1;
+    nb_route_init(&node->routes);
+    nb_registry_init(&node->registry);
+    node->registry_backend = (cfg->rpc.mode == NB_NODE_MODE_MESH) ? nb_registry_backend_mesh() : NULL;
+    node->id_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    if (!node->id_lock) {
+        nb_node_destroy(node);
+        return NB_ERR_NOMEM;
+    }
+    node->services_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    node->codecs_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    node->pending_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    node->rate_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    node->discovery.targets_lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    if (!node->services_lock || !node->codecs_lock || !node->pending_lock || !node->rate_lock ||
+        !node->discovery.targets_lock) {
+        nb_node_destroy(node);
+        return NB_ERR_NOMEM;
+    }
+    /* 保护 worker 限流计数与自定义 executor 诊断计数。 */
+    node->handler_limit_mutex = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    if (!node->handler_limit_mutex) {
+        nb_node_destroy(node);
+        return NB_ERR_NOMEM;
+    }
+    if (nb_obj_pool_init(&node->worker_call_pool, 256) != NB_OK) {
+        nb_node_destroy(node);
+        return NB_ERR_NOMEM;
+    }
+    if (nb_obj_pool_init(&node->handler_task_pool, 256) != NB_OK ||
+        nb_obj_pool_init(&node->reply_task_pool, 256) != NB_OK) {
+        nb_node_destroy(node);
+        return NB_ERR_NOMEM;
+    }
+
+    if (nb_atomic_once_begin(&platform_inited)) {
+        ntk_platform_init();
+        nb_atomic_once_end(&platform_inited);
+    }
+
+    memset(&popts, 0, sizeof(popts));
+    popts.size = node->io_threads;
+    popts.thread_priority = NTK_THREAD_PRIO_NORMAL;
+    node->pool = ntk_poller_pool_create(&popts);
+    if (!node->pool || ntk_poller_pool_start(node->pool) != NTK_OK) {
+        nb_node_destroy(node);
+        return NB_ERR_IO;
+    }
+    {
+        unsigned i;
+        unsigned n = ntk_poller_pool_size(node->pool);
+        if (n > NB_TRANSPORT_MAX_IO) {
+            n = NB_TRANSPORT_MAX_IO;
+        }
+        node->io_count = n;
+        for (i = 0; i < n; i++) {
+            node->io_pollers[i] = ntk_poller_pool_at(node->pool, i);
+        }
+        node->poller = n ? node->io_pollers[0] : NULL;
+    }
+
+    /*
+     * 挂载 per-poller 缓冲池，先把底层能力接上，热路径再逐步迁移到
+     * ntk_buf_alloc_local / ntk_buf_pool_acquire。每档设上限，避免无界增长。
+     */
+    {
+        ntk_buf_pool_opts bopts;
+        memset(&bopts, 0, sizeof(bopts));
+        bopts.max_per_bucket = NB_MEM_BUF_POOL_MAX_PER_BUCKET;
+        bopts.thread_safe = 0; /* poller 本地，热路径无锁 */
+        if (ntk_poller_pool_attach_buf_pools(node->pool, &bopts) != NTK_OK) {
+            nb_node_destroy(node);
+            return NB_ERR_NOMEM;
+        }
+    }
+
+    /*
+     * 可选专用发送通道：一组独立 poller 线程，只跑 nb_node_post_send 提交的
+     * 发布循环，与接收/分发的 io poller 隔离。发送循环在其上调用
+     * nb_proxy_call_event 会命中 inline 快路径，省掉每次发送的跨线程入队+唤醒。
+     */
+    if (cfg->runtime.send_lanes > 0) {
+        ntk_poller_pool_opts_t sopts;
+        ntk_buf_pool_opts bopts;
+
+        memset(&sopts, 0, sizeof(sopts));
+        sopts.size = cfg->runtime.send_lanes;
+        sopts.thread_priority = NTK_THREAD_PRIO_NORMAL;
+        node->send_pool = ntk_poller_pool_create(&sopts);
+        if (!node->send_pool || ntk_poller_pool_start(node->send_pool) != NTK_OK) {
+            nb_node_destroy(node);
+            return NB_ERR_IO;
+        }
+        memset(&bopts, 0, sizeof(bopts));
+        bopts.max_per_bucket = NB_MEM_BUF_POOL_MAX_PER_BUCKET;
+        bopts.thread_safe = 0;
+        if (ntk_poller_pool_attach_buf_pools(node->send_pool, &bopts) != NTK_OK) {
+            nb_node_destroy(node);
+            return NB_ERR_NOMEM;
+        }
+        node->send_poller = ntk_poller_pool_at(node->send_pool, 0);
+        if (!node->send_poller) {
+            nb_node_destroy(node);
+            return NB_ERR_IO;
+        }
+    }
+
+    /*
+     * 可选 handler 线程池：把注册为 *_worker 的业务 handler 移出 poller，
+     * 避免单个阻塞 handler 卡死整条 poller。回复经 ntk_poller_async 回投。
+     */
+    if (cfg->runtime.handler_threads > 0) {
+        ntk_thread_pool_opts_t hopts;
+        memset(&hopts, 0, sizeof(hopts));
+        hopts.thread_count = cfg->runtime.handler_threads;
+        hopts.priority = NTK_THREAD_PRIO_NORMAL;
+        hopts.auto_start = 1;
+        node->handler_pool = ntk_thread_pool_create(&hopts);
+        if (!node->handler_pool) {
+            nb_node_destroy(node);
+            return NB_ERR_NOMEM;
+        }
+    }
+
+    if (cfg->bindings && cfg->binding_count > 0) {
+        size_t i;
+        for (i = 0; i < cfg->binding_count; i++) {
+            const nb_binding_config_t *binding = &cfg->bindings[i];
+            if (nb_node_transport_add_binding(node, binding) != NB_OK) {
+                nb_node_destroy(node);
+                return NB_ERR_IO;
+            }
+        }
+    } else {
+        const char *scheme = cfg->rpc.kind == NB_TRANSPORT_KIND_TCP ? "tcp" : "udp";
+        if (nb_node_transport_add(node,
+                                  scheme,
+                                  node->bind_host,
+                                  cfg->rpc.data_port,
+                                  NULL) != NB_OK) {
+            nb_node_destroy(node);
+            return NB_ERR_IO;
+        }
+    }
+
+    if (node->mode == NB_NODE_MODE_MESH) {
+        if (!node->registry_backend || !node->registry_backend->ops->start ||
+            node->registry_backend->ops->start(node) != NB_OK) {
+            nb_node_destroy(node);
+            return NB_ERR_IO;
+        }
+        node->hello_timer =
+            ntk_timer_start(node->poller, node->hello_interval_ms, 1, nb_hello_timer_cb, node);
+    }
+    node->node_timer =
+        ntk_timer_start(node->poller, nb_tick_interval_ms(), 1, nb_node_timer_cb, node);
+    {
+        unsigned i;
+        for (i = 0; i < node->io_count; i++) {
+            node->pending_timers[i] = ntk_timer_start(
+                node->io_pollers[i], nb_tick_interval_ms(), 1, nb_pending_timer_cb, node);
+        }
+    }
+    {
+        size_t i;
+        for (i = 0; i < cfg->rpc.peer_count; i++) {
+            if (nb_node_add_discovery_peer(node, cfg->rpc.peers[i].host, cfg->rpc.peers[i].port) !=
+                NB_OK) {
+                nb_node_destroy(node);
+                return NB_ERR_INVALID;
+            }
+        }
+        for (i = 0; i < cfg->rpc.route_count; i++) {
+            if (nb_node_add_static_route_uri(
+                    node, cfg->rpc.routes[i].service, cfg->rpc.routes[i].endpoint) != NB_OK) {
+                nb_node_destroy(node);
+                return NB_ERR_INVALID;
+            }
+        }
+    }
+    node->started = 1;
+
+    if (node->mode == NB_NODE_MODE_MESH) {
+        if (node->registry_backend && node->registry_backend->ops->announce) {
+            node->registry_backend->ops->announce(node, 0);
+        }
+    }
+    *out = node;
+    return NB_OK;
+}
+
+void nb_node_destroy(nb_node_t *node)
+{
+    if (!node) {
+        return;
+    }
+    node->shutting_down = 1;
+    if (node->started && node->mode == NB_NODE_MODE_MESH) {
+        if (node->registry_backend && node->registry_backend->ops->announce) {
+            node->registry_backend->ops->announce(node, 1); /* BYE */
+        }
+    }
+    /*
+     * 先销毁 handler 线程池：drain 队列并 join worker。worker 期间的 nb_reply 会
+     * 回投仍运行的 poller，从而在传输/路由销毁前完成发送。
+     */
+    if (node->handler_pool) {
+        ntk_thread_pool_destroy(node->handler_pool);
+        node->handler_pool = NULL;
+    }
+    /* 池已 drain，worker task/call 已归还；此时销毁复用池。 */
+    nb_obj_pool_destroy(&node->handler_task_pool);
+    nb_obj_pool_destroy(&node->worker_call_pool);
+    /* Quiesce poller callbacks before destroying sockets or transport state. */
+    if (node->pool) {
+        ntk_poller_pool_stop(node->pool);
+        /*
+         * 停线程后、拆传输前，排空回投的回复任务：此时仍在本线程执行发送，
+         * 传输对象尚存活，避免任务在传输销毁后才被 drain 造成悬垂访问。
+         */
+        {
+            unsigned pi;
+            unsigned pn = ntk_poller_pool_size(node->pool);
+            for (pi = 0; pi < pn; pi++) {
+                ntk_poller_process_pending(ntk_poller_pool_at(node->pool, pi));
+            }
+        }
+    }
+    /* 专用发送通道同样先停线程、排空残留的发布任务，再拆传输。 */
+    if (node->send_pool) {
+        unsigned pi;
+        unsigned pn = ntk_poller_pool_size(node->send_pool);
+
+        ntk_poller_pool_stop(node->send_pool);
+        for (pi = 0; pi < pn; pi++) {
+            ntk_poller_process_pending(ntk_poller_pool_at(node->send_pool, pi));
+        }
+    }
+    /* 回投的回复任务已排空，任务头可安全回收。 */
+    nb_obj_pool_destroy(&node->reply_task_pool);
+    /*
+     * poller 已停：取消登记/限流计数不再被定时器或 worker 访问，可以安全销毁。
+     * 内置池已 drain 并 join，inflight 归零；自定义 executor 由调用者负责排空，
+     * 这里只做诊断，若仍有任务在飞说明契约被违反。
+     */
+    if (node->handler_limit_mutex) {
+        ntk_mutex_lock(node->handler_limit_mutex);
+        if (node->external_inflight > 0) {
+            nb_log_error("nb_node_destroy: %u custom-executor task(s) still in flight; "
+                          "caller must drain the executor before destroy",
+                          node->external_inflight);
+        }
+        ntk_mutex_unlock(node->handler_limit_mutex);
+        ntk_mutex_destroy(node->handler_limit_mutex);
+        node->handler_limit_mutex = NULL;
+    }
+    if (node->hello_timer) {
+        ntk_timer_stop(node->hello_timer);
+        node->hello_timer = NULL;
+    }
+    if (node->node_timer) {
+        ntk_timer_stop(node->node_timer);
+        node->node_timer = NULL;
+    }
+    {
+        unsigned i;
+        for (i = 0; i < NB_TRANSPORT_MAX_IO; i++) {
+            if (node->pending_timers[i]) {
+                ntk_timer_stop(node->pending_timers[i]);
+                node->pending_timers[i] = NULL;
+            }
+        }
+    }
+    {
+        size_t i;
+        for (i = 0; i < node->transport_count; i++) {
+            if (node->transports[i]) {
+                nb_transport_stop(node->transports[i]);
+            }
+        }
+    }
+    if (node->registry_backend && node->registry_backend->ops->stop) {
+        node->registry_backend->ops->stop(node);
+    }
+    if (node->discovery.targets_lock) {
+        ntk_mutex_destroy(node->discovery.targets_lock);
+        node->discovery.targets_lock = NULL;
+    }
+    nb_pending_cleanup(node);
+    if (node->pending_lock) {
+        ntk_mutex_destroy(node->pending_lock);
+        node->pending_lock = NULL;
+    }
+    if (node->rate_lock) {
+        ntk_mutex_destroy(node->rate_lock);
+        node->rate_lock = NULL;
+    }
+    nb_route_cleanup(&node->routes);
+    nb_registry_cleanup(&node->registry);
+    {
+        size_t i;
+        for (i = 0; i < node->transport_count; i++) {
+            if (node->transports[i]) {
+                nb_transport_destroy(node->transports[i]);
+                node->transports[i] = NULL;
+            }
+        }
+        node->transport_count = 0;
+    }
+    if (node->send_pool) {
+        ntk_poller_pool_destroy(node->send_pool);
+        node->send_pool = NULL;
+        node->send_poller = NULL;
+    }
+    if (node->pool) {
+        ntk_poller_pool_destroy(node->pool);
+        node->pool = NULL;
+    }
+    {
+        nb_service_t *svc = node->services;
+        while (svc) {
+            nb_service_t *next = svc->next;
+            nb_method_t *m = svc->methods;
+            while (m) {
+                nb_method_t *mn = m->next;
+                if (m->owns_user) {
+                    free(m->user);
+                }
+                free(m);
+                m = mn;
+            }
+            free(svc);
+            svc = next;
+        }
+        node->services = NULL;
+    }
+    {
+        nb_codec_entry_t *c = node->codecs;
+        while (c) {
+            nb_codec_entry_t *next = c->next;
+            free(c);
+            c = next;
+        }
+        node->codecs = NULL;
+    }
+    if (node->id_lock) {
+        ntk_mutex_destroy(node->id_lock);
+    }
+    if (node->services_lock) {
+        ntk_mutex_destroy(node->services_lock);
+        node->services_lock = NULL;
+    }
+    if (node->codecs_lock) {
+        ntk_mutex_destroy(node->codecs_lock);
+        node->codecs_lock = NULL;
+    }
+    {
+        int i;
+        for (i = 0; i < NB_STREAM_MAX_RECV_STREAMS; i++) {
+            if (node->recv_streams[i].used && node->recv_streams[i].call) {
+                nb_poller_free(node->recv_streams[i].call);
+                node->recv_streams[i].call = NULL;
+                node->recv_streams[i].used = 0;
+            }
+            free(node->recv_streams[i].metadata);
+            node->recv_streams[i].metadata = NULL;
+        }
+    }
+    free(node);
+}
+
+/* ---- 节点状态与端点 ---- */
+
+const char *nb_node_name(const nb_node_t *node)
+{
+    return node ? node->name : NULL;
+}
+
+nb_transport_kind_t nb_node_transport(const nb_node_t *node)
+{
+    return (node && node->transport_count > 0 && node->transports[0]) ? node->transports[0]->kind :
+                                                                        NB_TRANSPORT_KIND_UDP;
+}
+
+uint16_t nb_node_discovery_port(const nb_node_t *node)
+{
+    return node ? node->discovery_port : 0;
+}
+
+uint16_t nb_node_data_port(const nb_node_t *node)
+{
+    return (node && node->transport_count > 0 && node->transports[0]) ? node->transports[0]->port :
+                                                                        0;
+}
+
+size_t nb_node_binding_count(const nb_node_t *node)
+{
+    return node ? node->transport_count : 0;
+}
+
+int nb_node_binding_endpoint(const nb_node_t *node, size_t index, char *out, size_t cap)
+{
+    size_t len;
+
+    if (!node || index >= node->transport_count || !node->transports[index]) {
+        return NB_ERR_NOTFOUND;
+    }
+    if (!out || cap == 0 || !node->transports[index]->endpoint_uri[0]) {
+        return NB_ERR_INVALID;
+    }
+    len = strlen(node->transports[index]->endpoint_uri);
+    if (len >= cap) {
+        return NB_ERR_TOOBIG;
+    }
+    memcpy(out, node->transports[index]->endpoint_uri, len + 1);
+    return NB_OK;
+}
+
+/* ---- 指标与对端质量 ---- */
+
+/* 从累计直方图估算分位值；最后一桶返回 10000（表示 >=10s）。 */
+static uint64_t nb_latency_percentile(const uint64_t *hist, uint64_t total, uint32_t pct)
+{
+    uint64_t target;
+    uint64_t cumulative = 0;
+    int i;
+    if (!hist || total == 0) {
+        return 0;
+    }
+    target = (total * (uint64_t)pct + 99u) / 100u;
+    for (i = 0; i < NB_LATENCY_HIST_BUCKETS; i++) {
+        cumulative += hist[i];
+        if (cumulative >= target) {
+            return i < NB_LATENCY_HIST_BUCKETS - 1 ? nb_latency_bounds[i] : 10000u;
+        }
+    }
+    return 10000u;
+}
+
+void nb_node_metrics(const nb_node_t *node, nb_metrics_t *out)
+{
+    unsigned i;
+    if (!out) {
+        return;
+    }
+    if (!node) {
+        memset(out, 0, sizeof(*out));
+        return;
+    }
+    /* 逐字段原子读，避免与多个 poller 的增量并发时读到撕裂值。 */
+#define NB_METRICS_SNAPSHOT_U64(field) \
+    out->field = nb_atomic_load_u64(&node->metrics.field)
+    NB_METRICS_SNAPSHOT_U64(requests_sent);
+    NB_METRICS_SNAPSHOT_U64(responses_received);
+    NB_METRICS_SNAPSHOT_U64(requests_failed);
+    NB_METRICS_SNAPSHOT_U64(timeouts);
+    NB_METRICS_SNAPSHOT_U64(retries);
+    NB_METRICS_SNAPSHOT_U64(bytes_sent);
+    NB_METRICS_SNAPSHOT_U64(bytes_received);
+    NB_METRICS_SNAPSHOT_U64(udp_packets_sent);
+    NB_METRICS_SNAPSHOT_U64(udp_packets_received);
+    NB_METRICS_SNAPSHOT_U64(udp_retransmissions);
+    NB_METRICS_SNAPSHOT_U64(udp_nacks_sent);
+    NB_METRICS_SNAPSHOT_U64(udp_reassembly_expired);
+    NB_METRICS_SNAPSHOT_U64(tcp_frames_sent);
+    NB_METRICS_SNAPSHOT_U64(tcp_frames_received);
+    NB_METRICS_SNAPSHOT_U64(backpressure_events);
+    NB_METRICS_SNAPSHOT_U64(rtcp_sr_sent);
+    NB_METRICS_SNAPSHOT_U64(rtcp_rr_sent);
+    NB_METRICS_SNAPSHOT_U64(rtcp_sr_received);
+    NB_METRICS_SNAPSHOT_U64(rtcp_rr_received);
+    NB_METRICS_SNAPSHOT_U64(rtcp_bye_sent);
+    NB_METRICS_SNAPSHOT_U64(rtcp_bye_received);
+    out->rtcp_rtt_ms = nb_atomic_load_u32(&node->metrics.rtcp_rtt_ms);
+    out->rtcp_jitter_ms = nb_atomic_load_u32(&node->metrics.rtcp_jitter_ms);
+    out->rtcp_remote_lost =
+        (int32_t)nb_atomic_load_u32((const uint32_t *)&node->metrics.rtcp_remote_lost);
+    NB_METRICS_SNAPSHOT_U64(connections);
+    NB_METRICS_SNAPSHOT_U64(latency_count);
+    NB_METRICS_SNAPSHOT_U64(latency_sum_ms);
+    NB_METRICS_SNAPSHOT_U64(rate_limited);
+    NB_METRICS_SNAPSHOT_U64(streams_rejected);
+    for (i = 0; i < NB_LATENCY_HIST_BUCKETS; i++) {
+        out->latency_hist[i] = nb_atomic_load_u64(&node->metrics.latency_hist[i]);
+    }
+#undef NB_METRICS_SNAPSHOT_U64
+    out->latency_p50_ms = nb_latency_percentile(out->latency_hist, out->latency_count, 50u);
+    out->latency_p90_ms = nb_latency_percentile(out->latency_hist, out->latency_count, 90u);
+    out->latency_p99_ms = nb_latency_percentile(out->latency_hist, out->latency_count, 99u);
+    out->inflight_requests = nb_atomic_load_u32((const uint32_t *)&node->pending_count);
+    if (node->handler_limit_mutex) {
+        ntk_mutex_lock(node->handler_limit_mutex);
+        out->inflight_handlers = (uint64_t)node->handler_inflight + node->external_inflight;
+        ntk_mutex_unlock(node->handler_limit_mutex);
+    }
+    /* Providers contribute their own scope (today only RTPS has counters). */
+    for (i = 0; i < node->transport_count; i++) {
+        nb_transport_t *transport = node->transports[i];
+        const nb_transport_provider_ops_t *ops;
+
+        if (!transport || !transport->provider) {
+            continue;
+        }
+        ops = transport->provider->ops;
+        if (!ops || !ops->metrics_read) {
+            continue;
+        }
+        if (ops->struct_size != 0 &&
+            ops->struct_size <
+                offsetof(nb_transport_provider_ops_t, metrics_read) +
+                    sizeof(ops->metrics_read)) {
+            continue;
+        }
+        ops->metrics_read(transport->provider_instance, out);
+    }
+}
+
+int nb_node_peer_stats(const nb_node_t *node, const char *ip, uint16_t port, nb_peer_stats_t *out)
+{
+    size_t i;
+    if (!node || !ip || !out) {
+        return NB_ERR_INVALID;
+    }
+    memset(out, 0, sizeof(*out));
+    for (i = 0; i < node->transport_count; i++) {
+        nb_transport_t *t = node->transports[i];
+        if (t && t->ops && t->ops->peer_stats && t->ops->peer_stats(t, ip, port, out) == 1) {
+            return NB_OK;
+        }
+    }
+    memset(out, 0, sizeof(*out));
+    return NB_ERR_NOTFOUND;
+}
+
+/* ---- 发现与路由 ---- */
+
+int nb_node_add_discovery_peer(nb_node_t *node, const char *ip, uint16_t discovery_port)
+{
+    int i;
+    int added = 0;
+    if (!node || !ip || !ip[0] || !discovery_port) {
+        return NB_ERR_INVALID;
+    }
+    if (strlen(ip) >= NB_HOST_MAX) {
+        return NB_ERR_TOOBIG;
+    }
+    if (!node->discovery.targets_lock) {
+        return NB_ERR_INVALID;
+    }
+    ntk_mutex_lock(node->discovery.targets_lock);
+    for (i = 0; i < NB_DISCOVERY_MAX_TARGETS; i++) {
+        if (node->discovery.targets[i].used &&
+            node->discovery.targets[i].port == discovery_port &&
+            strcmp(node->discovery.targets[i].ip, ip) == 0) {
+            ntk_mutex_unlock(node->discovery.targets_lock);
+            return NB_ERR_ALREADY;
+        }
+        if (!node->discovery.targets[i].used) {
+            node->discovery.targets[i].used = 1;
+            nb_copy_str(node->discovery.targets[i].ip,
+                        sizeof(node->discovery.targets[i].ip),
+                        ip,
+                        NULL);
+            node->discovery.targets[i].port = discovery_port;
+            added = 1;
+            break;
+        }
+    }
+    ntk_mutex_unlock(node->discovery.targets_lock);
+    if (!added) {
+        return NB_ERR_NOMEM;
+    }
+    if (node->registry_backend && node->registry_backend->ops->announce) {
+        node->registry_backend->ops->announce(node, 0);
+    }
+    return NB_OK;
+}
+
+int nb_node_add_static_route(
+    nb_node_t *node, const char *service, const char *ip, uint16_t port, nb_transport_kind_t transport)
+{
+    if (!node || !service || !ip) {
+        return NB_ERR_INVALID;
+    }
+    return nb_route_set(&node->routes, service, ip, port, transport);
+}
+
+int nb_node_add_static_route_uri(nb_node_t *node, const char *service, const char *endpoint)
+{
+    if (!node || !service || !endpoint) {
+        return NB_ERR_INVALID;
+    }
+    return nb_route_add_endpoint(&node->routes, service, endpoint, 1);
+}
+
+/* ---- 服务等待与调度 ---- */
+
+int nb_node_wait_for_service(nb_node_t *node, const char *service, uint64_t timeout_ms)
+{
+    uint64_t deadline;
+    char ip[NB_HOST_MAX];
+    uint16_t port = 0;
+    if (!node || !service) {
+        return NB_ERR_INVALID;
+    }
+    if (node->mode == NB_NODE_MODE_STATIC) {
+        return NB_OK;
+    }
+    deadline = nb_now_ms() + (timeout_ms ? timeout_ms : NB_DEFAULT_TIMEOUT_MS);
+    for (;;) {
+        if (nb_route_lookup(&node->routes, service, ip, sizeof(ip), &port, NULL, NULL, 0) == NB_OK) {
+            return NB_OK;
+        }
+        {
+            nb_endpoint_t endpoint;
+            if (nb_registry_select(&node->registry, service, &endpoint) == NB_OK) {
+                return NB_OK;
+            }
+        }
+        if (nb_now_ms() >= deadline) {
+            return NB_ERR_TIMEOUT;
+        }
+        ntk_sleep_ms(10);
+    }
+}
+
+/* ---- 在 poller 线程投递任务 ---- */
+
+typedef struct nb_post_task {
+    void (*fn)(void *user);
+    void *user;
+} nb_post_task_t;
+
+static void nb_post_trampoline(void *user)
+{
+    nb_post_task_t *t = (nb_post_task_t *)user;
+    t->fn(t->user);
+    nb_poller_free(t);
+}
+
+int nb_node_post(nb_node_t *node, void (*fn)(void *user), void *user)
+{
+    nb_post_task_t *t;
+    if (!node || !fn) {
+        return NB_ERR_INVALID;
+    }
+    t = (nb_post_task_t *)nb_poller_alloc(sizeof(*t));
+    if (!t) {
+        return NB_ERR_NOMEM;
+    }
+    memset(t, 0, sizeof(*t));
+    t->fn = fn;
+    t->user = user;
+    if (ntk_poller_async(node->poller, nb_post_trampoline, t, 1) != NTK_OK) {
+        nb_poller_free(t);
+        return NB_ERR_IO;
+    }
+    return NB_OK;
+}
+
+int nb_node_post_send(nb_node_t *node, void (*fn)(void *user), void *user)
+{
+    nb_post_task_t *t;
+    if (!node || !fn || !node->send_poller) {
+        return NB_ERR_INVALID;
+    }
+    t = (nb_post_task_t *)nb_poller_alloc(sizeof(*t));
+    if (!t) {
+        return NB_ERR_NOMEM;
+    }
+    memset(t, 0, sizeof(*t));
+    t->fn = fn;
+    t->user = user;
+    if (ntk_poller_async(node->send_poller, nb_post_trampoline, t, 1) != NTK_OK) {
+        nb_poller_free(t);
+        return NB_ERR_IO;
+    }
+    return NB_OK;
+}
+
+static uint64_t nb_post_delay_cb(void *user)
+{
+    nb_post_task_t *t = (nb_post_task_t *)user;
+    t->fn(t->user);
+    nb_poller_free(t);
+    return 0; /* 单次 */
+}
+
+int nb_node_post_delay(nb_node_t *node, uint64_t delay_ms, void (*fn)(void *user), void *user)
+{
+    nb_post_task_t *t;
+    if (!node || !fn) {
+        return NB_ERR_INVALID;
+    }
+    t = (nb_post_task_t *)nb_poller_alloc(sizeof(*t));
+    if (!t) {
+        return NB_ERR_NOMEM;
+    }
+    memset(t, 0, sizeof(*t));
+    t->fn = fn;
+    t->user = user;
+    if (ntk_poller_do_delay(node->poller, delay_ms, nb_post_delay_cb, t) == NULL) {
+        nb_poller_free(t);
+        return NB_ERR_IO;
+    }
+    return NB_OK;
+}
+
+/* ---- 阻塞运行 ---- */
+
+static volatile sig_atomic_t nb_g_signal;
+
+static void nb_signal_handler(int signo)
+{
+    (void)signo;
+    nb_g_signal = 1;
+}
+
+int nb_node_run_once(nb_node_t *node, uint64_t timeout_ms)
+{
+    uint64_t deadline;
+    if (!node) {
+        return NB_ERR_INVALID;
+    }
+    deadline = nb_now_ms() + timeout_ms;
+    while (!nb_g_signal) {
+        if (timeout_ms && nb_now_ms() >= deadline) {
+            return NB_ERR_TIMEOUT;
+        }
+        ntk_sleep_ms(20);
+    }
+    return NB_OK;
+}
+
+int nb_node_run_until_signal(nb_node_t *node)
+{
+    if (!node) {
+        return NB_ERR_INVALID;
+    }
+    if (signal(SIGINT, nb_signal_handler) == SIG_ERR) {
+        return NB_ERR_IO;
+    }
+    (void)signal(SIGTERM, nb_signal_handler);
+    return nb_node_run_once(node, 0);
+}
+
+int nb_node_run(nb_node_t *node)
+{
+    return nb_node_run_until_signal(node);
+}

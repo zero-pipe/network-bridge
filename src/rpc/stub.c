@@ -7,7 +7,7 @@
 #include <nb/internal/poller_alloc.h>
 #include "util.h"
 
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 #include <stdlib.h>
 #include <string.h>

@@ -13,7 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <nb/error.h>
+#include <nb/base/error.h>
 
 #include "rtps_cdr.h"
 #include "rtps_types.h"

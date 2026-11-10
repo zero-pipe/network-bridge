@@ -6,10 +6,10 @@
 
 #define NB_LOG_TAG "example"
 #include <nb/config.h>
-#include <nb/node.h>
-#include <nb/service.h>
+#include <nb/rpc/node.h>
+#include <nb/rpc/service.h>
 
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 static void echo_handler(nb_call_t *call, const nb_request_t *req, void *user)
 {
@@ -21,20 +21,20 @@ static void echo_handler(nb_call_t *call, const nb_request_t *req, void *user)
 int main(int argc, char **argv)
 {
     const char *path = argc > 1 ? argv[1] : "server.json";
-    nb_config_doc_t *cfg = NULL;
+    nb_rpc_config_doc_t *cfg = NULL;
     nb_config_error_t err;
     nb_node_t *node = NULL;
     nb_service_t *svc = NULL;
     int rc;
 
-    rc = nb_config_parse_file(path, &cfg, &err);
+    rc = nb_rpc_config_parse_file(path, &cfg, &err);
     if (rc != NB_OK) {
         nb_log_error(
             "load config failed: %s (%d) path=%s reason=%s", path, rc, err.path, err.reason);
         return 1;
     }
     rc = nb_node_create_from_config(cfg, &node);
-    nb_config_doc_destroy(cfg);
+    nb_rpc_config_doc_destroy(cfg);
     if (rc == NB_OK) {
         rc = nb_service_create(node, "EchoService", &svc);
     }

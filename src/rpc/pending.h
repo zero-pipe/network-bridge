@@ -3,7 +3,7 @@
 
 /* pending：客户端未完成调用的关联表（request_id -> 回调/超时）。 */
 
-#include <nb/types.h>
+#include <nb/rpc/types.h>
 #include <ntk.h>
 
 #include <stddef.h>

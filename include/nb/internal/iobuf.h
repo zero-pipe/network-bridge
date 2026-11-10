@@ -19,7 +19,7 @@
  * 直接 free 兜底。本模块不依赖任何框架（ntk 等），可独立使用。
  */
 
-#include <nb/buf.h>
+#include <nb/base/buf.h>
 
 #include <stddef.h>
 #include <stdint.h>

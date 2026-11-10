@@ -11,16 +11,16 @@
  *   - deadline 传播到 req/call，排队期间过期的任务在启动前被跳过；
  *   - nb_proxy_cancel 把取消传播到服务端，排队任务被跳过。
  */
-#include <nb/proxy.h>
-#include <nb/node.h>
-#include <nb/service.h>
+#include <nb/rpc/proxy.h>
+#include <nb/rpc/node.h>
+#include <nb/rpc/service.h>
 #include <platform.h>
 #include <thread/sem.h>
 #include <thread/sync.h>
 #include <thread/thread.h>
 
 #define NB_LOG_TAG "test"
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 #include <stdio.h>
 #include <stdlib.h>

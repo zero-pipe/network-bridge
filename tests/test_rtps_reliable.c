@@ -1,7 +1,7 @@
 #include "rtps_reliable.h"
 
 #define NB_LOG_TAG "test"
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 #include <stdio.h>
 #include <string.h>

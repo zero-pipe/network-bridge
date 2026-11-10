@@ -5,16 +5,16 @@
  * 请求/响应队列、provider 线程与 chunk 池完全按真实部署路径运行，覆盖多客户端
  * 对同一 server 的并发回投。跨进程覆盖由 benchmark 工具（--shm）与质量门禁提供。
  */
-#include <nb/proxy.h>
-#include <nb/node.h>
-#include <nb/service.h>
-#include <nb/proxy.h>
-#include <nb/shm.h>
+#include <nb/rpc/proxy.h>
+#include <nb/rpc/node.h>
+#include <nb/rpc/service.h>
+#include <nb/rpc/proxy.h>
+#include <nb/rpc/shm.h>
 #include <platform.h>
 #include <thread/sem.h>
 
 #define NB_LOG_TAG "test"
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -150,7 +150,6 @@ int main(void)
     memset(&server_binding, 0, sizeof(server_binding));
     server_binding.name = "shm";
     server_binding.endpoint = server_endpoint;
-    server_binding.intra_process = NB_INTRA_PROCESS_OFF;
 
     nb_node_config_default(&server_cfg);
     server_cfg.name = "shm-server";
@@ -163,7 +162,6 @@ int main(void)
         memset(&client_binding[c], 0, sizeof(client_binding[c]));
         client_binding[c].name = "shm";
         client_binding[c].endpoint = client_endpoint[c];
-        client_binding[c].intra_process = NB_INTRA_PROCESS_OFF;
 
         nb_node_config_default(&client_cfg[c]);
         client_cfg[c].name = "shm-client";

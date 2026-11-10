@@ -1,6 +1,6 @@
 #include <nb/internal/poller_alloc.h>
 
-#include <nb/buf.h>
+#include <nb/base/buf.h>
 
 typedef struct nb_poller_hdr {
     nb_buf_t *buf;

@@ -1,0 +1,81 @@
+{
+  "name": "full-config",
+  "threads": { "io": 2, "handlers": 4, "send_lanes": 0 },
+  "limits": {
+    "max_inflight": 16384,
+    "max_streams": 32,
+    "handler_queue": 64,
+    "peer_rate_per_second": 1000
+  },
+  "rpc": {
+    "mode": "static",
+    "listen": ["tcp://127.0.0.1:42440"],
+    "max_message_bytes": 2097152,
+    "backpressure_bytes": 8388608,
+    "udp": {
+      "fragment_bytes": 1200,
+      "rtcp_interval": "1s",
+      "rtcp": true
+    },
+    "discovery": {
+      "broadcast": "255.255.255.255:41953",
+      "peers": ["192.168.1.20:41953"],
+      "hello_interval": "2s",
+      "node_ttl": "6s"
+    },
+    "routes": [
+      { "service": "EchoService", "endpoint": "tcp://127.0.0.1:42440" }
+    ]
+  },
+  "dds": {
+    "backend": "rtps",
+    "domain": 70,
+    "partition": "orders",
+    "prefix": "app",
+    "qos": {
+      "reliability": "reliable",
+      "durability": "volatile",
+      "history": "keep_last",
+      "depth": 8,
+      "deadline": "1s",
+      "lifespan": "10s",
+      "latency_budget": "250ms",
+      "min_separation": "100ms",
+      "liveliness": "automatic",
+      "lease_duration": "5s",
+      "ownership": "shared",
+      "max_samples": 0,
+      "max_instances": 0,
+      "max_samples_per_instance": 0,
+      "autodispose_unregistered": true,
+      "presentation_scope": "instance",
+      "coherent_access": false,
+      "ordered_access": false
+    },
+    "rtps": {
+      "bind_host": "127.0.0.1",
+      "advertise_host": "127.0.0.1",
+      "multicast_group": "",
+      "spdp_port": 48400,
+      "unicast_port": 48401,
+      "announce_interval": "200ms",
+      "lease": "4s",
+      "data_heartbeat": "500ms",
+      "data_history_depth": 8,
+      "tcp": false,
+      "tcp_port": 0,
+      "standard_ports": false,
+      "participant_id": 0,
+      "peers": ["127.0.0.1:48402"]
+    }
+  },
+  "metrics": {
+    "enabled": true,
+    "latency_histogram": true,
+    "sample_every": 10
+  },
+  "log": {
+    "enabled": true,
+    "level": "info"
+  }
+}

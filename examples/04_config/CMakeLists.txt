@@ -1,4 +1,10 @@
 nb_add_example(example_04_config_server server.c)
 nb_add_example(example_04_config_client client.c)
+nb_add_example(example_04_config_dds dds.c)
 nb_copy_example_file(example_04_config_server server.json)
 nb_copy_example_file(example_04_config_client client.json)
+nb_copy_example_file(example_04_config_dds dds.json)
+# 全量字段参考；两个 RPC 进程与 DDS 示例都复制一份，方便对照。
+nb_copy_example_file(example_04_config_server full.json)
+nb_copy_example_file(example_04_config_client full.json)
+nb_copy_example_file(example_04_config_dds full.json)

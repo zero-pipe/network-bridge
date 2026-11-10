@@ -1,0 +1,21 @@
+{
+  "name": "dds-config-example",
+  "threads": { "io": 1 },
+  "log": { "enabled": true, "level": "info" },
+  "dds": {
+    "backend": "rtps",
+    "domain": 70,
+    "partition": "example",
+    "prefix": "app",
+    "qos": {
+      "reliability": "reliable",
+      "durability": "volatile",
+      "history": "keep_last",
+      "depth": 4
+    },
+    "rtps": {
+      "bind_host": "127.0.0.1",
+      "multicast_group": ""
+    }
+  }
+}

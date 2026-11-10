@@ -3,8 +3,8 @@
  * 声明通常在创建任何节点之前安装，之后只读；因此这里不加锁，避免给热路径
  * 增加开销。请在启动阶段完成 install。
  */
-#include <nb/service_table.h>
-#include <nb/types.h>
+#include <nb/rpc/service_table.h>
+#include <nb/rpc/types.h>
 
 #include <string.h>
 

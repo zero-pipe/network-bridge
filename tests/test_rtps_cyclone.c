@@ -5,7 +5,7 @@
 #include "cy_dds_message.h"
 
 #define NB_LOG_TAG "test"
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 #include <dds/dds.h>
 #include <ntk.h>

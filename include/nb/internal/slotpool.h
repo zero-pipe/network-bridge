@@ -13,7 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <nb/buf.h>
+#include <nb/base/buf.h>
 
 #ifdef __cplusplus
 extern "C" {

@@ -5,7 +5,7 @@
  * 编码＋扇出，跳过普通 send 路径里把 payload 拷进 chunk 的那一次 memcpy。
  * 句柄由 core 分配、publish/release 归还，额度来自 provider 的段内 chunk。
  */
-#include <nb/proxy.h>
+#include <nb/rpc/proxy.h>
 
 #include <stdlib.h>
 #include <string.h>

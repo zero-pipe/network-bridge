@@ -1,5 +1,5 @@
 #include <nb/internal/slotpool.h>
-#include <nb/buf.h>
+#include <nb/base/buf.h>
 
 #include <stdint.h>
 #include <stdio.h>

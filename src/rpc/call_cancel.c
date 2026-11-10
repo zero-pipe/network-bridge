@@ -12,7 +12,7 @@
 #include "atomic.h"
 #include "envelope.h"
 
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 #include <string.h>
 

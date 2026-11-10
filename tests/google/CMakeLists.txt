@@ -27,9 +27,9 @@ if(NB_BUILD_GTESTS)
     add_executable(test_gtest_modules test_gtest_modules.cpp)
     target_include_directories(test_gtest_modules PRIVATE
         ${GOOGLE_GTEST_ROOT}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/message
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/transport/common
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/runtime)
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/rpc/message
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/rpc/transport/common
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/rpc/runtime)
     target_link_libraries(test_gtest_modules PRIVATE nb ${GTEST_MAIN_LIB}
         ${GTEST_LIB})
     if(MSVC)
@@ -56,8 +56,8 @@ if(NB_BUILD_BENCHMARKS)
         add_executable(bench_modules bench_modules.cpp)
         target_include_directories(bench_modules PRIVATE
             ${GOOGLE_BENCH_ROOT}/include
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/message
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/transport/common)
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/rpc/message
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/rpc/transport/common)
         target_link_libraries(bench_modules PRIVATE nb ${BENCH_LIB})
         if(UNIX)
             find_package(Threads REQUIRED)

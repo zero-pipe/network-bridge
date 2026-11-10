@@ -11,11 +11,11 @@
  */
 
 #define NB_LOG_TAG "example"
-#include <nb/node.h>
-#include <nb/proxy.h>
-#include <nb/service.h>
+#include <nb/rpc/node.h>
+#include <nb/rpc/proxy.h>
+#include <nb/rpc/service.h>
 
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 #include <stdio.h>
 #include <string.h>

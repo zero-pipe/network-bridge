@@ -5,7 +5,7 @@
 #include "rtps_param.h"
 
 #define NB_LOG_TAG "test"
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 #include <ntk.h>
 
@@ -758,7 +758,7 @@ static void test_discovery_views(void)
     nb_rtps_endpoint_info_t subscription;
     test_state_t state_a;
     test_state_t state_b;
-    nb_discovery_sample_t views[8];
+    nb_dds_discovery_sample_t views[8];
     uint16_t port_a;
     uint16_t port_b;
     size_t n;
@@ -818,11 +818,11 @@ static void test_discovery_views(void)
     CHECK(wait_endpoint_count(&state_a, 0, 1, 5000));
 
     /* DCPSParticipant: the local participant and the discovered peer. */
-    n = nb_rtps_participant_discovery_read(a, NB_BUILTIN_TOPIC_PARTICIPANT, views, 8);
+    n = nb_rtps_participant_discovery_read(a, NB_DDS_BUILTIN_TOPIC_PARTICIPANT, views, 8);
     CHECK(n == 2);
     local_count = 0;
     for (i = 0; i < n; i++) {
-        CHECK(views[i].topic == NB_BUILTIN_TOPIC_PARTICIPANT);
+        CHECK(views[i].topic == NB_DDS_BUILTIN_TOPIC_PARTICIPANT);
         if (views[i].is_local) {
             local_count++;
             CHECK(strcmp(views[i].name, "view-a") == 0);
@@ -834,7 +834,7 @@ static void test_discovery_views(void)
     CHECK(local_count == 1);
 
     /* DCPSPublication on A: its own writer only. */
-    n = nb_rtps_participant_discovery_read(a, NB_BUILTIN_TOPIC_PUBLICATION, views, 8);
+    n = nb_rtps_participant_discovery_read(a, NB_DDS_BUILTIN_TOPIC_PUBLICATION, views, 8);
     CHECK(n == 1);
     if (n == 1) {
         CHECK(views[0].is_local);
@@ -845,7 +845,7 @@ static void test_discovery_views(void)
     }
 
     /* DCPSSubscription on A: the remote reader B announced. */
-    n = nb_rtps_participant_discovery_read(a, NB_BUILTIN_TOPIC_SUBSCRIPTION, views, 8);
+    n = nb_rtps_participant_discovery_read(a, NB_DDS_BUILTIN_TOPIC_SUBSCRIPTION, views, 8);
     CHECK(n == 1);
     if (n == 1) {
         CHECK(!views[0].is_local);
@@ -854,10 +854,10 @@ static void test_discovery_views(void)
     }
 
     /* DCPSTopic: both (topic, type) pairs with their endpoint counts. */
-    n = nb_rtps_participant_discovery_read(a, NB_BUILTIN_TOPIC_TOPIC, views, 8);
+    n = nb_rtps_participant_discovery_read(a, NB_DDS_BUILTIN_TOPIC_TOPIC, views, 8);
     CHECK(n == 2);
     for (i = 0; i < n; i++) {
-        CHECK(views[i].topic == NB_BUILTIN_TOPIC_TOPIC);
+        CHECK(views[i].topic == NB_DDS_BUILTIN_TOPIC_TOPIC);
         CHECK(views[i].type_name[0] != '\0');
         if (strcmp(views[i].name, "topic.a") == 0) {
             saw_topic_a = 1;
@@ -873,12 +873,12 @@ static void test_discovery_views(void)
     }
     CHECK(saw_topic_a && saw_topic_b);
     if (n == 2) {
-        CHECK(memcmp(views[0].handle, views[1].handle, NB_DISCOVERY_HANDLE_SIZE) != 0);
+        CHECK(memcmp(views[0].handle, views[1].handle, NB_DDS_DISCOVERY_HANDLE_SIZE) != 0);
     }
 
     /* Bounds and invalid topic ids. */
-    CHECK(nb_rtps_participant_discovery_read(a, NB_BUILTIN_TOPIC_PARTICIPANT, views, 1) == 1);
-    CHECK(nb_rtps_participant_discovery_read(a, (nb_builtin_topic_t)99, views, 8) == 0);
+    CHECK(nb_rtps_participant_discovery_read(a, NB_DDS_BUILTIN_TOPIC_PARTICIPANT, views, 1) == 1);
+    CHECK(nb_rtps_participant_discovery_read(a, (nb_dds_builtin_topic_t)99, views, 8) == 0);
 
     nb_rtps_participant_stop(a);
     nb_rtps_participant_stop(b);

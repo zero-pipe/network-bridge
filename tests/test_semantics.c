@@ -1,14 +1,14 @@
 /*
  * gRPC 语义对齐：metadata、rich status、服务端/客户端拦截器。
  */
-#include <nb/proxy.h>
-#include <nb/node.h>
-#include <nb/service.h>
+#include <nb/rpc/proxy.h>
+#include <nb/rpc/node.h>
+#include <nb/rpc/service.h>
 #include <platform.h>
 #include <thread/sem.h>
 
 #define NB_LOG_TAG "test"
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 #include <stdio.h>
 #include <stdlib.h>

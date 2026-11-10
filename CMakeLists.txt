@@ -3,7 +3,7 @@ if(POLICY CMP0091)
     cmake_policy(SET CMP0091 NEW)
 endif()
 project(network_bridge
-    VERSION 0.4.0
+    VERSION 0.5.0
     DESCRIPTION "Heterogeneous network communication framework (RPC, pub/sub, streaming)"
     HOMEPAGE_URL "https://github.com/zero-pipe/network_bridge"
     LANGUAGES C)
@@ -84,6 +84,11 @@ if(NB_ENABLE_DDS)
 
     add_library(nb_cyclonedds INTERFACE)
     target_link_libraries(nb_cyclonedds INTERFACE ddsc)
+    if(WIN32)
+        # Cyclone's Windows rusage implementation calls GetProcessMemoryInfo.
+        # Link psapi after ddsc so the static archive scan resolves it.
+        target_link_libraries(nb_cyclonedds INTERFACE psapi)
+    endif()
     target_compile_definitions(nb_cyclonedds INTERFACE NB_ENABLE_DDS=1)
 endif()
 

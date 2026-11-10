@@ -1,14 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://network-bridge.local/config.schema.json",
-  "title": "network bridge 框架配置",
-  "description": "nb_config_parse 和 nb_config_parse_file 接受的 JSON 配置。字段按用法分组；字符串枚举为小写且区分大小写；时长写数字（毫秒）或 \"250ms\" / \"2s\"。未知字段会被忽略（nb_config_parse 会打印警告）。",
+  "title": "network bridge 配置",
+  "description": "nb_rpc_config_parse / nb_dds_config_parse 接受的 JSON。两个主干各自解析自己的块：rpc 与 dds 互不依赖，同一个文件可以同时包含两块。字符串枚举小写且区分大小写；时长写数字（毫秒）或 \"250ms\" / \"2s\"。",
   "type": "object",
   "properties": {
+    "$schema": { "type": "string" },
     "name": {
       "type": "string",
       "maxLength": 63,
-      "description": "Node 名称。默认：nb。"
+      "description": "进程名；RPC node 和 DDS participant 都使用。默认：nb。"
     },
     "threads": {
       "type": "object",
@@ -17,19 +18,19 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 8,
-          "description": "poller 线程数。0 表示硬件并发数。"
+          "description": "RPC poller 线程数。0 表示硬件并发数。"
         },
         "handlers": {
           "type": "integer",
           "minimum": 0,
           "maximum": 1024,
-          "description": "worker 线程数。0 关闭 worker 线程池。"
+          "description": "RPC worker 线程数。0 关闭线程池。"
         },
         "send_lanes": {
           "type": "integer",
           "minimum": 0,
           "maximum": 64,
-          "description": "专用发送 lane 的 poller 线程，与接收/分发 poller 隔离。"
+          "description": "RPC 专用发送 lane 线程数。"
         }
       },
       "additionalProperties": true
@@ -63,11 +64,12 @@
     },
     "rpc": {
       "type": "object",
+      "description": "RPC 主干：node/service/proxy，传输可选 tcp/udp/shm。",
       "properties": {
         "mode": {
           "type": "string",
           "enum": ["mesh", "static"],
-          "description": "服务发现模式。默认：mesh。static 关闭发现。"
+          "description": "服务发现模式。默认 mesh；static 关闭 ntk_discovery。"
         },
         "listen": {
           "type": "array",
@@ -75,15 +77,15 @@
           "items": {
             "type": "string",
             "maxLength": 255,
-            "description": "监听端点 URI，例如 tcp://0.0.0.0:42420。"
+            "description": "监听端点 URI，scheme 选择传输：tcp://、udp://、shm://。"
           },
-          "description": "RPC 监听端点。同一个 URI 也出现在 pubsub.backends 时，两个面共用一个传输。"
+          "description": "RPC 传输列表。客户端也需要至少一个端点用于出站。最多 8 个。"
         },
         "max_message_bytes": {
           "type": "integer",
           "minimum": 0,
           "maximum": 67108864,
-          "description": "单条消息上限。默认 1 MiB。"
+          "description": "单条 RPC 消息上限。默认 1 MiB。"
         },
         "backpressure_bytes": {
           "type": "integer",
@@ -95,10 +97,7 @@
           "properties": {
             "fragment_bytes": {
               "type": "integer",
-              "anyOf": [
-                { "const": 0 },
-                { "minimum": 256, "maximum": 8192 }
-              ],
+              "anyOf": [{ "const": 0 }, { "minimum": 256, "maximum": 8192 }],
               "description": "UDP 分片大小。0 使用默认值 1440。"
             },
             "rtcp_interval": {
@@ -122,10 +121,7 @@
             "peers": {
               "type": "array",
               "maxItems": 32,
-              "items": {
-                "type": "string",
-                "description": "单播 HELLO 目标，host:port 形式。"
-              }
+              "items": { "type": "string", "description": "单播 HELLO 目标 host:port。" }
             },
             "hello_interval": {
               "$ref": "#/$defs/duration",
@@ -145,10 +141,7 @@
             "type": "object",
             "required": ["service", "endpoint"],
             "properties": {
-              "service": {
-                "type": "string",
-                "maxLength": 63
-              },
+              "service": { "type": "string", "maxLength": 63 },
               "endpoint": {
                 "type": "string",
                 "maxLength": 255,
@@ -157,55 +150,75 @@
             },
             "additionalProperties": true
           },
-          "description": "绕过发现流程的静态服务路由。"
+          "description": "静态服务路由；优先于发现结果。"
         }
       },
       "additionalProperties": true
     },
-    "pubsub": {
+    "dds": {
       "type": "object",
+      "description": "DDS 主干：participant/topic/writer/reader，后端 rtps 或 cyclone。不依赖 RPC node。",
       "properties": {
-        "backends": {
-          "type": "array",
-          "maxItems": 8,
-          "items": {
-            "oneOf": [
-              {
-                "type": "string",
-                "maxLength": 255,
-                "description": "后端端点 URI，例如 dds://0、rtps://0、shm://orders:1。"
-              },
-              {
-                "type": "object",
-                "required": ["endpoint"],
-                "properties": {
-                  "endpoint": {
-                    "type": "string",
-                    "maxLength": 255
-                  },
-                  "qos": {
-                    "$ref": "#/$defs/qos"
-                  },
-                  "intra_process": {
-                    "type": "string",
-                    "enum": ["off", "auto", "only"],
-                    "description": "DDS 事件的进程内快路径。"
-                  },
-                  "poll_us": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "description": "shm 排空本地队列后的忙轮询窗口（微秒）。"
-                  }
-                },
-                "additionalProperties": true
-              }
-            ]
-          },
-          "description": "发布/订阅后端；participant/topic 在运行期创建。"
+        "backend": {
+          "type": "string",
+          "enum": ["rtps", "cyclone"],
+          "description": "DDS 后端。默认 rtps；cyclone 需要 NB_ENABLE_DDS=ON。"
         },
-        "default_qos": {
-          "$ref": "#/$defs/qos",
-          "description": "binding 的 qos 为 INHERIT 时使用的默认 QoS。"
+        "domain": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "DDS domain id。默认 0。"
+        },
+        "partition": {
+          "type": "string",
+          "maxLength": 127,
+          "description": "DDS partition。作为默认 QoS 继承到 topic/endpoint。"
+        },
+        "prefix": {
+          "type": "string",
+          "maxLength": 127,
+          "description": "topic 名前缀；线上名 = prefix/name。"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 63,
+          "description": "participant 名称。默认取顶层 name。"
+        },
+        "qos": { "$ref": "#/$defs/qos" },
+        "rtps": {
+          "type": "object",
+          "properties": {
+            "bind_host": { "type": "string", "maxLength": 63 },
+            "advertise_host": { "type": "string", "maxLength": 63 },
+            "multicast_group": {
+              "type": "string",
+              "maxLength": 63,
+              "description": "SPDP 组播地址；空字符串关闭组播。"
+            },
+            "spdp_port": { "type": "integer", "minimum": 0, "maximum": 65535 },
+            "unicast_port": { "type": "integer", "minimum": 0, "maximum": 65535 },
+            "announce_interval": { "$ref": "#/$defs/duration" },
+            "lease": { "$ref": "#/$defs/duration" },
+            "data_heartbeat": { "$ref": "#/$defs/duration" },
+            "data_history_depth": { "type": "integer", "minimum": 0 },
+            "tcp": { "type": "boolean", "description": "启用 RTPS over TCP。" },
+            "tcp_port": { "type": "integer", "minimum": 0, "maximum": 65535 },
+            "standard_ports": { "type": "boolean" },
+            "participant_id": { "type": "integer", "minimum": 0 },
+            "peers": {
+              "type": "array",
+              "maxItems": 32,
+              "items": { "type": "string", "description": "单播 SPDP 目标 host:port。" }
+            }
+          },
+          "additionalProperties": true
+        },
+        "cyclone": {
+          "type": "object",
+          "properties": {
+            "config_xml": { "type": "string", "maxLength": 511 }
+          },
+          "additionalProperties": true
         }
       },
       "additionalProperties": true
@@ -213,33 +226,20 @@
     "metrics": {
       "type": "object",
       "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "是否采集指标。默认 true。"
-        },
-        "latency_histogram": {
-          "type": "boolean",
-          "description": "是否采集延迟直方图。默认 true。"
-        },
-        "sample_every": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "延迟采样间隔。0 或 1 表示每次调用都采样。"
-        }
+        "enabled": { "type": "boolean", "description": "是否采集 RPC 指标。默认 true。" },
+        "latency_histogram": { "type": "boolean", "description": "是否采集延迟直方图。默认 true。" },
+        "sample_every": { "type": "integer", "minimum": 0, "description": "延迟采样间隔。0/1 表示全采样。" }
       },
       "additionalProperties": true
     },
     "log": {
       "type": "object",
       "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "是否输出日志。默认 true。"
-        },
+        "enabled": { "type": "boolean", "description": "是否输出日志。默认 true。" },
         "level": {
           "type": "string",
           "enum": ["assert", "error", "warn", "info", "debug", "verbose"],
-          "description": "日志级别。默认：info。"
+          "description": "日志级别。默认 info。"
         }
       },
       "additionalProperties": true
@@ -248,108 +248,36 @@
   "$defs": {
     "duration": {
       "oneOf": [
-        {
-          "type": "integer",
-          "minimum": 0,
-          "description": "毫秒数。"
-        },
-        {
-          "type": "string",
-          "pattern": "^[0-9]+(ms|s)$",
-          "description": "带单位的时长，例如 250ms、2s。"
-        }
+        { "type": "integer", "minimum": 0, "description": "毫秒数。" },
+        { "type": "string", "pattern": "^[0-9]+(ms|s)$", "description": "带单位的时长。" }
       ]
     },
     "qos": {
       "type": "object",
+      "description": "DDS QoS。缺省字段继承 participant 默认值；两个后端使用同一套 DDS 默认（best_effort / volatile / keep_last 1）。",
       "properties": {
-        "reliability": {
-          "type": "string",
-          "enum": ["best_effort", "reliable"],
-          "description": "DDS ReliabilityQosPolicy。"
-        },
-        "durability": {
-          "type": "string",
-          "enum": ["volatile", "transient_local"],
-          "description": "DDS DurabilityQosPolicy。"
-        },
-        "history": {
-          "type": "string",
-          "enum": ["keep_last", "keep_all"],
-          "description": "DDS HistoryQosPolicy。"
-        },
-        "depth": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "keep_last 的 history 深度。0 使用 provider 默认值。"
-        },
-        "deadline": {
-          "$ref": "#/$defs/duration",
-          "description": "DDS DeadlineQosPolicy。"
-        },
-        "lifespan": {
-          "$ref": "#/$defs/duration",
-          "description": "DDS LifespanQosPolicy。"
-        },
-        "latency_budget": {
-          "$ref": "#/$defs/duration",
-          "description": "DDS LatencyBudgetQosPolicy。"
-        },
-        "min_separation": {
-          "$ref": "#/$defs/duration",
-          "description": "DDS TimeBasedFilterQosPolicy 的最小间隔。"
-        },
+        "reliability": { "type": "string", "enum": ["best_effort", "reliable"] },
+        "durability": { "type": "string", "enum": ["volatile", "transient_local"] },
+        "history": { "type": "string", "enum": ["keep_last", "keep_all"] },
+        "depth": { "type": "integer", "minimum": 0, "description": "keep_last 深度。" },
+        "deadline": { "$ref": "#/$defs/duration" },
+        "lifespan": { "$ref": "#/$defs/duration" },
+        "latency_budget": { "$ref": "#/$defs/duration" },
+        "min_separation": { "$ref": "#/$defs/duration", "description": "DDS TimeBasedFilter 最小间隔。" },
         "liveliness": {
           "type": "string",
-          "enum": ["automatic", "manual_by_participant", "manual_by_topic"],
-          "description": "DDS LivelinessQosPolicy 类型。"
+          "enum": ["automatic", "manual_by_participant", "manual_by_topic"]
         },
-        "lease_duration": {
-          "$ref": "#/$defs/duration",
-          "description": "DDS LivelinessQosPolicy 的租约时长。"
-        },
-        "ownership": {
-          "type": "string",
-          "enum": ["shared", "exclusive"],
-          "description": "DDS OwnershipQosPolicy。"
-        },
-        "partition": {
-          "type": "string",
-          "maxLength": 127,
-          "description": "DDS PartitionQosPolicy（单个 partition 名称）。"
-        },
-        "max_samples": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "DDS ResourceLimitsQosPolicy 的 max_samples；0 表示不限制。"
-        },
-        "max_instances": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "DDS ResourceLimitsQosPolicy 的 max_instances；0 表示内建上限。"
-        },
-        "max_samples_per_instance": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "DDS ResourceLimitsQosPolicy 的 max_samples_per_instance；0 表示不限制。"
-        },
-        "autodispose_unregistered": {
-          "type": "boolean",
-          "description": "DDS WriterDataLifecycleQosPolicy；writer 注销时 dispose 其所有实例。"
-        },
-        "presentation_scope": {
-          "type": "string",
-          "enum": ["instance", "topic", "group"],
-          "description": "DDS PresentationQosPolicy 访问范围。"
-        },
-        "coherent_access": {
-          "type": "boolean",
-          "description": "DDS PresentationQosPolicy coherent_access。"
-        },
-        "ordered_access": {
-          "type": "boolean",
-          "description": "DDS PresentationQosPolicy ordered_access。"
-        }
+        "lease_duration": { "$ref": "#/$defs/duration" },
+        "ownership": { "type": "string", "enum": ["shared", "exclusive"] },
+        "partition": { "type": "string", "maxLength": 127 },
+        "max_samples": { "type": "integer", "minimum": 0 },
+        "max_instances": { "type": "integer", "minimum": 0 },
+        "max_samples_per_instance": { "type": "integer", "minimum": 0 },
+        "autodispose_unregistered": { "type": "boolean" },
+        "presentation_scope": { "type": "string", "enum": ["instance", "topic", "group"] },
+        "coherent_access": { "type": "boolean" },
+        "ordered_access": { "type": "boolean" }
       },
       "additionalProperties": true
     }

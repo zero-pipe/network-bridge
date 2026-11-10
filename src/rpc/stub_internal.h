@@ -5,13 +5,13 @@
  * Stub: the internal call engine under proxy.
  *
  * This is not part of the public API. The public client surface is
- * <nb/proxy.h>; proxy.c installs its routing send hook here, and only the RPC
+ * <nb/rpc/proxy.h>; proxy.c installs its routing send hook here, and only the RPC
  * internals under src/rpc may include this header. Providers that need a
- * custom transport extend <nb/transport_provider.h> instead of this layer.
+ * custom transport extend <nb/rpc/transport_provider.h> instead of this layer.
  */
 
-#include <nb/types.h>
-#include <nb/endpoint.h>
+#include <nb/rpc/types.h>
+#include <nb/rpc/endpoint.h>
 
 #include <stddef.h>
 #include <stdint.h>

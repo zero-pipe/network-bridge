@@ -1,5 +1,5 @@
-#include <nb/buf.h>
-#include <nb/error.h>
+#include <nb/base/buf.h>
+#include <nb/base/error.h>
 
 #include <thread/sem.h>
 #include <thread/thread.h>

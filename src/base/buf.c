@@ -1,8 +1,8 @@
-#include <nb/buf.h>
+#include <nb/base/buf.h>
 #include <nb/internal/poolset.h>
 #include "atomic.h"
 
-#include <nb/error.h>
+#include <nb/base/error.h>
 
 #include <string.h>
 

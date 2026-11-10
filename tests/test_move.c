@@ -1,12 +1,12 @@
-#include <nb/proxy.h>
-#include <nb/service.h>
-#include <nb/node.h>
+#include <nb/rpc/proxy.h>
+#include <nb/rpc/service.h>
+#include <nb/rpc/node.h>
 #include <platform.h>
 
 #define NB_LOG_TAG "test"
-#include <nb/log.h>
+#include <nb/base/log.h>
 
-#include <nb/buf.h>
+#include <nb/base/buf.h>
 
 #include <thread/sem.h>
 

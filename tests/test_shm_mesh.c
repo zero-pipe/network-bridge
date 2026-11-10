@@ -5,15 +5,15 @@
  * each other over UDP. The service lives on node 2; node 1 resolves the full
  * shm://channel:2 URI from discovery and calls it without a direct endpoint.
  */
-#include <nb/proxy.h>
-#include <nb/node.h>
-#include <nb/service.h>
-#include <nb/shm.h>
+#include <nb/rpc/proxy.h>
+#include <nb/rpc/node.h>
+#include <nb/rpc/service.h>
+#include <nb/rpc/shm.h>
 #include <platform.h>
 #include <thread/sem.h>
 
 #define NB_LOG_TAG "test"
-#include <nb/log.h>
+#include <nb/base/log.h>
 
 #include <stdio.h>
 #include <string.h>
