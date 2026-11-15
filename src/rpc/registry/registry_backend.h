@@ -11,8 +11,8 @@ typedef struct nb_node nb_node_t;
 
 /*
  * Control-plane backend lifecycle. A backend keeps the node registry in sync
- * with external peers (mesh broadcast, KV watch, static file, ...). It must
- * never touch data-plane framing or service handlers.
+ * with external peers (mesh multicast discovery, KV watch, static file, ...).
+ * It must never touch data-plane framing or service handlers.
  */
 typedef struct nb_registry_backend_ops {
     /* Start listening/timers. Return NB_OK on success. */
@@ -29,7 +29,7 @@ typedef struct nb_registry_backend {
     const nb_registry_backend_ops_t *ops;
 } nb_registry_backend_t;
 
-/* Mesh UDP broadcast backend (built-in). */
+/* Mesh UDP multicast discovery backend (built-in). */
 const nb_registry_backend_t *nb_registry_backend_mesh(void);
 
 #ifdef __cplusplus

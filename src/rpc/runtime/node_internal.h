@@ -101,7 +101,8 @@ struct nb_node {
     nb_obj_pool_t reply_task_pool;                    /* 跨线程回复任务头复用池 */
     nb_transport_t *transports[NB_MAX_BINDINGS];
     size_t transport_count;
-    zn_timer *hello_timer;
+    /* 周期维护（发现 tick/流超时/取消/去重过期）。心跳与租约由 nb_mesh 自己的
+     * poller 线程调度，这里不再有 hello_timer。 */
     zn_timer *node_timer;
 
     nb_service_t *services;

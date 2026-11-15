@@ -18,10 +18,12 @@
       "rtcp": true
     },
     "discovery": {
-      "broadcast": "255.255.255.255:41953",
-      "peers": ["192.168.1.20:41953"],
-      "hello_interval": "2s",
-      "node_ttl": "6s"
+      "group": "239.255.12.7:41953",
+      "formation": 7,
+      "service_mask": 3,
+      "heartbeat_interval": "1s",
+      "lease": "1500ms",
+      "peers": ["192.168.1.20:41953"]
     },
     "routes": [
       { "service": "EchoService", "endpoint": "tcp://127.0.0.1:42440" }

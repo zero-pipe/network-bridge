@@ -66,6 +66,13 @@ bool nb_service_table_is_active(void);
  * argument returns NB_ERR_INVALID. */
 int nb_service_table_find_id(const char *service, const char *method, uint16_t *out_id);
 
+/*
+ * Look up the numeric ID of a service (without a method). Discovery uses it to
+ * map a service name onto a stable service-mask bit; returns NB_ERR_NOTFOUND
+ * when the service is not declared in any installed table.
+ */
+int nb_service_table_find_service_id(const char *service, uint16_t *out_id);
+
 /* ---- Declaration macros ---- */
 /* Declare one method row; only valid inside NB_SERVICE_DEFINE(). */
 #define NB_SERVICE_METHOD(id, name) { (uint16_t)(id), (name) }

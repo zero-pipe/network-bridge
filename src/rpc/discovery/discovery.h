@@ -2,21 +2,24 @@
 #define NB_DISCOVERY_H
 
 /*
- * mesh 服务发现（RPC 控制面）：nb_mesh 的适配层。
+ * mesh 服务发现（RPC 控制面）：nb_mesh 的薄适配层。
  *
- * 协议、报文、编队隔离、按需内省都在 nb_mesh 库里；这里只做三件事：
- *   1. 把本地服务清单交给 mesh（用于 schema_hash 与内省应答）；
- *   2. 把 mesh 的对端/内省回调翻译成 registry 里的服务 -> 端点映射；
+ * 协议、报文、编队隔离、邻居表、心跳/租约全部在 nb_mesh 库里；这里只做映射：
+ *   1. 把本节点的服务名折算成服务位图（有共享 nb_service_table 时用服务 ID，
+ *      否则用服务名哈希位），交给 nb_mesh 随心跳通告；
+ *   2. 调用时按需掩码寻址：服务名 -> 位 -> nb_mesh_find() -> ip:port，
+ *      再拼成本节点主绑定（tcp 优先）的 scheme 作为 RPC 端点；
  *   3. 实现 registry backend 的 start/stop/tick/announce。
  *
- * 关键点：契约哈希（schema_hash）一致的节点不做任何握手——本地服务清单即
- * 远端服务清单，registry 直接按本地清单填充。只有异构节点（哈希不同、
- * 动态插件）才单播拉取一次 manifest 并缓存。
+ * 关键点：**这里不再往 registry 里塞"服务名 -> 端点"的预填条目**。registry 只
+ * 保留程序自己注册的内容；未知服务一律按需查邻居表，因此客户端本地不需要事先
+ * 知道远端提供哪些服务名（异构服务集不再互相失明）。
  */
 
-#include <nb/rpc/types.h>
-#include <nb/rpc/endpoint.h>
 #include <nb/mesh.h>
+#include <nb/rpc/config.h>
+#include <nb/rpc/endpoint.h>
+#include <nb/rpc/types.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -50,12 +53,14 @@ void nb_discovery_shutdown(nb_node_t *node);
 void nb_discovery_send_hello(nb_node_t *node, int bye);
 void nb_discovery_tick(nb_node_t *node, uint64_t now_ms);
 
-int nb_discovery_find(nb_node_t *node,
-                       const char *service,
-                       char *ip_out,
-                       size_t ip_cap,
-                       uint16_t *port_out,
-                       nb_transport_kind_t *transport_out);
+/*
+ * 按服务名做掩码寻址。命中返回 NB_OK 并写出 RPC 端点；否则 NB_ERR_NOTFOUND。
+ * 只查邻居表，不改 registry。
+ */
+int nb_discovery_find(nb_node_t *node, const char *service, nb_endpoint_t *out);
+
+/* 追加一个定向单播发现目标（组播不可用或跨网段时使用）。 */
+int nb_discovery_add_peer(nb_node_t *node, const char *ip, uint16_t discovery_port);
 
 #ifdef __cplusplus
 }

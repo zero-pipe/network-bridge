@@ -31,8 +31,6 @@ __pycache__/
 !tests/google/benchmark/lib/**/*.a
 !tests/google/gtest/lib/**/*.a
 
-# Local vendored dependency metadata
-3rdparty/ntk/.git/
 
 # Local environment notes and secrets (never commit)
 /.local/

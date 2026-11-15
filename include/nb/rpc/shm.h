@@ -11,10 +11,10 @@
  *
  * One channel is one shared-memory segment; the port is the node's unique id
  * in that segment (1..NB_SHM_MAX_NODES). There are no fixed server/client
- * roles: any node may receive requests, reply, and publish events. In MESH
- * mode discovery broadcasts the full shm://channel:id URI, so services can also
- * be found by name. For direct calls, point the proxy endpoint at the target
- * node, for example shm://<channel>:2.
+ * roles: any node may receive requests, reply, and publish events. With mesh
+ * discovery enabled, a node's services are resolved to its shm endpoint, so a
+ * client can find them by name. For direct calls, point the proxy endpoint at
+ * the target node, for example shm://<channel>:2.
  *
  * The transport uses an iceoryx-style size-classed chunk pool, lock-free
  * queues, and offset addressing: the sender encodes the envelope directly in

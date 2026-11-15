@@ -87,9 +87,12 @@ nb_add_test(test_rtps_participant e2e.rtps_participant
     INCLUDES ${NB_SRC_DIR}/rtps/internal
     TIMEOUT 60)
 
+# nb_mesh：报文编解码/邻居表用内部头（mesh_table.h）直接驱动，
+# 发现用例走 loopback 单播，不依赖环境里是否有可用组播。
 nb_add_test(test_mesh unit.mesh
     LABELS "unit;discovery"
-    LIBRARIES nb_mesh)
+    LIBRARIES nb_mesh
+    INCLUDES ${NB_SRC_DIR}/mesh)
 
 # Contract: the rtps transport provider may only use the public rtps_* API.
 add_test(NAME contract.rtps_provider_api

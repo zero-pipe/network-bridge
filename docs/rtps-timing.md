@@ -217,4 +217,6 @@ SEDP 复用与用户数据相同的可靠机制，区别只在于历史由 `publ
 | RTPS-over-TCP | `src/rtps/rtps_tcp.c` |
 | 公共 API（`rtps_*`） | `src/rtps/api/`、`include/rtps/` |
 
-> 下一步重构方向：把 `rtps_participant.c` 中的**报文构建**（`send_spdp` / `send_sedp_*` / `send_user_*`）抽到独立文件，使「报文工厂 → 发现状态机 / 可靠状态机 → 参与者调度」三层各自可读、可单独测试。当前拆分计划见 [`../todo.md`](../todo.md)。
+> 拆分现状：报文构建已收敛到 `rtps_wire.c`，用户数据面在 `rtps_datapath.c`，
+> 发现面在 `rtps_discovery.c`，`rtps_participant.c` 只剩生命周期、socket、线程
+> 节拍与端点匹配。后续里程碑见 [`roadmap.md`](roadmap.md)。

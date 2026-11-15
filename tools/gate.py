@@ -43,6 +43,9 @@ DEFAULT_BUILD_DIR = ROOT / "build"
 ARTIFACT_ROOT = ROOT / "artifacts" / "gate"
 IS_WINDOWS = os.name == "nt"
 ALL_TRANSPORTS = ("tcp", "udp", "shm")
+# 场景跑批支持的"传输"：RPC 链路 tcp/udp/shm，以及 DDS/RTPS 两个自带
+# 进程内参与者的场景。默认只跑前三个。
+SCENARIO_TRANSPORTS = ALL_TRANSPORTS + ("dds", "rtps")
 MIB = 1024 * 1024
 BENCH_SERVICE = "OrderService"
 BENCH_METHOD = "get"
@@ -91,10 +94,9 @@ class Context:
         self.config = resolve_config(self.cache, args.config, self.multiconfig)
         self.cmake = resolve_tool(args.cmake, "cmake")
         self.ctest = resolve_tool(args.ctest, "ctest")
-        self.dds_enabled = cache_bool(self.cache, "NB_ENABLE_DDS", True)
         self.tools_enabled = cache_bool(self.cache, "BUILD_TOOLS", True)
         self.tests_enabled = cache_bool(self.cache, "BUILD_TESTS", True)
-        self.transports = select_transports(args, self.dds_enabled)
+        self.transports = select_transports(args)
         self.out = Path(args.output_dir).resolve() if args.output_dir else ARTIFACT_ROOT / timestamp()
         self.out.mkdir(parents=True, exist_ok=True)
         self.env = child_env()
@@ -194,7 +196,7 @@ def child_env() -> Dict[str, str]:
     return os.environ.copy()
 
 
-def select_transports(args: argparse.Namespace, dds_enabled: bool) -> List[str]:
+def select_transports(args: argparse.Namespace) -> List[str]:
     if getattr(args, "no_dds", False):
         requested = [item for item in (args.transports or "tcp,udp").split(",") if item]
         requested = [item for item in requested if item != "dds"]
@@ -204,12 +206,10 @@ def select_transports(args: argparse.Namespace, dds_enabled: bool) -> List[str]:
         requested = list(ALL_TRANSPORTS)
     result: List[str] = []
     for item in requested:
-        if item not in ALL_TRANSPORTS:
+        if item not in SCENARIO_TRANSPORTS:
             raise GateError(
-                "unknown transport '{}'; expected tcp, udp or shm".format(item))
-        if item == "dds" and not dds_enabled:
-            print("gate: skipping DDS (NB_ENABLE_DDS=OFF)")
-            continue
+                "unknown transport '{}'; expected one of {}".format(
+                    item, ", ".join(SCENARIO_TRANSPORTS)))
         if item == "shm" and not sys.platform.startswith("linux"):
             print("gate: skipping SHM (Linux only)")
             continue

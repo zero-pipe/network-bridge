@@ -158,14 +158,6 @@ void nb_obj_pool_free(nb_obj_pool_t *pool, void *obj)
 
 /* ---- 定时器 ---- */
 
-static void nb_hello_timer_cb(void *user)
-{
-    nb_node_t *node = (nb_node_t *)user;
-    if (node && node->registry_backend && node->registry_backend->ops->announce) {
-        node->registry_backend->ops->announce(node, 0);
-    }
-}
-
 static void nb_node_timer_cb(void *user)
 {
     nb_node_t *node = (nb_node_t *)user;
@@ -412,8 +404,7 @@ int nb_node_create(const nb_node_config_t *cfg, nb_node_t **out)
             nb_node_destroy(node);
             return NB_ERR_IO;
         }
-        node->hello_timer =
-            zn_timer_start(node->poller, node->hello_interval_ms, 1, nb_hello_timer_cb, node);
+        /* 心跳/租约由 nb_mesh 自己的执行体调度：这里不再起重复的公告定时器。 */
     }
     node->node_timer =
         zn_timer_start(node->poller, nb_tick_interval_ms(), 1, nb_node_timer_cb, node);
@@ -516,10 +507,6 @@ void nb_node_destroy(nb_node_t *node)
         zb_mutex_unlock(node->handler_limit_mutex);
         zb_mutex_destroy(node->handler_limit_mutex);
         node->handler_limit_mutex = NULL;
-    }
-    if (node->hello_timer) {
-        zn_timer_stop(node->hello_timer);
-        node->hello_timer = NULL;
     }
     if (node->node_timer) {
         zn_timer_stop(node->node_timer);
@@ -799,44 +786,8 @@ int nb_node_peer_stats(const nb_node_t *node, const char *ip, uint16_t port, nb_
 
 int nb_node_add_discovery_peer(nb_node_t *node, const char *ip, uint16_t discovery_port)
 {
-    int i;
-    int added = 0;
-    if (!node || !ip || !ip[0] || !discovery_port) {
-        return NB_ERR_INVALID;
-    }
-    if (strlen(ip) >= NB_HOST_MAX) {
-        return NB_ERR_TOOBIG;
-    }
-    if (!node->discovery.targets_lock) {
-        return NB_ERR_INVALID;
-    }
-    zb_mutex_lock(node->discovery.targets_lock);
-    for (i = 0; i < NB_DISCOVERY_MAX_TARGETS; i++) {
-        if (node->discovery.targets[i].used &&
-            node->discovery.targets[i].port == discovery_port &&
-            strcmp(node->discovery.targets[i].ip, ip) == 0) {
-            zb_mutex_unlock(node->discovery.targets_lock);
-            return NB_ERR_ALREADY;
-        }
-        if (!node->discovery.targets[i].used) {
-            node->discovery.targets[i].used = 1;
-            nb_copy_str(node->discovery.targets[i].ip,
-                        sizeof(node->discovery.targets[i].ip),
-                        ip,
-                        NULL);
-            node->discovery.targets[i].port = discovery_port;
-            added = 1;
-            break;
-        }
-    }
-    zb_mutex_unlock(node->discovery.targets_lock);
-    if (!added) {
-        return NB_ERR_NOMEM;
-    }
-    if (node->registry_backend && node->registry_backend->ops->announce) {
-        node->registry_backend->ops->announce(node, 0);
-    }
-    return NB_OK;
+    /* 定向单播目标由发现适配层登记；它同时会把"新目标立刻补一帧 JOIN"做掉。 */
+    return nb_discovery_add_peer(node, ip, discovery_port);
 }
 
 int nb_node_add_static_route(
@@ -861,8 +812,6 @@ int nb_node_add_static_route_uri(nb_node_t *node, const char *service, const cha
 int nb_node_wait_for_service(nb_node_t *node, const char *service, uint64_t timeout_ms)
 {
     uint64_t deadline;
-    char ip[NB_HOST_MAX];
-    uint16_t port = 0;
     if (!node || !service) {
         return NB_ERR_INVALID;
     }
@@ -871,14 +820,11 @@ int nb_node_wait_for_service(nb_node_t *node, const char *service, uint64_t time
     }
     deadline = nb_now_ms() + (timeout_ms ? timeout_ms : NB_DEFAULT_TIMEOUT_MS);
     for (;;) {
-        if (nb_route_lookup(&node->routes, service, ip, sizeof(ip), &port, NULL, NULL, 0) == NB_OK) {
+        /* 与调用路径同一套解析：静态路由 -> registry -> 邻居表掩码寻址。 */
+        nb_endpoint_t endpoint;
+
+        if (nb_node_resolve(node, service, 0, &endpoint) == NB_OK) {
             return NB_OK;
-        }
-        {
-            nb_endpoint_t endpoint;
-            if (nb_registry_select(&node->registry, service, &endpoint) == NB_OK) {
-                return NB_OK;
-            }
         }
         if (nb_now_ms() >= deadline) {
             return NB_ERR_TIMEOUT;

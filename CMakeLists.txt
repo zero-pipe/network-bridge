@@ -35,47 +35,14 @@ add_subdirectory(3rdparty/elog)
 add_subdirectory(3rdparty/micro-cdr)
 
 # Public options use the NB_ prefix so they can be embedded with
-# add_subdirectory() without colliding with the parent project. The legacy
-# unprefixed names below are still honoured for one release cycle.
+# add_subdirectory() without colliding with the parent project.
 option(NB_BUILD_TESTS "Build tests" ON)
 option(NB_BUILD_TOOLS "Build benchmark tools" ON)
 option(NB_BUILD_EXAMPLES "Build examples" ON)
 option(NB_BUILD_GTESTS "Build GoogleTest module tests" OFF)
 option(NB_BUILD_BENCHMARKS "Build Google Benchmark microbenchmarks" OFF)
 
-if(DEFINED BUILD_TESTS)
-    message(WARNING "BUILD_TESTS is deprecated; use NB_BUILD_TESTS")
-    set(NB_BUILD_TESTS "${BUILD_TESTS}" CACHE BOOL "" FORCE)
-    unset(BUILD_TESTS CACHE)
-endif()
-if(DEFINED BUILD_TOOLS)
-    message(WARNING "BUILD_TOOLS is deprecated; use NB_BUILD_TOOLS")
-    set(NB_BUILD_TOOLS "${BUILD_TOOLS}" CACHE BOOL "" FORCE)
-    unset(BUILD_TOOLS CACHE)
-endif()
-if(DEFINED BUILD_EXAMPLES)
-    message(WARNING "BUILD_EXAMPLES is deprecated; use NB_BUILD_EXAMPLES")
-    set(NB_BUILD_EXAMPLES "${BUILD_EXAMPLES}" CACHE BOOL "" FORCE)
-    unset(BUILD_EXAMPLES CACHE)
-endif()
-if(DEFINED BUILD_GTESTS)
-    message(WARNING "BUILD_GTESTS is deprecated; use NB_BUILD_GTESTS")
-    set(NB_BUILD_GTESTS "${BUILD_GTESTS}" CACHE BOOL "" FORCE)
-    unset(BUILD_GTESTS CACHE)
-endif()
-if(DEFINED BUILD_BENCHMARKS)
-    message(WARNING "BUILD_BENCHMARKS is deprecated; use NB_BUILD_BENCHMARKS")
-    set(NB_BUILD_BENCHMARKS "${BUILD_BENCHMARKS}" CACHE BOOL "" FORCE)
-    unset(BUILD_BENCHMARKS CACHE)
-endif()
-
 set(NB_SANITIZE "" CACHE STRING "Sanitizer set: address|undefined|thread|address,undefined")
-if(DEFINED ZERO_RPC_SANITIZE AND NOT NB_SANITIZE)
-    message(WARNING "ZERO_RPC_SANITIZE is deprecated; use NB_SANITIZE")
-    set(NB_SANITIZE "${ZERO_RPC_SANITIZE}" CACHE STRING "" FORCE)
-    unset(ZERO_RPC_SANITIZE CACHE)
-endif()
-
 if(NB_SANITIZE)
     if(CMAKE_C_COMPILER_ID STREQUAL "MSVC")
         message(FATAL_ERROR

@@ -18,13 +18,13 @@ static int g_fail;
 
 typedef struct resend_state {
     int count;
-    uint32_t sn[8];
+    uint64_t sn[8];
     char payload[8][8];
     int dispose[8];
 } resend_state_t;
 
 static int on_resend(void *user,
-                     uint32_t sn,
+                     uint64_t sn,
                      const uint8_t *payload,
                      size_t len,
                      int dispose)
@@ -52,9 +52,9 @@ static void test_history_and_acknack(void)
     nb_rtps_reliable_writer_t *writer = nb_rtps_reliable_writer_create(2);
     nb_rtps_acknack_t ack;
     resend_state_t state;
-    uint32_t sn = 0;
-    uint32_t first = 0;
-    uint32_t last = 0;
+    uint64_t sn = 0;
+    uint64_t first = 0;
+    uint64_t last = 0;
     size_t count = 0;
     const uint8_t *payload = NULL;
     size_t len = 0;
@@ -120,8 +120,8 @@ static void test_history_byte_budget(void)
     enum { SAMPLE_SIZE = 100 * 1024, SAMPLE_COUNT = 4 };
     static uint8_t sample[SAMPLE_SIZE];
     nb_rtps_reliable_writer_t *writer = nb_rtps_reliable_writer_create(64);
-    uint32_t first = 0;
-    uint32_t last = 0;
+    uint64_t first = 0;
+    uint64_t last = 0;
     size_t count = 0;
     size_t i;
 

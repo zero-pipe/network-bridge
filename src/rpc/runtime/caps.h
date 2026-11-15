@@ -45,9 +45,9 @@
 #define NB_STREAM_IDLE_TIMEOUT_MS 15000
 
 /* ---- DISCOVERY ---- */
-#define NB_DISCOVERY_MAX_PEERS 64
+/* 定向单播发现目标上限（组播不可用时的兜底）。邻居表容量在 nb_mesh 内部
+ * （NB_MESH_DEFAULT_MAX_PEERS = 8192），不再由 RPC 侧限制。 */
 #define NB_DISCOVERY_MAX_TARGETS 32
-#define NB_DISCOVERY_MAX_SERVICES_PER_PEER 32
 
 /* ---- CODEC ---- */
 #define NB_CODEC_MAX 8

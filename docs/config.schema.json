@@ -69,7 +69,7 @@
         "mode": {
           "type": "string",
           "enum": ["mesh", "static"],
-          "description": "服务发现模式。默认 mesh；static 关闭 ntk_discovery。"
+          "description": "服务发现模式。默认 mesh（nb_mesh 组播发现）；static 只用静态路由。"
         },
         "listen": {
           "type": "array",
@@ -114,22 +114,38 @@
         "discovery": {
           "type": "object",
           "properties": {
-            "broadcast": {
+            "group": {
               "type": "string",
-              "description": "发现地址 host:port。默认 255.255.255.255:41953。"
+              "description": "组播组 host:port。缺省时由 formation 推导（239.255.x.y:41953）；给出非组播地址时退化为定向单播目标。"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535,
+              "description": "发现端口。默认 41953。"
+            },
+            "formation": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "编队/任务组 ID：不同编队互不可见。默认 0。"
+            },
+            "service_mask": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "本节点核心服务位图（32 位，见 include/nb/mesh_services.h）。默认 0。"
+            },
+            "heartbeat_interval": {
+              "$ref": "#/$defs/duration",
+              "description": "心跳周期；上电先按 50ms 间隔连发 3 次 JOIN。默认 1s。"
+            },
+            "lease": {
+              "$ref": "#/$defs/duration",
+              "description": "对端租约：超过该时长没有心跳即剔除。默认 1500ms。"
             },
             "peers": {
               "type": "array",
               "maxItems": 32,
-              "items": { "type": "string", "description": "单播 HELLO 目标 host:port。" }
-            },
-            "hello_interval": {
-              "$ref": "#/$defs/duration",
-              "description": "HELLO 间隔。默认 3s。"
-            },
-            "node_ttl": {
-              "$ref": "#/$defs/duration",
-              "description": "对端过期时间。默认 9s。"
+              "items": { "type": "string", "description": "定向单播发现目标 host:port。" }
             }
           },
           "additionalProperties": true

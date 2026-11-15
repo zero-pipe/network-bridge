@@ -5,10 +5,10 @@
 Network Bridge 是一个面向异构网络的 C99 通信框架，由**两条并列的语义主干 + 一个共享底座**组成：
 
 - **RPC 主干**：`node / service / proxy`，参考 brpc/gRPC 的调用模型；底层传输可选
-  **tcp / udp / shm**，控制面用静态路由或广播式 `ntk_discovery`。
+  **tcp / udp / shm**，控制面用静态路由或组播式 `nb_mesh` 发现。
 - **DDS 主干**：`participant / topic / writer / reader`，参考 ROS 2 的对象模型；
   `domain / partition / prefix / QoS` 是一等公民，后端是**内建 RTPS 引擎**，
-  不需要 RPC node 或广播发现。
+  不需要 RPC node 或应用层发现。
 - **共享底座**：缓冲区/分配器、日志、指标、错误码、payload 视图和 JSON 读取器。
 
 两条主干在目录、库目标、公共头和配置上都相互独立；应用可以只用其中一条，也可以
@@ -22,7 +22,7 @@ Network Bridge 是一个面向异构网络的 C99 通信框架，由**两条并�
   `nb_proxy_call_event`，以及客户端流、服务端流和双向流。
 - **DDS 原生语义。** topic 名原样上线（可加 `prefix`），domain/partition/QoS
   逐级继承；样本不再套 RPC 信封。
-- **默认不额外起线程。** RPC 回调在 ntk poller 线程上执行；阻塞 handler 可以显式
+- **默认不额外起线程。** RPC 回调在 znet poller 线程上执行；阻塞 handler 可以显式
   选择 `WORKER` 线程池或调用方提供的 `EXECUTOR`。
 - **可组合的 RPC 传输。** UDP 带分片、NACK/RTX 和 RTCP 反馈；TCP 使用长度前缀
   分帧；SHM 支持零拷贝 loan/borrow。
@@ -133,12 +133,12 @@ src/rtps/                    RTPS 协议引擎与 rtps_* API
 examples/                    01_rpc、02_rpc_streaming、03_dds_pubsub、04_config
 docs/                        API、架构、RTPS 报文与时序、错误和测试文档
 tests/                       单元、端到端与契约测试
-3rdparty/                    ntk、elog、cJSON、uthash、micro-cdr
+3rdparty/                    zbase、znet、elog、cJSON、uthash、micro-cdr
 ```
 
-库目标：`nb_base`、`nb_json`、`nb_log`、`ntk_discovery`、`rtps_core`、`rtps`、
+库目标：`nb_base`、`nb_json`、`nb_log`、`nb_mesh`、`rtps_core`、`rtps`、
 `nb_rpc`、`nb_dds`，以及链接两条主干的便利目标 `nb`。`nb_rpc` 不链接
-`rtps`，`nb_dds` 不链接 `ntk_discovery`。
+`rtps`，`nb_dds` 不链接 `nb_mesh`。
 
 ## 构建
 
@@ -168,9 +168,6 @@ NB_BUILD_GTESTS      构建 GoogleTest 模块测试（默认 OFF）
 NB_BUILD_BENCHMARKS  构建 Google Benchmark 微基准（默认 OFF）
 NB_SANITIZE          address | undefined | thread | address,undefined
 ```
-
-不带前缀的旧名称（`BUILD_TESTS`、`ZERO_RPC_SANITIZE` 等）仍然接受，但会输出
-弃用警告。
 
 库目标是 `nb`（别名 `nb::nb`），也可以按主干链接 `nb_rpc` / `nb_dds`。
 

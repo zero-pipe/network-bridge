@@ -91,10 +91,19 @@ int nb_node_resolve(nb_node_t *node, const char *service, int prefer_stream, nb_
     if (nb_route_select(&node->routes, service, prefer_stream, out) == NB_OK) {
         return NB_OK;
     }
-    if (nb_registry_select_prefer(&node->registry, service, prefer_stream, out) != NB_OK) {
-        return NB_ERR_NOTFOUND;
+    if (nb_registry_select_prefer(&node->registry, service, prefer_stream, out) == NB_OK) {
+        return NB_OK;
     }
-    return NB_OK;
+    /*
+     * 按需掩码寻址：静态路由与 registry 都没命中时，直接查发现的邻居表。
+     * 这样客户端本地不必事先知道远端有哪些服务名（异构服务集不再失明），
+     * 调用失败也只会在"本编队确实没有提供该服务的节点"时发生。
+     */
+    if (node->mode == NB_NODE_MODE_MESH &&
+        nb_discovery_find(node, service, out) == NB_OK) {
+        return NB_OK;
+    }
+    return NB_ERR_NOTFOUND;
 }
 
 /*

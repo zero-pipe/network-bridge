@@ -112,3 +112,29 @@ int nb_service_table_find_id(const char *service, const char *method, uint16_t *
     }
     return NB_OK;
 }
+
+int nb_service_table_find_service_id(const char *service, uint16_t *out_id)
+{
+    size_t t;
+
+    if (!service) {
+        return NB_ERR_INVALID;
+    }
+    for (t = 0; t < nb_g_table_count; t++) {
+        const nb_service_table_t *table = nb_g_tables[t];
+        size_t s;
+
+        for (s = 0; s < table->service_count; s++) {
+            const nb_service_descriptor_t *svc = &table->services[s];
+
+            if (strcmp(svc->name, service) != 0) {
+                continue;
+            }
+            if (out_id) {
+                *out_id = svc->id;
+            }
+            return NB_OK;
+        }
+    }
+    return NB_ERR_NOTFOUND;
+}

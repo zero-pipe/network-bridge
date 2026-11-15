@@ -10,7 +10,7 @@
     src/rtps/api/         接口层实现（句柄、topic、历史、waitset）
     src/rtps/             协议引擎（SPDP/SEDP、可靠传输、分片、QoS、TCP；
                           头文件在 src/rtps/internal/，不安装；lib rtps_core）
-      ntk                 线程、socket、锁、时间
+      znet + zbase        socket、poller、线程、定时器
 ```
 
 接口层和协议引擎是分开的：`include/rtps/` 不包含任何 `nb_*` 类型或引擎内部头；框架的 `rtps` transport provider 现在也只用这层公共接口。`contract.rtps_provider_api` 这个 ctest 会检查 provider 的源码，出现私有引擎符号就让构建失败。
