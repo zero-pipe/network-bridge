@@ -603,14 +603,15 @@ int nb_mesh_start(nb_mesh_t **out, const nb_mesh_config_t *cfg)
         rc = NB_MESH_ERR_NOMEM;
         goto fail;
     }
-#if defined(_WIN32)
     {
-        /* Windows 没有 SO_REUSEPORT：同端口多实例由定向单播目标区分。 */
+        /*
+         * 只开 SO_REUSEADDR，**不能**开 SO_REUSEPORT：后者会让内核把同一端口上
+         * 的组播报文负载均衡给其中一个 socket，同机多节点就各自只收到随机子集
+         * （实测 32 进程互发现只看到 0~31 个邻居）。SO_REUSEADDR 下每个加入组播
+         * 组的 socket 都能收到一份完整副本。
+         */
         const int reuse_port = 0;
-#else
-    {
-        const int reuse_port = 1;
-#endif
+
         if (zn_socket_bind_udp_ex(m->sock,
                                   m->bind_host[0] ? m->bind_host : "0.0.0.0",
                                   m->port,
@@ -651,12 +652,13 @@ int nb_mesh_start(nb_mesh_t **out, const nb_mesh_config_t *cfg)
     }
     zb_mutex_unlock(m->send_lock);
 
-    m->thread = zb_thread_create(mesh_thread_main, m);
-    if (!m->thread) {
-        rc = NB_MESH_ERR_NOMEM;
-        goto fail;
-    }
-    /* Fast-Join：立即发第一帧，此后每 50 ms 一帧，共 NB_MESH_FAST_JOIN_COUNT 帧。 */
+    /*
+     * 先把状态和定时器全部就绪，再启动 poller 线程：poller 一旦开始 run，
+     * 定时器回调可能在另一个线程上立刻出现，此时 m->running / 定时器句柄必须
+     * 已经有效（早期版本在 run 之后才注册定时器，导致部分进程的发送链没有
+     * 被挂上——表现为"别人能看到它，它自己看不到别人"）。
+     */
+    m->running = 1;
     m->fast_join_left = NB_MESH_FAST_JOIN_COUNT;
     m->send_timer = zn_poller_do_delay(m->poller, 0, mesh_send_cb, m);
     m->sweep_timer =
@@ -665,7 +667,11 @@ int nb_mesh_start(nb_mesh_t **out, const nb_mesh_config_t *cfg)
         rc = NB_MESH_ERR_NOMEM;
         goto fail;
     }
-    m->running = 1;
+    m->thread = zb_thread_create(mesh_thread_main, m);
+    if (!m->thread) {
+        rc = NB_MESH_ERR_NOMEM;
+        goto fail;
+    }
     *out = m;
     return NB_MESH_OK;
 
