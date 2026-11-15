@@ -111,16 +111,23 @@
 
 ## 第三阶段：RTPS 消息报文与时序清晰化
 
-- [ ] **任务 3.1**：拆分 `src/rtps/rtps_participant.c`（262 KB），按职责拆分：
-  - [x] 第一步（已完成）：抽出**报文工厂** `src/rtps/rtps_wire.c` + `src/rtps/internal/rtps_wire.h`。
+- [x] **任务 3.1**：拆分 `src/rtps/rtps_participant.c`（262 KB），按职责拆分：
+  - [x] 第一步：抽出**报文工厂** `src/rtps/rtps_wire.c` + `src/rtps/internal/rtps_wire.h`。
         RTPS 每个出站消息都是 `MessageHeader + INFO_TS + (INFO_DST) + 一个实体子消息`，
         这段起手链原先在参与者里重复了 **13 处**；现统一为
         `nb_rtps_wire_{data,data_frag,heartbeat,heartbeat_frag,acknack,gap,nack_frag}`，
         参与者只负责“填参数 + 选目标 + 发送”。净减约 70 行重复代码。
-  - [ ] `rtps_discovery.c`：SPDP 发布/接收、SEDP 发布/接收、远端参与者租约
-  - [ ] `rtps_datapath.c`：用户 DATA / DATA_FRAG 发送、HEARTBEAT / HEARTBEAT_FRAG 发送
-  - [ ] `rtps_reliable.c`：已有，保留可靠 writer 历史 + ACKNACK 处理 + reader 窗口，把与 participant 的耦合降到最低
-  - [ ] `rtps_session.c`（或在 participant 内）：远端会话/TCP 链路管理、target 地址解析
+  - [x] 第二步：抽出**用户数据面** `src/rtps/rtps_datapath.c`（2056 行）：DATA/DATA_FRAG
+        收发、GAP/ACKNACK/HEARTBEAT、分片重组、样本投递、实例表。
+  - [x] 第三步：抽出**发现面** `src/rtps/rtps_discovery.c`（886 行）：SPDP 公告、SEDP
+        端点公告的收发，远端参与者/远端端点登记与淘汰，租约换算。
+  - [x] 共享形态集中到 `src/rtps/internal/rtps_participant_priv.h`（568 行，仅引擎内部）。
+  - [x] `rtps_reliable.c`：保持独立，未改动（可靠历史 + reader 窗口本身已内聚）。
+  - 结果：`rtps_participant.c` 由 6826 行降到 3497 行，只剩生命周期、socket、
+    线程节拍、端点匹配与 deadline/liveliness 检查。
+  - 未做：`rtps_session.c`。远端会话与 TCP 链路（`maybe_tcp_connect`、
+    `retry_tcp_links`、`tcp_on_*`）仍留在 participant.c，它们与 participant 的
+    socket/poller 生命周期强耦合，再拆收益有限，暂缓。
 
 ### 任务 3.1 过程中发现并修复的真实缺陷
 

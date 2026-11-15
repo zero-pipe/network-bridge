@@ -408,17 +408,39 @@ nb_rtps_time_t rtps_time_from_ns(uint64_t ns);
 uint64_t rtps_time_to_ns(const nb_rtps_time_t *ts);
 int endpoint_qos_compatible(const nb_rtps_endpoint_info_t *publication,
                             const nb_rtps_endpoint_info_t *subscription);
-void update_remote(nb_rtps_participant_t *participant,
-                   const nb_rtps_participant_info_t *info,
-                   const char *source_host,
-                   uint16_t source_port);
-void handle_sedp_data(nb_rtps_participant_t *participant,
-                      nb_rtps_endpoint_kind_t kind,
-                      const nb_rtps_data_view_t *data,
-                      const nb_rtps_guid_prefix_t *source_prefix);
 void handle_pmd_data(nb_rtps_participant_t *participant,
                      const nb_rtps_data_view_t *data,
                      const nb_rtps_guid_prefix_t *prefix);
+
+/* ---- 由 rtps_participant.c 提供给发现面/数据面使用的工具 ---- */
+int remote_target(const nb_rtps_remote_participant_t *remote,
+                         char *host,
+                         size_t cap,
+                         uint16_t *port);
+void notify_endpoint(nb_rtps_participant_t *participant,
+                            nb_rtps_endpoint_event_t event,
+                            nb_rtps_endpoint_kind_t kind,
+                            const nb_rtps_endpoint_info_t *info);
+void notify(nb_rtps_participant_t *participant,
+                   nb_rtps_participant_event_t event,
+                   const nb_rtps_participant_info_t *info);
+void notify_matches(nb_rtps_participant_t *participant,
+                           const nb_rtps_endpoint_info_t *remote_info,
+                           nb_rtps_endpoint_kind_t remote_kind,
+                           int added);
+void replay_retained_history(nb_rtps_participant_t *participant,
+                                    const nb_rtps_endpoint_info_t *reader_info);
+int locator_to_host(const nb_rtps_locator_t *locator,
+                           char *host,
+                           size_t cap,
+                           uint16_t *port);
+int locator_to_host_any(const nb_rtps_locator_t *locator,
+                               char *host,
+                               size_t cap,
+                               uint16_t *port);
+void send_pmd(nb_rtps_participant_t *participant, uint32_t kind);
+void maybe_tcp_connect(nb_rtps_participant_t *participant,
+                              const nb_rtps_guid_prefix_t *prefix);
 
 /* ---- 由 rtps_datapath.c 提供给参与者调度使用 ---- */
 void dispatch_data_view(nb_rtps_participant_t *participant,
@@ -498,5 +520,49 @@ void send_user_liveliness_heartbeat(nb_rtps_participant_t *participant,
                                            const nb_rtps_endpoint_info_t *remote,
                                            const char *host,
                                            uint16_t port);
+
+
+
+/* ---- 由 rtps_discovery.c 提供给参与者调度使用 ---- */
+void broadcast_sedp_sample(nb_rtps_participant_t *participant,
+                                  nb_rtps_endpoint_kind_t kind,
+                                  uint64_t sn,
+                                  const uint8_t *payload,
+                                  size_t payload_len,
+                                  int dispose);
+void send_local_endpoint_to_remotes(nb_rtps_participant_t *participant,
+                                           const nb_rtps_local_endpoint_t *local);
+void send_sedp_heartbeats(nb_rtps_participant_t *participant);
+int send_spdp(nb_rtps_participant_t *participant);
+void fill_local_info(const nb_rtps_participant_t *participant,
+                            nb_rtps_participant_info_t *info);
+int parse_ipv4(const char *host, uint8_t out[4]);
+void handle_sedp_gap(nb_rtps_participant_t *participant,
+                            nb_rtps_endpoint_kind_t kind,
+                            const nb_rtps_gap_t *gap,
+                            const nb_rtps_guid_prefix_t *source_prefix);
+void handle_sedp_heartbeat(nb_rtps_participant_t *participant,
+                                  nb_rtps_endpoint_kind_t kind,
+                                  const nb_rtps_heartbeat_t *heartbeat,
+                                  const nb_rtps_guid_prefix_t *source_prefix,
+                                  const char *source_host,
+                                  uint16_t source_port);
+void handle_sedp_acknack(nb_rtps_participant_t *participant,
+                                nb_rtps_endpoint_kind_t kind,
+                                const nb_rtps_acknack_t *acknack,
+                                const nb_rtps_guid_prefix_t *source_prefix,
+                                const char *source_host,
+                                uint16_t source_port);
+void remove_remote_endpoints_for_prefix(nb_rtps_participant_t *participant,
+                                               const nb_rtps_guid_prefix_t *prefix);
+void update_remote(nb_rtps_participant_t *participant,
+                   const nb_rtps_participant_info_t *info,
+                   const char *source_host,
+                   uint16_t source_port);
+void handle_sedp_data(nb_rtps_participant_t *participant,
+                      nb_rtps_endpoint_kind_t kind,
+                      const nb_rtps_data_view_t *data,
+                      const nb_rtps_guid_prefix_t *source_prefix);
+uint32_t lease_from_info(const nb_rtps_participant_info_t *info, uint32_t fallback);
 
 #endif /* NB_RTPS_PARTICIPANT_PRIV_H */
