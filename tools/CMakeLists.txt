@@ -23,3 +23,11 @@ nb_copy_runtime_deps(dds_bench)
 if(MSVC)
     target_compile_definitions(dds_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
+
+# DDS/RTPS ping-pong round-trip QPS and latency probe.
+add_executable(dds_rtt_bench dds_rtt_bench.c)
+target_link_libraries(dds_rtt_bench PRIVATE nb_dds)
+nb_copy_runtime_deps(dds_rtt_bench)
+if(MSVC)
+    target_compile_definitions(dds_rtt_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
