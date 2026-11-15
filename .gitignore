@@ -36,4 +36,6 @@ __pycache__/
 
 # Local environment notes and secrets (never commit)
 /.local/
+/3rdparty/Fast-DDS-master/
+/3rdparty/Fast-DDS-master.zip
 
