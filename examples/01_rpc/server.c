@@ -9,6 +9,9 @@
 #include <nb/rpc/node.h>
 #include <nb/rpc/service.h>
 
+/* 与服务端/客户端共享的服务/方法声明表（服务名、方法名和数字 ID 的契约）。 */
+#include "service_table.h"
+
 #include <nb/base/log.h>
 
 #include <stdlib.h>
@@ -35,6 +38,8 @@ int main(int argc, char **argv)
     cfg.rpc.bind_host = "0.0.0.0";
     cfg.rpc.data_port = port;
     cfg.runtime.io_threads = 1;
+    /* 装上共享服务表：发现层会用服务 ID 当服务位号（id 0 -> bit 0）。 */
+    cfg.rpc.service_table = &echo_table;
 
     rc = nb_node_create(&cfg, &node);
     if (rc == NB_OK) {

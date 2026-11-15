@@ -145,13 +145,51 @@
 
 这是整个方案里**唯一需要人工约定**的部分，也是唯一容易踩坑的地方。
 
-### 4.1 两套并存的机制
+### 4.1 三套机制，以及"RPC 路径实际用哪一套"
 
-心跳里只有 32 个 bit，所以"服务 → bit"必须两端一致。系统提供两种方式：
+先说结论，避免踩坑：
 
-**方式一：编译期位图契约（推荐，零碰撞）**
+| 机制 | 谁在用 | 说明 |
+| --- | --- | --- |
+| **共享服务表**（`NB_SERVICE_DEFINE`） | **RPC 应用（推荐）** | 服务 ID 直接当 bit 号，两端零碰撞 |
+| **编译期位图宏**（`mesh_services.h`） | 直接调 `nb_mesh_*` API 的代码 | RPC 适配层**不读**它，见下面的说明 |
+| **服务名哈希**（兜底） | 没装表的程序 | 同一个名字算同一个 bit，但可能撞位 |
 
-`include/nb/mesh_services.h` 里把服务按子系统分组，写死 bit：
+#### 方式一：共享服务表（RPC 应用就该用这个）
+
+用 `nb_service_table.h` 的宏声明"服务名 + 数字 ID"，**客户端与服务端包含同一份头**
+（仓库里的完整例子：`examples/01_rpc/service_table.h`）：
+
+```c
+/* service_table.h —— 两端共同包含 */
+#include <nb/rpc/service_table.h>
+
+NB_SERVICE_DEFINE(echo_table, 0u, "EchoService",
+    NB_SERVICE_METHOD(1u, "echo"));
+```
+
+然后在建节点前装上（推荐随配置一起装）：
+
+```c
+nb_node_config_default(&cfg);
+cfg.rpc.service_table = &echo_table;   /* 发现层：服务 ID 0 -> bit 0 */
+nb_node_create(&cfg, &node);
+```
+
+发现层的映射规则（`src/rpc/discovery/discovery.c`）：
+
+```
+服务名 -> 服务表里的数字 ID（必须 < 32） -> bit = 1 << ID
+```
+
+所以：
+- **服务 ID 必须 < 32**（心跳位图 32 位）；
+- 同名不同 ID 在装表时就会报错，不会带到线上；
+- 两端必须装**同一份**表，否则算出的 bit 不同。
+
+#### 方式二：编译期位图宏（只有直接调 nb_mesh 时生效）
+
+`include/nb/mesh_services.h` 里把能力按子系统分组写死 bit：
 
 ```c
 #define NB_SERVICE_CORE_FCS     (1U << 0)   // 飞控
@@ -162,36 +200,24 @@
 #define NB_SERVICE_RELAY_NODE   (1U << 24)  // 中继
 ```
 
-所有节点编译时包含同一份头文件 → 天生一致。
-规则写在头文件里：**新增服务必须在这里分配 bit，已废弃的 bit 不能复用**（bit 编号
-一旦发到线上就等同于 ABI）。
+> **重要**：RPC 应用层的适配层目前**不**读这份宏表——它只认「服务表 ID」和
+> 「名字哈希」。这份宏的价值在于：
+> 直接使用 `nb_mesh` 的代码（例如自己写发现逻辑、或测试）可以用它填
+> `cfg.service_mask`，并保持全网 bit 编号一致。
+>
+> 如果你希望 RPC 路径也用上这套固定编号，做法是：**让服务表里的 ID 等于你想用的
+> bit 号**（例如 `CORE_FCS` 用 ID 0、`SENSE_SLAM` 用 ID 8），两者就自动对齐了。
 
-**方式二：共享服务表（服务多、需要编号管理时用）**
+规则：新增服务在这里分配 bit 后，**已废弃的 bit 不能复用**——编号一旦发到线上就
+等同于 ABI。
 
-用 `nb_service_table.h` 的宏声明"服务名 + 数字 ID"，所有节点包含同一份声明头：
+#### 方式三：名字哈希（兜底，生产别依赖）
 
-```c
-NB_SERVICE_DEFINE(order_table, 9u, "OrderService",
-    NB_SERVICE_METHOD(1u, "get"),
-    NB_SERVICE_METHOD(2u, "put"));
-```
-
-发现层会把"服务 ID"直接当 bit 号用（ID 9 → bit 9）。所以：
-
-- 服务 ID 必须 **< 32** 才能走位图；
-- 编号冲突（同名不同 ID）在安装表时就会报错。
-
-### 4.2 兜底：服务名哈希
-
-如果既没在 `mesh_services.h` 里分配 bit，也没有共享服务表，发现层会退化成
+既没装服务表、也没在 `mesh_services.h` 分配 bit 时，发现层退化成
 "把服务名哈希到 32 个 bit 之一"（`nb_mesh_service_bit(name)`）。
 
-代价：**不同服务可能撞到同一个 bit**。撞了会怎样？
-
-- 不会误删、不会崩；
-- 但"查服务 X"可能返回一个实际只提供 Y 的节点，调用会失败（RPC 层报错）。
-
-对生产环境，建议：**关键服务一律走方式一或方式二，别依赖哈希兜底**。
+代价：**不同服务可能撞到同一个 bit**。撞了不会崩、不会误删邻居，但"查服务 X"
+可能返回一个实际只提供 Y 的节点，调用失败（RPC 层报错）。
 
 ### 4.3 "我怎么知道对端有哪些服务"
 

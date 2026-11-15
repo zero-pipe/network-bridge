@@ -10,6 +10,9 @@
 #include <nb/rpc/node.h>
 #include <nb/rpc/proxy.h>
 
+/* 与服务端共享同一份声明表：服务名 -> 数字 ID -> 服务位必须两端一致。 */
+#include "service_table.h"
+
 #include <nb/base/log.h>
 
 #include <stdlib.h>
@@ -55,6 +58,8 @@ int main(int argc, char **argv)
     cfg.rpc.bind_host = "127.0.0.1";
     cfg.rpc.data_port = 0;
     cfg.runtime.io_threads = 1;
+    /* 与服务端装上同一张表：MESH 模式下两端才能算出同一个服务位。 */
+    cfg.rpc.service_table = &echo_table;
 
     rc = nb_node_create(&cfg, &node);
     if (rc == NB_OK) {
