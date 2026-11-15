@@ -8,6 +8,7 @@
 
 #include "metric_macros.h"
 #include <nb/internal/poolset.h>
+#include "deliver.h"
 #include "envelope.h"
 #include "reasm.h"
 #include "rx_window.h"
@@ -620,27 +621,13 @@ static int nb_session_send(nb_udp_transport_t *udp, nb_session_t *s, const nb_me
         return NB_ERR_INVALID;
     }
 
-    /* 仅把 envelope 头 + route 编进栈上前缀；payload 保持借用，不做整包拷贝。 */
+    /* 把 nb_message_t 的应用层字段拷进 envelope；payload 保持借用，不做整包拷贝。 */
     memset(&envelope, 0, sizeof(envelope));
-    envelope.kind = msg->kind;
-    envelope.flags = msg->flags;
-    envelope.status = msg->status;
-    envelope.encoding = msg->payload.encoding;
-    envelope.request_id = msg->request_id;
-    envelope.timeout_ms = msg->timeout_ms;
-    envelope.route = msg->route;
-    envelope.metadata = msg->metadata;
-    envelope.metadata_len = msg->metadata_len;
-    envelope.status_msg = msg->status_msg;
-    envelope.status_msg_len = msg->status_msg_len;
+    if (nb_envelope_from_message(msg, &envelope) != NB_OK) {
+        return NB_ERR_INVALID;
+    }
     envelope.payload = NULL;
     envelope.payload_len = len;
-    if (msg->has_stream) {
-        envelope.stream_flags = (uint8_t)(STREAM_FLAG_STREAM | msg->stream.flags);
-        envelope.stream_id = msg->stream.stream_id;
-        envelope.stream_offset = msg->stream.offset;
-        envelope.stream_total_size = msg->stream.total_size;
-    }
     env_len = nb_envelope_size(&envelope);
     if (env_len == 0 || env_len > (size_t)udp->base.max_msg_bytes + NB_MESSAGE_MAX_ENVELOPE_EXTRA) {
         return NB_ERR_TOOBIG;
@@ -814,22 +801,8 @@ static void nb_deliver_message(nb_udp_transport_t *udp,
                             size_t len,
                             nb_buf_t *owner)
 {
-    nb_envelope_t env;
-    nb_message_t msg;
-    char route[NB_GLOBAL_MAX_ROUTE_BYTES];
-
-    if (nb_envelope_decode(buf, len, &env) != NB_OK) {
-        if (owner) {
-            nb_buf_release(owner);
-        }
-        return;
-    }
-    nb_envelope_to_message(&env, route, sizeof(route), &msg);
-    msg.peer_host = s->peer_ip_s;
-    msg.peer_port = s->peer_port;
-    msg.reply_token = s;
-    msg.frame_owner = owner;
-    nb_node_on_message(udp->base.node, &udp->base, &msg);
+    (void)nb_transport_deliver_frame(
+        &udp->base, buf, len, s->peer_ip_s, s->peer_port, s, owner);
 }
 
 static int nb_session_on_data(nb_udp_transport_t *udp,

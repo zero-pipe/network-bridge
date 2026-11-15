@@ -199,31 +199,9 @@ static void nb_shm_deliver(nb_shm_instance_t *inst, uint64_t off, uint16_t sourc
         return;
     }
 
-    memset(&msg, 0, sizeof(msg));
-    msg.kind = env.kind;
-    msg.flags = env.flags;
-    msg.status = env.status;
-    msg.request_id = env.request_id;
-    msg.timeout_ms = env.timeout_ms;
-    msg.metadata = env.metadata;
-    msg.metadata_len = env.metadata_len;
-    msg.status_msg = env.status_msg;
-    msg.status_msg_len = env.status_msg_len;
-    if (env.route && env.route_len < sizeof(route_buf)) {
-        memcpy(route_buf, env.route, env.route_len);
-        route_buf[env.route_len] = '\0';
-        msg.route = route_buf;
-    }
-    msg.payload.data = env.payload;
-    msg.payload.len = env.payload_len;
-    msg.payload.encoding = env.encoding;
-    if (env.stream_flags != 0 || env.stream_id != 0) {
-        msg.has_stream = 1;
-        msg.stream.flags = env.stream_flags;
-        msg.stream.stream_id = env.stream_id;
-        msg.stream.offset = env.stream_offset;
-        msg.stream.total_size = env.stream_total_size;
-    }
+    /* envelope → nb_message_t：与 tcp/udp 共用同一份映射，避免语义漂移
+     * （尤其是 stream 判定条件）。 */
+    nb_envelope_to_message(&env, route_buf, sizeof(route_buf), &msg);
     msg.frame_owner = frame;
     if (nb_endpoint_from_parts(&peer,
                                "shm",

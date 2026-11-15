@@ -4,6 +4,36 @@
 
 #include <string.h>
 
+/* 把 nb_message_t 的应用层字段拷贝到 nb_envelope_t。payload 字段由调用方
+ * 在返回后按需填写（通常传输层将其设为 NULL，随帧单独发送）。 */
+int nb_envelope_from_message(const nb_message_t *msg, nb_envelope_t *envelope)
+{
+    if (!msg || !envelope) {
+        return NB_ERR_INVALID;
+    }
+    memset(envelope, 0, sizeof(*envelope));
+    envelope->kind = msg->kind;
+    envelope->flags = msg->flags;
+    envelope->status = msg->status;
+    envelope->encoding = msg->payload.encoding;
+    envelope->request_id = msg->request_id;
+    envelope->timeout_ms = msg->timeout_ms;
+    envelope->route = msg->route;
+    envelope->metadata = msg->metadata;
+    envelope->metadata_len = msg->metadata_len;
+    envelope->status_msg = msg->status_msg;
+    envelope->status_msg_len = msg->status_msg_len;
+    envelope->payload = NULL;
+    envelope->payload_len = 0;
+    if (msg->has_stream) {
+        envelope->stream_flags = (uint8_t)(STREAM_FLAG_STREAM | msg->stream.flags);
+        envelope->stream_id = msg->stream.stream_id;
+        envelope->stream_offset = msg->stream.offset;
+        envelope->stream_total_size = msg->stream.total_size;
+    }
+    return NB_OK;
+}
+
 static size_t nb_envelope_route_len(const nb_envelope_t *envelope)
 {
     return envelope->route ? strlen(envelope->route) : 0;

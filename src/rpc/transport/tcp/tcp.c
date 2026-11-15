@@ -19,6 +19,7 @@
 
 #include "metric_macros.h"
 #include <nb/internal/poolset.h>
+#include "deliver.h"
 #include "envelope.h"
 #include <nb/internal/iobuf.h>
 #include "util.h"
@@ -106,29 +107,6 @@ static nb_buf_t *nb_tcp_rx_alloc(nb_tcp_transport_t *t, int io, size_t total)
 
 /* ---- 解析并投递完整帧 ---- */
 
-static void nb_tcp_link_dispatch(nb_tcp_transport_t *t,
-                              nb_tcp_link_t *link,
-                              const uint8_t *body,
-                              size_t body_len,
-                              nb_buf_t *frame_owner)
-{
-    nb_envelope_t env;
-    nb_message_t msg;
-    char route[NB_GLOBAL_MAX_ROUTE_BYTES];
-
-    if (nb_envelope_decode(body, body_len, &env) != NB_OK) {
-        if (frame_owner) {
-            nb_buf_release(frame_owner);
-        }
-        return;
-    }
-    nb_envelope_to_message(&env, route, sizeof(route), &msg);
-    msg.peer_host = link->ip;
-    msg.peer_port = link->port;
-    msg.reply_token = link;
-    msg.frame_owner = frame_owner;
-    nb_node_on_message(t->base.node, &t->base, &msg);
-}
 static void nb_tcp_link_on_bytes(nb_tcp_transport_t *t,
                               nb_tcp_link_t *link,
                               const void *data,
@@ -182,7 +160,8 @@ static void nb_tcp_link_on_bytes(nb_tcp_transport_t *t,
             link->rx.got = 0;
             link->rx.hdr_got = 0;
             NB_METRIC_INC(t->base.metrics->tcp_frames_received);
-            nb_tcp_link_dispatch(t, link, body, body_len, owner);
+            nb_transport_deliver_frame(
+                &t->base, body, body_len, link->ip, link->port, link, owner);
         }
     }
 }
@@ -724,23 +703,8 @@ static int nb_tcp_send_common(nb_tcp_transport_t *t, nb_tcp_link_t *link, const 
     if (!t || !msg) {
         return NB_ERR_INVALID;
     }
-    memset(&header_envelope, 0, sizeof(header_envelope));
-    header_envelope.kind = msg->kind;
-    header_envelope.flags = msg->flags;
-    header_envelope.status = msg->status;
-    header_envelope.encoding = msg->payload.encoding;
-    header_envelope.request_id = msg->request_id;
-    header_envelope.timeout_ms = msg->timeout_ms;
-    header_envelope.route = msg->route;
-    header_envelope.metadata = msg->metadata;
-    header_envelope.metadata_len = msg->metadata_len;
-    header_envelope.status_msg = msg->status_msg;
-    header_envelope.status_msg_len = msg->status_msg_len;
-    if (msg->has_stream) {
-        header_envelope.stream_flags = (uint8_t)(STREAM_FLAG_STREAM | msg->stream.flags);
-        header_envelope.stream_id = msg->stream.stream_id;
-        header_envelope.stream_offset = msg->stream.offset;
-        header_envelope.stream_total_size = msg->stream.total_size;
+    if (nb_envelope_from_message(msg, &header_envelope) != NB_OK) {
+        return NB_ERR_INVALID;
     }
     header_envelope.payload = NULL;
     header_envelope.payload_len = payload_len;

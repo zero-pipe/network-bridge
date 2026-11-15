@@ -73,6 +73,11 @@ typedef struct nb_envelope {
     size_t payload_len;
 } nb_envelope_t;
 
+/* 把 nb_message_t 的应用层字段拷贝到 nb_envelope_t，供 tcp/udp 等传输层复用。
+ * payload 字段不在此处填写（传输层按需设为 NULL 或实际负载指针）。
+ * 返回 NB_OK 成功；参数非法返回 NB_ERR_INVALID。 */
+int nb_envelope_from_message(const nb_message_t *msg, nb_envelope_t *envelope);
+
 /* 编码后的总字节数（header + extensions + payload）。 */
 size_t nb_envelope_size(const nb_envelope_t *envelope);
 /*

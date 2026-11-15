@@ -88,6 +88,7 @@ set(NB_RPC_SOURCES
     rpc/config/rpc_config.c
     rpc/config/rpc_config_defaults.c
     rpc/transport/common/framing.c
+    rpc/transport/common/deliver.c
     rpc/transport/common/transport.c
     rpc/transport/common/provider.c
     rpc/transport/common/rx_window.c
@@ -158,6 +159,7 @@ set(NB_RTPS_CORE_SOURCES
     rtps/rtps_cdr.c
     rtps/rtps_param.c
     rtps/rtps_message.c
+    rtps/rtps_wire.c
     rtps/rtps_spdp.c
     rtps/rtps_sedp.c
     rtps/rtps_data.c
