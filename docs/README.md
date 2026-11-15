@@ -9,6 +9,7 @@
 - [错误码](api/error-codes.md)：稳定数值、名称、描述与重试语义。
 - [示例](examples.md)：按场景索引的可运行程序。
 - [测试](testing.md)：统一的 unit / e2e / perf / stability 质量门禁。
+- [集群发现（大白话版）](mesh-guide.md)：报文、时序、服务表、容量评估，不读代码也能看懂。
 - [路线图](roadmap.md)：进行中的事项与已知缺口。
 
 配置文件的编辑器校验使用 [`config.schema.json`](config.schema.json)。
