@@ -160,6 +160,7 @@ set(NB_RTPS_CORE_SOURCES
     rtps/rtps_param.c
     rtps/rtps_message.c
     rtps/rtps_wire.c
+    rtps/rtps_datapath.c
     rtps/rtps_spdp.c
     rtps/rtps_sedp.c
     rtps/rtps_data.c
