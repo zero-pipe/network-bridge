@@ -87,7 +87,7 @@ nb_add_test(test_rtps_participant e2e.rtps_participant
     INCLUDES ${NB_SRC_DIR}/rtps/internal
     TIMEOUT 60)
 
-# nb_mesh：报文编解码/邻居表用内部头（nb_mesh_table.h）直接驱动，
+# nb_mesh：报文编解码/邻居表用内部头（mesh_table.h）直接驱动，
 # 发现用例走 loopback 单播，不依赖环境里是否有可用组播。
 nb_add_test(test_mesh unit.mesh
     LABELS "unit;discovery"

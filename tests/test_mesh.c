@@ -9,7 +9,7 @@
  */
 #include <nb/mesh.h>
 
-#include "nb_mesh_table.h"
+#include "mesh_table.h"
 
 #include <zn/zn.h>
 
