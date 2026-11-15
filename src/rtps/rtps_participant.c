@@ -96,23 +96,26 @@ ntk_ssize_t nb_rtps_sendto(nb_rtps_participant_t *participant,
     return rc;
 }
 
-void drop_data_readers_for_writer(nb_rtps_participant_t *participant,
-                                         const nb_rtps_guid_t *writer);
+void drop_data_readers_for_writer(nb_rtps_participant_t *participant, const nb_rtps_guid_t *writer);
 
-int endpoint_qos_compatible(const nb_rtps_endpoint_info_t *publication,
-                                   const nb_rtps_endpoint_info_t *subscription);
+int endpoint_qos_compatible(
+    const nb_rtps_endpoint_info_t *publication,
+    const nb_rtps_endpoint_info_t *subscription);
 
-void notify_matches(nb_rtps_participant_t *participant,
-                           const nb_rtps_endpoint_info_t *remote_info,
-                           nb_rtps_endpoint_kind_t remote_kind,
-                           int added);
+void notify_matches(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_endpoint_info_t *remote_info,
+    nb_rtps_endpoint_kind_t remote_kind,
+    int added);
 
-void arm_reader_deadlines(nb_rtps_participant_t *participant,
-                                 const nb_rtps_remote_endpoint_t *remote);
+void arm_reader_deadlines(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_remote_endpoint_t *remote);
 
-void handle_pmd_data(nb_rtps_participant_t *participant,
-                            const nb_rtps_data_view_t *data,
-                            const nb_rtps_guid_prefix_t *prefix);
+void handle_pmd_data(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_data_view_t *data,
+    const nb_rtps_guid_prefix_t *prefix);
 
 void send_pmd(nb_rtps_participant_t *participant, uint32_t kind);
 

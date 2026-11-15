@@ -367,202 +367,229 @@ typedef struct nb_rtps_queued_status {
 /* ---- 由 rtps_participant.c 提供给数据面的工具 ---- */
 void copy_str(char *dst, size_t cap, const char *src);
 ntk_socket *participant_data_socket(const nb_rtps_participant_t *participant);
-ntk_ssize_t nb_rtps_sendto(nb_rtps_participant_t *participant,
-                                  ntk_socket *socket,
-                                  const void *data,
-                                  size_t len,
-                                  const char *host,
-                                  uint16_t port);
+ntk_ssize_t nb_rtps_sendto(
+    nb_rtps_participant_t *participant,
+    ntk_socket *socket,
+    const void *data,
+    size_t len,
+    const char *host,
+    uint16_t port);
 void init_header(const nb_rtps_participant_t *participant, nb_rtps_header_t *header);
-nb_rtps_local_endpoint_t *find_local_endpoint(nb_rtps_participant_t *participant,
-                                                     const nb_rtps_guid_t *guid);
-nb_rtps_remote_endpoint_t *find_remote_endpoint(nb_rtps_participant_t *participant,
-                                                       const nb_rtps_guid_t *guid);
-nb_rtps_remote_participant_t *find_remote(nb_rtps_participant_t *participant,
-                                                 const nb_rtps_guid_prefix_t *prefix);
-size_t endpoint_data_targets(nb_rtps_participant_t *participant,
-                                    const nb_rtps_remote_endpoint_t *endpoint,
-                                    nb_rtps_targets_t *out);
-int endpoint_data_target(nb_rtps_participant_t *participant,
-                                const nb_rtps_remote_endpoint_t *endpoint,
-                                char *host,
-                                size_t cap,
-                                uint16_t *port);
+nb_rtps_local_endpoint_t *find_local_endpoint(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_guid_t *guid);
+nb_rtps_remote_endpoint_t *find_remote_endpoint(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_guid_t *guid);
+nb_rtps_remote_participant_t *find_remote(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_guid_prefix_t *prefix);
+size_t endpoint_data_targets(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_remote_endpoint_t *endpoint,
+    nb_rtps_targets_t *out);
+int endpoint_data_target(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_remote_endpoint_t *endpoint,
+    char *host,
+    size_t cap,
+    uint16_t *port);
 void nb_rtps_used_add(uint32_t *list, size_t *count, size_t cap, size_t index);
 void nb_rtps_used_remove(uint32_t *list, size_t *count, size_t index);
 int ensure_data_readers(nb_rtps_participant_t *participant);
-nb_rtps_data_reader_state_t *find_data_reader(nb_rtps_participant_t *participant,
-                                                     const nb_rtps_guid_t *writer,
-                                                     const nb_rtps_entity_id_t *reader);
-nb_rtps_data_reader_state_t *get_data_reader(nb_rtps_participant_t *participant,
-                                                    const nb_rtps_guid_t *writer,
-                                                    const nb_rtps_entity_id_t *reader,
-                                                    uint64_t first_expected);
-int data_endpoint_matches(const nb_rtps_local_endpoint_t *local,
-                                 const nb_rtps_remote_endpoint_t *remote);
-void arm_reader_deadlines(nb_rtps_participant_t *participant,
-                                 const nb_rtps_remote_endpoint_t *remote);
-void drop_data_readers_for_writer(nb_rtps_participant_t *participant,
-                                         const nb_rtps_guid_t *writer);
+nb_rtps_data_reader_state_t *find_data_reader(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_guid_t *writer,
+    const nb_rtps_entity_id_t *reader);
+nb_rtps_data_reader_state_t *get_data_reader(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_guid_t *writer,
+    const nb_rtps_entity_id_t *reader,
+    uint64_t first_expected);
+int data_endpoint_matches(
+    const nb_rtps_local_endpoint_t *local,
+    const nb_rtps_remote_endpoint_t *remote);
+void arm_reader_deadlines(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_remote_endpoint_t *remote);
+void drop_data_readers_for_writer(nb_rtps_participant_t *participant, const nb_rtps_guid_t *writer);
 nb_rtps_time_t rtps_time_from_ns(uint64_t ns);
 uint64_t rtps_time_to_ns(const nb_rtps_time_t *ts);
-int endpoint_qos_compatible(const nb_rtps_endpoint_info_t *publication,
-                            const nb_rtps_endpoint_info_t *subscription);
-void handle_pmd_data(nb_rtps_participant_t *participant,
-                     const nb_rtps_data_view_t *data,
-                     const nb_rtps_guid_prefix_t *prefix);
+int endpoint_qos_compatible(
+    const nb_rtps_endpoint_info_t *publication,
+    const nb_rtps_endpoint_info_t *subscription);
+void handle_pmd_data(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_data_view_t *data,
+    const nb_rtps_guid_prefix_t *prefix);
 
 /* ---- 由 rtps_participant.c 提供给发现面/数据面使用的工具 ---- */
-int remote_target(const nb_rtps_remote_participant_t *remote,
-                         char *host,
-                         size_t cap,
-                         uint16_t *port);
-void notify_endpoint(nb_rtps_participant_t *participant,
-                            nb_rtps_endpoint_event_t event,
-                            nb_rtps_endpoint_kind_t kind,
-                            const nb_rtps_endpoint_info_t *info);
-void notify(nb_rtps_participant_t *participant,
-                   nb_rtps_participant_event_t event,
-                   const nb_rtps_participant_info_t *info);
-void notify_matches(nb_rtps_participant_t *participant,
-                           const nb_rtps_endpoint_info_t *remote_info,
-                           nb_rtps_endpoint_kind_t remote_kind,
-                           int added);
-void replay_retained_history(nb_rtps_participant_t *participant,
-                                    const nb_rtps_endpoint_info_t *reader_info);
-int locator_to_host(const nb_rtps_locator_t *locator,
-                           char *host,
-                           size_t cap,
-                           uint16_t *port);
-int locator_to_host_any(const nb_rtps_locator_t *locator,
-                               char *host,
-                               size_t cap,
-                               uint16_t *port);
+int remote_target(
+    const nb_rtps_remote_participant_t *remote,
+    char *host,
+    size_t cap,
+    uint16_t *port);
+void notify_endpoint(
+    nb_rtps_participant_t *participant,
+    nb_rtps_endpoint_event_t event,
+    nb_rtps_endpoint_kind_t kind,
+    const nb_rtps_endpoint_info_t *info);
+void notify(
+    nb_rtps_participant_t *participant,
+    nb_rtps_participant_event_t event,
+    const nb_rtps_participant_info_t *info);
+void notify_matches(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_endpoint_info_t *remote_info,
+    nb_rtps_endpoint_kind_t remote_kind,
+    int added);
+void replay_retained_history(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_endpoint_info_t *reader_info);
+int locator_to_host(const nb_rtps_locator_t *locator, char *host, size_t cap, uint16_t *port);
+int locator_to_host_any(const nb_rtps_locator_t *locator, char *host, size_t cap, uint16_t *port);
 void send_pmd(nb_rtps_participant_t *participant, uint32_t kind);
-void maybe_tcp_connect(nb_rtps_participant_t *participant,
-                              const nb_rtps_guid_prefix_t *prefix);
+void maybe_tcp_connect(nb_rtps_participant_t *participant, const nb_rtps_guid_prefix_t *prefix);
 
 /* ---- 由 rtps_datapath.c 提供给参与者调度使用 ---- */
-void dispatch_data_view(nb_rtps_participant_t *participant,
-                               const nb_rtps_data_view_t *data,
-                               const nb_rtps_time_t *source_ts,
-                               const nb_rtps_guid_prefix_t *prefix,
-                               const char *source_host,
-                               uint16_t source_port);
-nb_rtps_instance_t *get_instance(nb_rtps_local_endpoint_t *local,
-                                        const uint8_t *handle,
-                                        const nb_rtps_guid_t *writer);
-void handle_data_frag(nb_rtps_participant_t *participant,
-                             const nb_rtps_data_frag_t *fragment,
-                             const nb_rtps_time_t *source_ts,
-                             const nb_rtps_guid_prefix_t *prefix,
-                             const char *source_host,
-                             uint16_t source_port);
-void handle_user_acknack(nb_rtps_participant_t *participant,
-                                const nb_rtps_acknack_t *acknack,
-                                const nb_rtps_guid_prefix_t *source_prefix,
-                                const char *source_host,
-                                uint16_t source_port);
-void handle_user_gap(nb_rtps_participant_t *participant,
-                            const nb_rtps_gap_t *gap,
-                            const nb_rtps_guid_prefix_t *source_prefix);
-void handle_user_heartbeat(nb_rtps_participant_t *participant,
-                                  const nb_rtps_heartbeat_t *heartbeat,
-                                  const nb_rtps_guid_prefix_t *source_prefix,
-                                  const char *source_host,
-                                  uint16_t source_port);
-void handle_user_heartbeat_frag(nb_rtps_participant_t *participant,
-                                       const nb_rtps_heartbeat_frag_t *heartbeat,
-                                       const nb_rtps_guid_prefix_t *source_prefix);
-void handle_user_nack_frag(nb_rtps_participant_t *participant,
-                                  const nb_rtps_nack_frag_t *nack,
-                                  const nb_rtps_guid_prefix_t *source_prefix,
-                                  const char *source_host,
-                                  uint16_t source_port);
-void mark_instances_no_writers(nb_rtps_local_endpoint_t *local,
-                                      const nb_rtps_guid_t *writer);
+void dispatch_data_view(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_data_view_t *data,
+    const nb_rtps_time_t *source_ts,
+    const nb_rtps_guid_prefix_t *prefix,
+    const char *source_host,
+    uint16_t source_port);
+nb_rtps_instance_t *get_instance(
+    nb_rtps_local_endpoint_t *local,
+    const uint8_t *handle,
+    const nb_rtps_guid_t *writer);
+void handle_data_frag(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_data_frag_t *fragment,
+    const nb_rtps_time_t *source_ts,
+    const nb_rtps_guid_prefix_t *prefix,
+    const char *source_host,
+    uint16_t source_port);
+void handle_user_acknack(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_acknack_t *acknack,
+    const nb_rtps_guid_prefix_t *source_prefix,
+    const char *source_host,
+    uint16_t source_port);
+void handle_user_gap(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_gap_t *gap,
+    const nb_rtps_guid_prefix_t *source_prefix);
+void handle_user_heartbeat(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_heartbeat_t *heartbeat,
+    const nb_rtps_guid_prefix_t *source_prefix,
+    const char *source_host,
+    uint16_t source_port);
+void handle_user_heartbeat_frag(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_heartbeat_frag_t *heartbeat,
+    const nb_rtps_guid_prefix_t *source_prefix);
+void handle_user_nack_frag(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_nack_frag_t *nack,
+    const nb_rtps_guid_prefix_t *source_prefix,
+    const char *source_host,
+    uint16_t source_port);
+void mark_instances_no_writers(nb_rtps_local_endpoint_t *local, const nb_rtps_guid_t *writer);
 int sample_expired(const nb_rtps_local_endpoint_t *local, uint64_t sn, uint64_t now);
 void send_data_heartbeats(nb_rtps_participant_t *participant);
-int send_frag_nack(nb_rtps_participant_t *participant,
-                          nb_rtps_frag_assembly_t *assembly,
-                          uint64_t now);
-int send_user_data_all(nb_rtps_participant_t *participant,
-                              const nb_rtps_guid_t *writer_guid,
-                              const nb_rtps_guid_t *reader_guid,
-                              uint64_t sn,
-                              uint64_t source_ns,
-                              const void *payload,
-                              size_t payload_len,
-                              const uint8_t *handle,
-                              uint32_t status,
-                              const nb_rtps_targets_t *targets);
-void send_user_gap_all(nb_rtps_participant_t *participant,
-                              const nb_rtps_guid_t *writer_guid,
-                              const nb_rtps_guid_t *reader_guid,
-                              uint64_t gap_start,
-                              uint64_t gap_last,
-                              const nb_rtps_targets_t *targets);
-int send_user_heartbeat(nb_rtps_participant_t *participant,
-                               nb_rtps_local_endpoint_t *local,
-                               const nb_rtps_endpoint_info_t *remote,
-                               uint64_t first_sn,
-                               uint64_t last_sn,
-                               const char *host,
-                               uint16_t port);
-void send_user_heartbeat_all(nb_rtps_participant_t *participant,
-                                    nb_rtps_local_endpoint_t *local,
-                                    const nb_rtps_endpoint_info_t *reader_info,
-                                    uint64_t first_sn,
-                                    uint64_t last_sn,
-                                    const nb_rtps_targets_t *targets);
-void send_user_liveliness_heartbeat(nb_rtps_participant_t *participant,
-                                           nb_rtps_local_endpoint_t *local,
-                                           const nb_rtps_endpoint_info_t *remote,
-                                           const char *host,
-                                           uint16_t port);
-
-
+int send_frag_nack(
+    nb_rtps_participant_t *participant,
+    nb_rtps_frag_assembly_t *assembly,
+    uint64_t now);
+int send_user_data_all(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_guid_t *writer_guid,
+    const nb_rtps_guid_t *reader_guid,
+    uint64_t sn,
+    uint64_t source_ns,
+    const void *payload,
+    size_t payload_len,
+    const uint8_t *handle,
+    uint32_t status,
+    const nb_rtps_targets_t *targets);
+void send_user_gap_all(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_guid_t *writer_guid,
+    const nb_rtps_guid_t *reader_guid,
+    uint64_t gap_start,
+    uint64_t gap_last,
+    const nb_rtps_targets_t *targets);
+int send_user_heartbeat(
+    nb_rtps_participant_t *participant,
+    nb_rtps_local_endpoint_t *local,
+    const nb_rtps_endpoint_info_t *remote,
+    uint64_t first_sn,
+    uint64_t last_sn,
+    const char *host,
+    uint16_t port);
+void send_user_heartbeat_all(
+    nb_rtps_participant_t *participant,
+    nb_rtps_local_endpoint_t *local,
+    const nb_rtps_endpoint_info_t *reader_info,
+    uint64_t first_sn,
+    uint64_t last_sn,
+    const nb_rtps_targets_t *targets);
+void send_user_liveliness_heartbeat(
+    nb_rtps_participant_t *participant,
+    nb_rtps_local_endpoint_t *local,
+    const nb_rtps_endpoint_info_t *remote,
+    const char *host,
+    uint16_t port);
 
 /* ---- 由 rtps_discovery.c 提供给参与者调度使用 ---- */
-void broadcast_sedp_sample(nb_rtps_participant_t *participant,
-                                  nb_rtps_endpoint_kind_t kind,
-                                  uint64_t sn,
-                                  const uint8_t *payload,
-                                  size_t payload_len,
-                                  int dispose);
-void send_local_endpoint_to_remotes(nb_rtps_participant_t *participant,
-                                           const nb_rtps_local_endpoint_t *local);
+void broadcast_sedp_sample(
+    nb_rtps_participant_t *participant,
+    nb_rtps_endpoint_kind_t kind,
+    uint64_t sn,
+    const uint8_t *payload,
+    size_t payload_len,
+    int dispose);
+void send_local_endpoint_to_remotes(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_local_endpoint_t *local);
 void send_sedp_heartbeats(nb_rtps_participant_t *participant);
 int send_spdp(nb_rtps_participant_t *participant);
-void fill_local_info(const nb_rtps_participant_t *participant,
-                            nb_rtps_participant_info_t *info);
+void fill_local_info(const nb_rtps_participant_t *participant, nb_rtps_participant_info_t *info);
 int parse_ipv4(const char *host, uint8_t out[4]);
-void handle_sedp_gap(nb_rtps_participant_t *participant,
-                            nb_rtps_endpoint_kind_t kind,
-                            const nb_rtps_gap_t *gap,
-                            const nb_rtps_guid_prefix_t *source_prefix);
-void handle_sedp_heartbeat(nb_rtps_participant_t *participant,
-                                  nb_rtps_endpoint_kind_t kind,
-                                  const nb_rtps_heartbeat_t *heartbeat,
-                                  const nb_rtps_guid_prefix_t *source_prefix,
-                                  const char *source_host,
-                                  uint16_t source_port);
-void handle_sedp_acknack(nb_rtps_participant_t *participant,
-                                nb_rtps_endpoint_kind_t kind,
-                                const nb_rtps_acknack_t *acknack,
-                                const nb_rtps_guid_prefix_t *source_prefix,
-                                const char *source_host,
-                                uint16_t source_port);
-void remove_remote_endpoints_for_prefix(nb_rtps_participant_t *participant,
-                                               const nb_rtps_guid_prefix_t *prefix);
-void update_remote(nb_rtps_participant_t *participant,
-                   const nb_rtps_participant_info_t *info,
-                   const char *source_host,
-                   uint16_t source_port);
-void handle_sedp_data(nb_rtps_participant_t *participant,
-                      nb_rtps_endpoint_kind_t kind,
-                      const nb_rtps_data_view_t *data,
-                      const nb_rtps_guid_prefix_t *source_prefix);
+void handle_sedp_gap(
+    nb_rtps_participant_t *participant,
+    nb_rtps_endpoint_kind_t kind,
+    const nb_rtps_gap_t *gap,
+    const nb_rtps_guid_prefix_t *source_prefix);
+void handle_sedp_heartbeat(
+    nb_rtps_participant_t *participant,
+    nb_rtps_endpoint_kind_t kind,
+    const nb_rtps_heartbeat_t *heartbeat,
+    const nb_rtps_guid_prefix_t *source_prefix,
+    const char *source_host,
+    uint16_t source_port);
+void handle_sedp_acknack(
+    nb_rtps_participant_t *participant,
+    nb_rtps_endpoint_kind_t kind,
+    const nb_rtps_acknack_t *acknack,
+    const nb_rtps_guid_prefix_t *source_prefix,
+    const char *source_host,
+    uint16_t source_port);
+void remove_remote_endpoints_for_prefix(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_guid_prefix_t *prefix);
+void update_remote(
+    nb_rtps_participant_t *participant,
+    const nb_rtps_participant_info_t *info,
+    const char *source_host,
+    uint16_t source_port);
+void handle_sedp_data(
+    nb_rtps_participant_t *participant,
+    nb_rtps_endpoint_kind_t kind,
+    const nb_rtps_data_view_t *data,
+    const nb_rtps_guid_prefix_t *source_prefix);
 uint32_t lease_from_info(const nb_rtps_participant_info_t *info, uint32_t fallback);
 
 #endif /* NB_RTPS_PARTICIPANT_PRIV_H */

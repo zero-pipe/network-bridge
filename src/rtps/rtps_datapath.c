@@ -18,11 +18,12 @@
 #include "rtps_wire.h"
 
 /* Defined further down; the fragmented and single-DATA senders both use it. */
-static int build_instance_inline_qos(const uint8_t *handle,
-                                     uint32_t status,
-                                     uint8_t *buf,
-                                     size_t cap,
-                                     size_t *out_len);
+static int build_instance_inline_qos(
+    const uint8_t *handle,
+    uint32_t status,
+    uint8_t *buf,
+    size_t cap,
+    size_t *out_len);
 
 static uint32_t nb_rtps_fragment_count(size_t payload_len)
 {

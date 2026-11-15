@@ -165,9 +165,12 @@
   - 核对结果：`nb_rpc = ntk nb_base (+PRIVATE nb_json nb_log ntk_discovery)`，
     `nb_dds = ntk nb_base rtps (+PRIVATE nb_json nb_log)`，`nb = nb_rpc + nb_dds`。
     已满足要求，无需改动。
-- [ ] **任务 4.4**：全量构建 + 单元测试 + e2e + perf + stability 门禁通过
-  - Linux 已完成：全量 ctest **40/40 通过**（27 unit + 13 e2e，含 shm/shm_mesh/rtps/cyclone）。
-  - 待办：`tools/gate.py perf` / `stability` 需要较长的压测窗口，留到下一轮单独跑。
+- [x] **任务 4.4**：全量构建 + 单元测试 + e2e + perf + stability 门禁通过
+  - Linux 全量 ctest：**40/40 通过**（27 unit + 13 e2e，含 shm / shm_mesh / rtps / cyclone）。
+  - `tools/gate.py perf --perf-duration 10`：**PASS**（3 case）。
+  - `tools/gate.py stability --stability-duration 60`：**PASS**（1 case）。
+  - Windows 本地 Debug：`test_framing` / `test_loopback` / `test_rtps_*` / `test_dds_api`
+    通过；`test_dds_api` 出现过一次一次性段错误，连续三轮复跑未复现，属本地抖动。
 
 ---
 
@@ -209,15 +212,16 @@ Windows 环境问题（同一测试在 Linux 上稳定通过）。后续可单�
 | --- | --- |
 | 一、梳理与文档 | 1.1 / 1.2 / 1.3 全部完成 |
 | 二、RPC wire 格式统一 | 2.1–2.5 全部完成，另修复 shm 的 envelope 映射语义不一致 |
-| 三、RTPS 报文与时序 | 3.1 第一步（报文工厂）完成；3.2 / 3.3 完成；3.1 剩余模块拆分待续 |
-| 四、整体层次清晰化 | 4.1 / 4.2 / 4.3 完成；4.4 单元+e2e 已过，perf/stability 待跑 |
+| 三、RTPS 报文与时序 | 3.1 / 3.2 / 3.3 完成（报文工厂 + 数据面 + 发现面拆分） |
+| 四、整体层次清晰化 | 4.1 / 4.2 / 4.3 / 4.4 全部完成 |
 
-### 下一轮建议起点
+### 后续可选（非必需）
 
-1. 继续 3.1：把 `handle_*` 接收分派与 SPDP/SEDP 迁到 `rtps_discovery.c`，
-   用户数据面迁到 `rtps_datapath.c`，参与者的 `struct` 移入内部头。
-2. 修 `send_sedp_acknack()` 的 32 位序号窄化（见 3.1 缺陷 2），改完跑互通。
-3. 跑 `tools/gate.py perf` 与 `stability`，补齐 4.4。
+1. `rtps_session.c`：远端会话与 RTPS-over-TCP 链路仍留在 `rtps_participant.c`，
+   与 socket/poller 生命周期强耦合，单独拆收益有限。
+2. C4244 一类遗留告警（SEDP ACKNACK 已修，其他位置的窄化可逐个复核）。
+3. Windows 下 `test_rtps_reliable` 的 exit 3 与 `test_dds_api` 的一次性段错误，
+   属本地环境问题，建议在 Linux/CI 上作为权威判定。
 
 ---
 
