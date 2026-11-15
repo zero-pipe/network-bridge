@@ -15,3 +15,11 @@ endif()
 add_executable(mesh_probe mesh_probe.c)
 target_link_libraries(mesh_probe PRIVATE nb_rpc nb_mesh)
 nb_copy_runtime_deps(mesh_probe)
+
+# DDS/RTPS one-way QPS + latency probe (explicit loopback unicast peers).
+add_executable(dds_bench dds_bench.c)
+target_link_libraries(dds_bench PRIVATE nb_dds)
+nb_copy_runtime_deps(dds_bench)
+if(MSVC)
+    target_compile_definitions(dds_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
