@@ -36,6 +36,10 @@ typedef struct rtt_state {
     uint64_t expected_seq;
     uint64_t sent_ns;
     int measuring;
+    uint64_t start_ns;
+    uint64_t end_ns;
+    uint64_t warmup_completed;
+    uint64_t warmup_timed_out;
     uint64_t completed;
     uint64_t timed_out;
     uint64_t write_failed;
@@ -96,6 +100,7 @@ static void on_response(void *user, const nb_dds_sample_t *sample)
     uint64_t now;
     uint64_t rtt;
     uint64_t bin;
+    int matched = 0;
 
     if (!st || !sample || !sample->data.data || sample->data.len < 16u) {
         return;
@@ -110,6 +115,18 @@ static void on_response(void *user, const nb_dds_sample_t *sample)
         return; /* late/duplicate response, or not the current measured call */
     }
     rtt = now - st->sent_ns;
+    if (!st->start_ns) {
+        st->warmup_completed++;
+    } else if (st->sent_ns < st->start_ns || st->sent_ns >= st->end_ns) {
+        st->sent_ns = 0;
+        matched = 1;
+        goto unlock;
+    }
+    st->sent_ns = 0; /* Consume this sequence before another callback can match. */
+    if (!st->start_ns) {
+        matched = 1;
+        goto unlock;
+    }
     st->completed++;
     st->sum_ns += rtt;
     if (st->completed == 1 || rtt < st->min_ns) {
@@ -124,8 +141,12 @@ static void on_response(void *user, const nb_dds_sample_t *sample)
     } else {
         st->overflow++;
     }
+    matched = 1;
+unlock:
     zb_mutex_unlock(st->lock);
-    zb_sem_post(st->sem, 1);
+    if (matched) {
+        zb_sem_post(st->sem, 1);
+    }
 }
 
 static int make_participant(uint32_t domain,
@@ -216,6 +237,7 @@ int main(int argc, char **argv)
     uint64_t started_ns;
     uint64_t deadline_ns;
     uint64_t measured_ns;
+    uint64_t drain_seq;
     uint64_t i;
     int rc = 1;
     char peer_a[64], peer_b[64];
@@ -282,35 +304,53 @@ int main(int argc, char **argv)
 
     /* Warm discovery/matching with a bounded request-response warm-up. */
     for (i = 0; i < RTT_WARMUP_REQUESTS; i++) {
+        int write_rc;
         uint64_t warm_deadline = mono_ns() + 3000000000ull;
         uint64_t warm_seq = UINT64_MAX - i;
         put_u64_le(payload, warm_seq);
-        put_u64_le(payload + 8, mono_ns());
         zb_mutex_lock(st.lock);
         st.expected_seq = warm_seq;
         st.sent_ns = mono_ns();
         zb_mutex_unlock(st.lock);
-        if (nb_dds_writer_write(req_writer, payload, payload_size) != NB_OK) {
-            continue;
-        }
-        while (mono_ns() < warm_deadline) {
-            if (zb_sem_timedwait(st.sem, 100) == ZN_OK) {
-                break;
+        write_rc = nb_dds_writer_write(req_writer, payload, payload_size);
+        if (write_rc == NB_OK) {
+            while (mono_ns() < warm_deadline) {
+                if (zb_sem_timedwait(st.sem, 100) == ZN_OK) {
+                    break;
+                }
             }
+        }
+        zb_mutex_lock(st.lock);
+        if (st.sent_ns != 0) {
+            st.warmup_timed_out++;
+            st.sent_ns = 0;
+        } else if (write_rc != NB_OK) {
+            st.warmup_timed_out++;
+        }
+        zb_mutex_unlock(st.lock);
+        while (zb_sem_timedwait(st.sem, 0) == ZN_OK) {
         }
     }
     /* Drain any warm-up response token before starting the measured window. */
     while (zb_sem_timedwait(st.sem, 1) == ZN_OK) {
     }
 
+    zb_mutex_lock(st.lock);
     started_ns = mono_ns();
     deadline_ns = started_ns + (uint64_t)duration_s * 1000000000ull;
-    measured_ns = 0;
+    st.start_ns = started_ns;
+    st.end_ns = deadline_ns;
+    st.measuring = 1;
+    zb_mutex_unlock(st.lock);
+
     while (mono_ns() < deadline_ns) {
         uint64_t current_seq = ++seq;
         uint64_t sent_ns = mono_ns();
         uint64_t remaining_ms;
 
+        if (sent_ns >= deadline_ns) {
+            break;
+        }
         put_u64_le(payload, current_seq);
         put_u64_le(payload + 8, sent_ns);
         zb_mutex_lock(st.lock);
@@ -325,46 +365,83 @@ int main(int argc, char **argv)
             zb_mutex_unlock(st.lock);
             continue;
         }
-        remaining_ms = deadline_ns > mono_ns() ? (deadline_ns - mono_ns()) / 1000000ull : 1u;
+        {
+            uint64_t now_ns = mono_ns();
+            remaining_ms = now_ns < deadline_ns ?
+                (deadline_ns - now_ns + 999999ull) / 1000000ull : 0;
+        }
         if (remaining_ms > RTT_REQUEST_TIMEOUT_MS) {
             remaining_ms = RTT_REQUEST_TIMEOUT_MS;
         }
         if (zb_sem_timedwait(st.sem, (unsigned)remaining_ms) != ZN_OK) {
+            if (mono_ns() >= deadline_ns) {
+                break; /* Preserve the final in-flight request for the drain. */
+            }
             zb_mutex_lock(st.lock);
-            st.timed_out++;
-            st.sent_ns = 0; /* late response will be ignored */
+            if (st.sent_ns != 0) {
+                st.timed_out++;
+                st.sent_ns = 0;
+            }
             zb_mutex_unlock(st.lock);
+            while (zb_sem_timedwait(st.sem, 0) == ZN_OK) {
+            }
         }
     }
-    measured_ns = mono_ns() - started_ns;
+
+    zb_mutex_lock(st.lock);
+    st.end_ns = mono_ns();
+    measured_ns = st.end_ns - started_ns;
+    st.measuring = 0;
+    drain_seq = st.sent_ns;
+    zb_mutex_unlock(st.lock);
+    if (drain_seq != 0) {
+        (void)zb_sem_timedwait(st.sem, RTT_REQUEST_TIMEOUT_MS);
+        zb_mutex_lock(st.lock);
+        if (st.sent_ns != 0 && st.expected_seq == seq) {
+            st.timed_out++;
+            st.sent_ns = 0;
+        }
+        zb_mutex_unlock(st.lock);
+        while (zb_sem_timedwait(st.sem, 0) == ZN_OK) {
+        }
+    }
 
     zb_mutex_lock(st.lock);
     {
+        rtt_state_t result = st;
         double elapsed = (double)measured_ns / 1000000000.0;
-        double qps = elapsed > 0.0 ? (double)st.completed / elapsed : 0.0;
-        double avg_us = st.completed ? (double)st.sum_ns / (double)st.completed / 1000.0 : 0.0;
+        double qps;
+        double avg_us;
+        zb_mutex_unlock(st.lock);
 
+        qps = elapsed > 0.0 ? (double)result.completed / elapsed : 0.0;
+        avg_us = result.completed ?
+            (double)result.sum_ns / (double)result.completed / 1000.0 : 0.0;
         printf("DDS_BACKEND=RTPS\n");
         printf("MODE=request_response_ping_pong\n");
         printf("LATENCY_KIND=round_trip_write_to_response_callback\n");
         printf("QOS=best_effort_keep_last_1\n");
+        printf("TRANSPORT=same_host_unicast_loopback\n");
         printf("WINDOW=1\n");
         printf("DURATION_SECONDS=%.3f\n", elapsed);
+        printf("MEASURED_SECONDS=%.6f\n", elapsed);
         printf("PAYLOAD_BYTES=%zu\n", payload_size);
-        printf("COMPLETED=%" PRIu64 "\n", st.completed);
-        printf("TIMED_OUT=%" PRIu64 "\n", st.timed_out);
-        printf("WRITE_FAILED=%" PRIu64 "\n", st.write_failed);
+        printf("WARMUP_COMPLETED=%" PRIu64 "\n", result.warmup_completed);
+        printf("WARMUP_TIMED_OUT=%" PRIu64 "\n", result.warmup_timed_out);
+        printf("COMPLETED=%" PRIu64 "\n", result.completed);
+        printf("TIMED_OUT=%" PRIu64 "\n", result.timed_out);
+        printf("WRITE_FAILED=%" PRIu64 "\n", result.write_failed);
         printf("QPS=%.2f\n", qps);
-        printf("RTT_US_MIN=%.2f\n", (double)st.min_ns / 1000.0);
+        printf("RTT_US_MIN=%.2f\n", (double)result.min_ns / 1000.0);
         printf("RTT_US_AVG=%.2f\n", avg_us);
-        printf("RTT_US_P50=%" PRIu64 "\n", percentile_us(&st, 0.50));
-        printf("RTT_US_P95=%" PRIu64 "\n", percentile_us(&st, 0.95));
-        printf("RTT_US_P99=%" PRIu64 "\n", percentile_us(&st, 0.99));
-        printf("RTT_US_MAX=%.2f\n", (double)st.max_ns / 1000.0);
-        printf("RTT_OVER_10MS=%" PRIu64 "\n", st.overflow);
+        printf("RTT_US_P50=%" PRIu64 "\n", percentile_us(&result, 0.50));
+        printf("RTT_US_P95=%" PRIu64 "\n", percentile_us(&result, 0.95));
+        printf("RTT_US_P99=%" PRIu64 "\n", percentile_us(&result, 0.99));
+        printf("RTT_US_MAX=%.2f\n", (double)result.max_ns / 1000.0);
+        printf("RTT_OVER_10MS=%" PRIu64 "\n", result.overflow);
+        rc = result.completed > 0 ? 0 : 1;
     }
-    zb_mutex_unlock(st.lock);
-    rc = st.completed > 0 ? 0 : 1;
+
 
 done:
     nb_dds_reader_destroy(resp_reader);
