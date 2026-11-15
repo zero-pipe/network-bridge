@@ -14,6 +14,7 @@
 #include "rtps_reliable.h"
 #include "rtps_sedp.h"
 #include "rtps_spdp.h"
+#include "rtps_wire.h"
 
 #define NB_RTPS_SPDP_BASE_PORT 7400u
 #define NB_RTPS_SPDP_DOMAIN_GAIN 250u
@@ -817,7 +818,6 @@ static int send_sedp_data(nb_rtps_participant_t *participant,
     nb_rtps_header_t header;
     nb_rtps_time_t timestamp;
     nb_rtps_data_t data;
-    nb_cdr_writer_t writer;
     uint64_t now;
     size_t message_len;
 
@@ -859,14 +859,10 @@ static int send_sedp_data(nb_rtps_participant_t *participant,
         data.inline_qos_len = inline_qos_len;
     }
 
-    if (nb_rtps_message_init(&writer, message, sizeof(message), &header) != NB_OK ||
-        nb_rtps_info_ts(&writer, &timestamp, false) != NB_OK ||
-        (dst && nb_rtps_info_dst(&writer, dst) != NB_OK) ||
-        nb_rtps_data(&writer, &data) != NB_OK ||
-        !nb_cdr_writer_ok(&writer)) {
+    message_len = nb_rtps_wire_data(message, sizeof(message), &header, &timestamp, dst, &data);
+    if (message_len == 0) {
         return NB_ERR_BAD_MESSAGE;
     }
-    message_len = nb_cdr_writer_len(&writer);
     if (nb_rtps_sendto(participant, participant->unicast_sock, message, message_len, host, port) < 0) {
         return NB_ERR_IO;
     }
@@ -910,7 +906,7 @@ static int send_user_fragment(nb_rtps_participant_t *participant,
     nb_rtps_header_t header;
     nb_rtps_time_t timestamp;
     nb_rtps_data_frag_t fragment;
-    nb_cdr_writer_t writer;
+    size_t message_len;
     size_t offset;
     size_t chunk;
 
@@ -949,20 +945,21 @@ static int send_user_fragment(nb_rtps_participant_t *participant,
     }
     fragment.key = status != 0;
 
-    if (nb_rtps_message_init(&writer, message, sizeof(message), &header) != NB_OK ||
-        nb_rtps_info_ts(&writer, &timestamp, false) != NB_OK ||
-        nb_rtps_info_dst(&writer, &reader_guid->prefix) != NB_OK ||
-        nb_rtps_data_frag(&writer, &fragment) != NB_OK ||
-        !nb_cdr_writer_ok(&writer)) {
+    message_len = nb_rtps_wire_data_frag(message,
+                                         sizeof(message),
+                                         &header,
+                                         &timestamp,
+                                         &reader_guid->prefix,
+                                         &fragment);
+    if (message_len == 0) {
         return NB_ERR_BAD_MESSAGE;
     }
     if (nb_rtps_sendto(participant, participant_data_socket(participant),
                           message,
-                          nb_cdr_writer_len(&writer),
+                          message_len,
                           host,
                           port) < 0) {
-        return NB_ERR_IO;
-    }
+        return NB_ERR_IO;    }
     participant->stats.data_sent++;
     participant->stats.fragments_sent++;
 
@@ -986,8 +983,8 @@ static int send_user_heartbeat_frag(nb_rtps_participant_t *participant,
     nb_rtps_header_t header;
     nb_rtps_time_t timestamp;
     nb_rtps_heartbeat_frag_t heartbeat;
-    nb_cdr_writer_t writer;
     uint64_t now;
+    size_t message_len;
 
     init_header(participant, &header);
     now = ntk_wall_ms();
@@ -1000,16 +997,18 @@ static int send_user_heartbeat_frag(nb_rtps_participant_t *participant,
     heartbeat.last_fragment_num = last_fragment_num;
     heartbeat.count = ++participant->frag_heartbeat_count;
 
-    if (nb_rtps_message_init(&writer, message, sizeof(message), &header) != NB_OK ||
-        nb_rtps_info_ts(&writer, &timestamp, false) != NB_OK ||
-        nb_rtps_info_dst(&writer, &reader_guid->prefix) != NB_OK ||
-        nb_rtps_heartbeat_frag(&writer, &heartbeat) != NB_OK ||
-        !nb_cdr_writer_ok(&writer)) {
+    message_len = nb_rtps_wire_heartbeat_frag(message,
+                                              sizeof(message),
+                                              &header,
+                                              &timestamp,
+                                              &reader_guid->prefix,
+                                              &heartbeat);
+    if (message_len == 0) {
         return NB_ERR_BAD_MESSAGE;
     }
     if (nb_rtps_sendto(participant, participant_data_socket(participant),
                           message,
-                          nb_cdr_writer_len(&writer),
+                          message_len,
                           host,
                           port) < 0) {
         return NB_ERR_IO;
@@ -1110,7 +1109,6 @@ static int send_user_data(nb_rtps_participant_t *participant,
     nb_rtps_header_t header;
     nb_rtps_time_t timestamp;
     nb_rtps_data_t data;
-    nb_cdr_writer_t writer;
     size_t message_len;
 
     if (!participant || !writer_guid || !reader_guid || !payload ||
@@ -1150,14 +1148,15 @@ static int send_user_data(nb_rtps_participant_t *participant,
         data.dispose = status == 1;
     }
 
-    if (nb_rtps_message_init(&writer, message, sizeof(message), &header) != NB_OK ||
-        nb_rtps_info_ts(&writer, &timestamp, false) != NB_OK ||
-        nb_rtps_info_dst(&writer, &reader_guid->prefix) != NB_OK ||
-        nb_rtps_data(&writer, &data) != NB_OK ||
-        !nb_cdr_writer_ok(&writer)) {
+    message_len = nb_rtps_wire_data(message,
+                                    sizeof(message),
+                                    &header,
+                                    &timestamp,
+                                    &reader_guid->prefix,
+                                    &data);
+    if (message_len == 0) {
         return NB_ERR_BAD_MESSAGE;
     }
-    message_len = nb_cdr_writer_len(&writer);
     if (nb_rtps_sendto(participant, participant_data_socket(participant), message, message_len, host, port) < 0) {
         return NB_ERR_IO;
     }
@@ -1255,7 +1254,6 @@ static void send_sedp_heartbeat(nb_rtps_participant_t *participant,
     nb_rtps_header_t header;
     nb_rtps_time_t timestamp;
     nb_rtps_heartbeat_t heartbeat;
-    nb_cdr_writer_t writer;
     nb_rtps_reliable_writer_t *history = kind == NB_RTPS_ENDPOINT_PUBLICATION
                                              ? participant->publications_writer
                                              : participant->subscriptions_writer;
@@ -1290,14 +1288,15 @@ static void send_sedp_heartbeat(nb_rtps_participant_t *participant,
     nb_rtps_sn_from_u64(&heartbeat.first_sn, first_sn);
     nb_rtps_sn_from_u64(&heartbeat.last_sn, last_sn);
 
-    if (nb_rtps_message_init(&writer, message, sizeof(message), &header) != NB_OK ||
-        nb_rtps_info_ts(&writer, &timestamp, false) != NB_OK ||
-        nb_rtps_info_dst(&writer, &remote->info.guid.prefix) != NB_OK ||
-        nb_rtps_heartbeat(&writer, &heartbeat) != NB_OK ||
-        !nb_cdr_writer_ok(&writer)) {
+    message_len = nb_rtps_wire_heartbeat(message,
+                                         sizeof(message),
+                                         &header,
+                                         &timestamp,
+                                         &remote->info.guid.prefix,
+                                         &heartbeat);
+    if (message_len == 0) {
         return;
     }
-    message_len = nb_cdr_writer_len(&writer);
     (void)nb_rtps_sendto(participant, participant->unicast_sock, message, message_len, host, port);
     participant->stats.heartbeats_sent++;
 }
@@ -1332,7 +1331,6 @@ static void send_sedp_acknack(nb_rtps_participant_t *participant,
     nb_rtps_header_t header;
     nb_rtps_time_t timestamp;
     nb_rtps_acknack_t acknack;
-    nb_cdr_writer_t writer;
     uint64_t now;
     size_t message_len;
 
@@ -1353,14 +1351,15 @@ static void send_sedp_acknack(nb_rtps_participant_t *participant,
     if (bitmap) {
         memcpy(acknack.bitmap, bitmap, sizeof(acknack.bitmap));
     }
-    if (nb_rtps_message_init(&writer, message, sizeof(message), &header) != NB_OK ||
-        nb_rtps_info_ts(&writer, &timestamp, false) != NB_OK ||
-        (dst && nb_rtps_info_dst(&writer, dst) != NB_OK) ||
-        nb_rtps_acknack(&writer, &acknack) != NB_OK ||
-        !nb_cdr_writer_ok(&writer)) {
+    message_len = nb_rtps_wire_acknack(message,
+                                       sizeof(message),
+                                       &header,
+                                       &timestamp,
+                                       dst,
+                                       &acknack);
+    if (message_len == 0) {
         return;
     }
-    message_len = nb_cdr_writer_len(&writer);
     (void)nb_rtps_sendto(participant, participant->unicast_sock, message, message_len, host, port);
     participant->stats.acknacks_sent++;
 }
@@ -1373,7 +1372,6 @@ static int send_spdp(nb_rtps_participant_t *participant)
     nb_rtps_header_t header;
     nb_rtps_time_t timestamp;
     nb_rtps_data_t data;
-    nb_cdr_writer_t writer;
     size_t payload_len = 0;
     size_t message_len;
     uint64_t sn;
@@ -1408,13 +1406,11 @@ static int send_spdp(nb_rtps_participant_t *participant)
     data.payload = payload;
     data.payload_len = payload_len;
 
-    if (nb_rtps_message_init(&writer, message, sizeof(message), &header) != NB_OK ||
-        nb_rtps_info_ts(&writer, &timestamp, false) != NB_OK ||
-        nb_rtps_data(&writer, &data) != NB_OK ||
-        !nb_cdr_writer_ok(&writer)) {
+    /* SPDP 只按源地址投递，不带 INFO_DST。 */
+    message_len = nb_rtps_wire_data(message, sizeof(message), &header, &timestamp, NULL, &data);
+    if (message_len == 0) {
         return NB_ERR_BAD_MESSAGE;
     }
-    message_len = nb_cdr_writer_len(&writer);
 
     if (participant->multicast_enabled) {
         targets++;
@@ -2727,7 +2723,6 @@ static int send_user_gap(nb_rtps_participant_t *participant,
     nb_rtps_header_t header;
     nb_rtps_time_t timestamp;
     nb_rtps_gap_t gap;
-    nb_cdr_writer_t writer;
     uint64_t now;
     size_t message_len;
 
@@ -2750,14 +2745,15 @@ static int send_user_gap(nb_rtps_participant_t *participant,
      * Cyclone accepts: a zero bitmapBase is rejected as malformed. */
     nb_rtps_sn_from_u64(&gap.base, last_sn + 1u);
     gap.num_bits = 0;
-    if (nb_rtps_message_init(&writer, message, sizeof(message), &header) != NB_OK ||
-        nb_rtps_info_ts(&writer, &timestamp, false) != NB_OK ||
-        nb_rtps_info_dst(&writer, &reader_guid->prefix) != NB_OK ||
-        nb_rtps_gap(&writer, &gap) != NB_OK ||
-        !nb_cdr_writer_ok(&writer)) {
+    message_len = nb_rtps_wire_gap(message,
+                                   sizeof(message),
+                                   &header,
+                                   &timestamp,
+                                   &reader_guid->prefix,
+                                   &gap);
+    if (message_len == 0) {
         return NB_ERR_BAD_MESSAGE;
     }
-    message_len = nb_cdr_writer_len(&writer);
     if (nb_rtps_sendto(participant, participant_data_socket(participant), message, message_len, host, port) < 0) {
         return NB_ERR_IO;
     }
@@ -2776,7 +2772,6 @@ static int send_user_acknack(nb_rtps_participant_t *participant,
     uint8_t message[NB_RTPS_PACKET_MAX];
     nb_rtps_header_t header;
     nb_rtps_time_t timestamp;
-    nb_cdr_writer_t writer;
     uint64_t now;
     size_t message_len;
 
@@ -2788,14 +2783,15 @@ static int send_user_acknack(nb_rtps_participant_t *participant,
     now = ntk_wall_ms();
     timestamp.seconds = (int32_t)(now / 1000u);
     timestamp.fraction = (uint32_t)(((now % 1000u) << 32) / 1000u);
-    if (nb_rtps_message_init(&writer, message, sizeof(message), &header) != NB_OK ||
-        nb_rtps_info_ts(&writer, &timestamp, false) != NB_OK ||
-        nb_rtps_info_dst(&writer, &writer_guid->prefix) != NB_OK ||
-        nb_rtps_acknack(&writer, acknack) != NB_OK ||
-        !nb_cdr_writer_ok(&writer)) {
+    message_len = nb_rtps_wire_acknack(message,
+                                       sizeof(message),
+                                       &header,
+                                       &timestamp,
+                                       &writer_guid->prefix,
+                                       acknack);
+    if (message_len == 0) {
         return NB_ERR_BAD_MESSAGE;
     }
-    message_len = nb_cdr_writer_len(&writer);
     if (nb_rtps_sendto(participant, participant_data_socket(participant), message, message_len, host, port) < 0) {
         return NB_ERR_IO;
     }
@@ -2816,7 +2812,6 @@ static int send_user_heartbeat(nb_rtps_participant_t *participant,
     nb_rtps_header_t header;
     nb_rtps_time_t timestamp;
     nb_rtps_heartbeat_t heartbeat;
-    nb_cdr_writer_t writer;
     uint64_t now;
     size_t message_len;
 
@@ -2830,14 +2825,15 @@ static int send_user_heartbeat(nb_rtps_participant_t *participant,
     nb_rtps_sn_from_u64(&heartbeat.first_sn, first_sn);
     nb_rtps_sn_from_u64(&heartbeat.last_sn, last_sn);
     heartbeat.count = ++local->heartbeat_count;
-    if (nb_rtps_message_init(&writer, message, sizeof(message), &header) != NB_OK ||
-        nb_rtps_info_ts(&writer, &timestamp, false) != NB_OK ||
-        nb_rtps_info_dst(&writer, &remote->endpoint_guid.prefix) != NB_OK ||
-        nb_rtps_heartbeat(&writer, &heartbeat) != NB_OK ||
-        !nb_cdr_writer_ok(&writer)) {
+    message_len = nb_rtps_wire_heartbeat(message,
+                                         sizeof(message),
+                                         &header,
+                                         &timestamp,
+                                         &remote->endpoint_guid.prefix,
+                                         &heartbeat);
+    if (message_len == 0) {
         return NB_ERR_BAD_MESSAGE;
     }
-    message_len = nb_cdr_writer_len(&writer);
     if (nb_rtps_sendto(participant, participant_data_socket(participant), message, message_len, host, port) < 0) {
         return NB_ERR_IO;
     }
@@ -2863,7 +2859,6 @@ static void send_user_liveliness_heartbeat(nb_rtps_participant_t *participant,
     nb_rtps_header_t header;
     nb_rtps_time_t timestamp;
     nb_rtps_heartbeat_t heartbeat;
-    nb_cdr_writer_t writer;
     uint64_t now;
     size_t message_len;
 
@@ -2900,14 +2895,15 @@ static void send_user_liveliness_heartbeat(nb_rtps_participant_t *participant,
     }
     heartbeat.count = ++local->heartbeat_count;
     heartbeat.liveliness = 1;
-    if (nb_rtps_message_init(&writer, message, sizeof(message), &header) != NB_OK ||
-        nb_rtps_info_ts(&writer, &timestamp, false) != NB_OK ||
-        nb_rtps_info_dst(&writer, &remote->endpoint_guid.prefix) != NB_OK ||
-        nb_rtps_heartbeat(&writer, &heartbeat) != NB_OK ||
-        !nb_cdr_writer_ok(&writer)) {
+    message_len = nb_rtps_wire_heartbeat(message,
+                                         sizeof(message),
+                                         &header,
+                                         &timestamp,
+                                         &remote->endpoint_guid.prefix,
+                                         &heartbeat);
+    if (message_len == 0) {
         return;
     }
-    message_len = nb_cdr_writer_len(&writer);
     (void)nb_rtps_sendto(participant, participant_data_socket(participant), message, message_len, host, port);
     participant->stats.heartbeats_sent++;
 }
@@ -4406,11 +4402,11 @@ static int send_frag_nack(nb_rtps_participant_t *participant,
     nb_rtps_header_t header;
     nb_rtps_time_t timestamp;
     nb_rtps_nack_frag_t nack;
-    nb_cdr_writer_t writer;
     uint32_t first_missing = 0;
     uint32_t window;
     uint32_t i;
     int found = 0;
+    size_t message_len;
 
     if (!participant || !assembly || !assembly->used || assembly->complete ||
         assembly->fragment_count == 0 || assembly->source_port == 0 ||
@@ -4449,15 +4445,18 @@ static int send_frag_nack(nb_rtps_participant_t *participant,
     init_header(participant, &header);
     timestamp.seconds = (int32_t)(now / 1000u);
     timestamp.fraction = (uint32_t)(((now % 1000u) << 32) / 1000u);
-    if (nb_rtps_message_init(&writer, message, sizeof(message), &header) != NB_OK ||
-        nb_rtps_info_ts(&writer, &timestamp, false) != NB_OK ||
-        nb_rtps_info_dst(&writer, &assembly->writer.prefix) != NB_OK ||
-        nb_rtps_nack_frag(&writer, &nack) != NB_OK || !nb_cdr_writer_ok(&writer)) {
+    message_len = nb_rtps_wire_nack_frag(message,
+                                         sizeof(message),
+                                         &header,
+                                         &timestamp,
+                                         &assembly->writer.prefix,
+                                         &nack);
+    if (message_len == 0) {
         return NB_ERR_BAD_MESSAGE;
     }
     if (nb_rtps_sendto(participant, participant_data_socket(participant),
                           message,
-                          nb_cdr_writer_len(&writer),
+                          message_len,
                           assembly->source_host,
                           assembly->source_port) < 0) {
         return NB_ERR_IO;
@@ -5036,7 +5035,6 @@ static void send_pmd(nb_rtps_participant_t *participant, uint32_t kind)
     nb_rtps_header_t header;
     nb_rtps_time_t timestamp;
     nb_rtps_data_t data;
-    nb_cdr_writer_t writer;
     size_t payload_len = 0;
     size_t message_len;
     uint64_t sn;
@@ -5063,13 +5061,11 @@ static void send_pmd(nb_rtps_participant_t *participant, uint32_t kind)
     nb_rtps_sn_from_u64(&data.writer_sn, sn);
     data.payload = payload;
     data.payload_len = payload_len;
-    if (nb_rtps_message_init(&writer, message, sizeof(message), &header) != NB_OK ||
-        nb_rtps_info_ts(&writer, &timestamp, false) != NB_OK ||
-        nb_rtps_data(&writer, &data) != NB_OK ||
-        !nb_cdr_writer_ok(&writer)) {
+    /* PMD 是内建 writer，按源地址投递，不带 INFO_DST。 */
+    message_len = nb_rtps_wire_data(message, sizeof(message), &header, &timestamp, NULL, &data);
+    if (message_len == 0) {
         return;
     }
-    message_len = nb_cdr_writer_len(&writer);
 
     ntk_mutex_lock(participant->lock);
     for (i = 0; i < participant->max_remotes; i++) {
@@ -6167,8 +6163,8 @@ static int publish_internal(nb_rtps_participant_t *participant,
     nb_rtps_publish_send_t batch[NB_RTPS_PUBLISH_BATCH];
     size_t batch_count = 0;
     uint64_t sn = 0;
-    uint32_t evicted_first = 0;
-    uint32_t evicted_last = 0;
+    uint64_t evicted_first = 0;
+    uint64_t evicted_last = 0;
     uint64_t first_sn = 0;
     size_t i;
     int target_count = 0;
@@ -6189,8 +6185,12 @@ static int publish_internal(nb_rtps_participant_t *participant,
     }
 
     if (local->history) {
-        uint32_t old_first = 0;
-        uint32_t old_last = 0;
+        /* nb_rtps_reliable_state() writes full uint64_t sequence numbers; a
+         * narrower type here would write past the variable and corrupt the
+         * neighbouring `old_count`, which is what decides whether a GAP has to
+         * announce evicted samples. */
+        uint64_t old_first = 0;
+        uint64_t old_last = 0;
         size_t old_count = 0;
         int rc;
 
