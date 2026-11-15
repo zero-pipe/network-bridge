@@ -118,6 +118,16 @@ set_tests_properties(contract.nb_headers PROPERTIES
     LABELS "unit;contract"
     TIMEOUT 30)
 
+# The spines are independent at the source level too: src/base knows no spine,
+# src/rpc knows no DDS/RTPS, src/dds knows no RPC.
+add_test(NAME contract.source_layering
+    COMMAND ${CMAKE_COMMAND}
+            -DSRC_DIR=${CMAKE_SOURCE_DIR}/src
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_layering_sources.cmake)
+set_tests_properties(contract.source_layering PROPERTIES
+    LABELS "unit;contract"
+    TIMEOUT 30)
+
 # The public library must only export rtps_* symbols. Skipped when no nm.
 add_test(NAME contract.rtps_symbols
     COMMAND ${CMAKE_COMMAND}

@@ -89,6 +89,7 @@ int main(void)
 | [配置](docs/api/config.md) | JSON 字段、默认值与校验 |
 | [错误码](docs/api/error-codes.md) | 稳定数值、名称、描述与重试语义 |
 | [RTPS 公共接口](docs/rtps-api.md) | 内建 RTPS 引擎的对象模型、QoS 与读写语义 |
+| [RTPS 报文与时序](docs/rtps-timing.md) | RTPS 报文结构、发送/接收/分片/发现时序与节拍参数 |
 | [示例](docs/examples.md) | 按场景索引 |
 | [测试](docs/testing.md) | unit / e2e / perf / stability 门禁 |
 
@@ -118,15 +119,21 @@ include/nb/
   internal/                 不安装
 include/rtps/                RTPS 引擎独立公共 API（不含 nb 头）
 src/base/                    共享基础设施 + JSON 读取器
-src/rpc/                     RPC 主干：runtime/service/proxy/message/router/
-                             registry/discovery/transport(tcp,udp,shm)/config
+src/rpc/                     RPC 主干：runtime/service/proxy/router/registry/
+                             discovery/config
+  message/                  codec 层：envelope + frame（tcp/udp/shm 共用的 wire 编解码）
+  transport/common/         传输公共层：framing、deliver（入站投递）、reasm、
+                             rx_window、tx_ring、回压
+  transport/tcp/udp/shm/    各传输驱动：只管字节搬运与各自的可靠性机制
 src/dds/                     DDS 主干：participant/topic/writer/reader/history/
                              waitset/qos/backend(rtps,cyclone)/config
 src/rtps/                    RTPS 协议引擎与 rtps_* API
+  internal/                  引擎内部头（不安装）
+  api/                       rtps_* 公共接口实现
 examples/                    01_rpc、02_rpc_streaming、03_dds_pubsub、04_config
-docs/                        API、配置、错误和测试文档
-tests/                       单元与端到端测试
-3rdparty/                    ntk、elog、cJSON、uthash、Cyclone DDS
+docs/                        API、架构、RTPS 报文与时序、错误和测试文档
+tests/                       单元、端到端与契约测试
+3rdparty/                    ntk、elog、cJSON、uthash、Cyclone DDS、micro-cdr
 ```
 
 库目标：`nb_base`、`nb_json`、`nb_log`、`ntk_discovery`、`rtps_core`、`rtps`、
