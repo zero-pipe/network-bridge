@@ -5,11 +5,11 @@
  *
  * 全部走 loopback（不依赖环境里是否真的有可用组播）：
  *   - 发现相关用例用两个真实 nb_mesh 实例 + 定向单播目标；
- *   - 表操作与规模用例直接驱动 mesh_table（无 socket），因此不必真发 5000 包。
+ *   - 表操作与规模用例直接驱动 nb_mesh_table（无 socket），因此不必真发 5000 包。
  */
 #include <nb/mesh.h>
 
-#include "mesh_table.h"
+#include "nb_mesh_table.h"
 
 #include <zn/zn.h>
 

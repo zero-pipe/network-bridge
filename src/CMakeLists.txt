@@ -132,10 +132,10 @@ install(TARGETS nb_log
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 # Mesh discovery library: 定长组播心跳 + 编队隔离 + 掩码寻址。只依赖 znet/zbase。
-# mesh_table.c 是邻居表本身（无 socket），单测直接链进来做容量/时延冒烟。
+# nb_mesh_table.c 是邻居表本身（无 socket），单测直接链进来做容量/时延冒烟。
 add_library(nb_mesh STATIC
     mesh/nb_mesh.c
-    mesh/mesh_table.c)
+    mesh/nb_mesh_table.c)
 add_library(nb::nb_mesh ALIAS nb_mesh)
 target_include_directories(nb_mesh
     PUBLIC

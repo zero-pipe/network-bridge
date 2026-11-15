@@ -1,5 +1,5 @@
-/* nb_mesh 邻居表：哈希桶 + 服务位双向索引。见 mesh_table.h。 */
-#include "mesh_table.h"
+/* nb_mesh 邻居表：哈希桶 + 服务位双向索引。见 nb_mesh_table.h。 */
+#include "nb_mesh_table.h"
 
 #include <stdlib.h>
 #include <string.h>

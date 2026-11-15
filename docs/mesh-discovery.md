@@ -11,7 +11,7 @@
 | `include/nb/mesh_services.h` | 服务位图契约：新增服务必须在这里分配 bit |
 | `include/nb/mesh.h` | 公共 API：报文结构、编解码、生命周期、掩码寻址 |
 | `src/mesh/nb_mesh.c` | 报文编解码、三个执行体、公共 API |
-| `src/mesh/mesh_table.{h,c}` | 邻居表（哈希桶 + 服务位索引 + 淘汰），无 socket，可单测 |
+| `src/mesh/nb_mesh_table.{h,c}` | 邻居表（哈希桶 + 服务位索引 + 淘汰），无 socket，可单测 |
 | `src/rpc/discovery/discovery.c` | RPC 适配层：服务名 ↔ 位、邻居 → RPC 端点 |
 
 ---
