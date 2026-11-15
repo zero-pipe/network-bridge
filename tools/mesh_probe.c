@@ -152,7 +152,7 @@ static void put_u64(uint8_t *p, uint64_t v)
 }
 
 static int do_mutual(unsigned formation, const char *group, unsigned disc_port,
-                     unsigned secs, unsigned index)
+                     unsigned secs, unsigned index, unsigned mask)
 {
     nb_mesh_config_t mcfg;
     nb_mesh_t *mesh = NULL;
@@ -164,10 +164,11 @@ static int do_mutual(unsigned formation, const char *group, unsigned disc_port,
     mcfg.port = (uint16_t)disc_port;
     mcfg.node_id = 0xBBBB000000000000ull + index;
     mcfg.rpc_port = (uint16_t)(46000u + index);
-    mcfg.service_mask = (1u << (index % 32u));
-    mcfg.heartbeat_ms = 500;
-    mcfg.lease_ms = 3000;
-    mcfg.max_peers = 512;
+    /* mask 0 表示纯成员：不提供任何服务，只用来看邻居。 */
+    mcfg.service_mask = mask;
+    mcfg.heartbeat_ms = 1000;
+    mcfg.lease_ms = 5000;
+    mcfg.max_peers = 4096;
     if (nb_mesh_start(&mesh, &mcfg) != 0) {
         printf("MUTUAL index=%u START_FAILED\n", index);
         return 1;
@@ -306,8 +307,11 @@ int main(int argc, char **argv)
         return do_call((unsigned)atoi(argv[2]), argv[3], (unsigned)atoi(argv[4]));
     }
     if (strcmp(argv[1], "mutual") == 0 && argc >= 7) {
-        return do_mutual((unsigned)atoi(argv[2]), argv[3], (unsigned)atoi(argv[4]),
-                         (unsigned)atoi(argv[5]), (unsigned)atoi(argv[6]));
+        {
+            unsigned mask = argc >= 8 ? (unsigned)strtoul(argv[7], NULL, 0) : 0u;
+            return do_mutual((unsigned)atoi(argv[2]), argv[3], (unsigned)atoi(argv[4]),
+                             (unsigned)atoi(argv[5]), (unsigned)atoi(argv[6]), mask);
+        }
     }
     if (strcmp(argv[1], "scale") == 0 && argc >= 6) {
         return do_scale((unsigned)atoi(argv[2]), argv[3], (unsigned)atoi(argv[4]),
