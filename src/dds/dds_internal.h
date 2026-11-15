@@ -5,7 +5,7 @@
 
 #include <nb/dds.h>
 
-#include <ntk.h>
+#include <zn/zn.h>
 
 #include "sample_queue.h"
 
@@ -17,7 +17,7 @@ struct nb_dds_participant {
     nb_dds_backend_t backend_id;
     const nb_dds_backend_ops_t *ops;
     void *backend;
-    ntk_mutex *lock; /* protects topics/status callback/backend lifetime */
+    zb_mutex *lock; /* protects topics/status callback/backend lifetime */
     nb_dds_topic_t *topics;
     nb_dds_status_callback_t status_cb;
     void *status_user;
@@ -63,8 +63,8 @@ typedef struct nb_dds_waitset_link {
 
 struct nb_dds_waitset {
     nb_dds_participant_t *participant;
-    ntk_mutex *lock;
-    ntk_sem *sem;
+    zb_mutex *lock;
+    zb_sem *sem;
     nb_dds_waitset_link_t *links;
 };
 

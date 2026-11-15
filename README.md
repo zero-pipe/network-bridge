@@ -7,8 +7,8 @@ Network Bridge 是一个面向异构网络的 C99 通信框架，由**两条并�
 - **RPC 主干**：`node / service / proxy`，参考 brpc/gRPC 的调用模型；底层传输可选
   **tcp / udp / shm**，控制面用静态路由或广播式 `ntk_discovery`。
 - **DDS 主干**：`participant / topic / writer / reader`，参考 ROS 2 的对象模型；
-  `domain / partition / prefix / QoS` 是一等公民，后端可选 **内建 RTPS** 或
-  **Cyclone DDS**，不需要 RPC node 或广播发现。
+  `domain / partition / prefix / QoS` 是一等公民，后端是**内建 RTPS 引擎**，
+  不需要 RPC node 或广播发现。
 - **共享底座**：缓冲区/分配器、日志、指标、错误码、payload 视图和 JSON 读取器。
 
 两条主干在目录、库目标、公共头和配置上都相互独立；应用可以只用其中一条，也可以
@@ -16,7 +16,7 @@ Network Bridge 是一个面向异构网络的 C99 通信框架，由**两条并�
 
 ## 特性
 
-- **两条独立主干。** RPC（tcp/udp/shm）与 DDS（rtps/cyclone）不共享 node、
+- **两条独立主干。** RPC（tcp/udp/shm）与 DDS（内建 RTPS）不共享 node、
   binding、发现或 QoS 模型，各自有独立的目录与静态库（`nb_rpc` / `nb_dds`）。
 - **RPC 调用形态。** `nb_proxy_call_async`、`nb_proxy_call_sync`、
   `nb_proxy_call_event`，以及客户端流、服务端流和双向流。
@@ -126,19 +126,19 @@ src/rpc/                     RPC 主干：runtime/service/proxy/router/registry/
                              rx_window、tx_ring、回压
   transport/tcp/udp/shm/    各传输驱动：只管字节搬运与各自的可靠性机制
 src/dds/                     DDS 主干：participant/topic/writer/reader/history/
-                             waitset/qos/backend(rtps,cyclone)/config
+                             waitset/qos/backend(rtps)/config
 src/rtps/                    RTPS 协议引擎与 rtps_* API
   internal/                  引擎内部头（不安装）
   api/                       rtps_* 公共接口实现
 examples/                    01_rpc、02_rpc_streaming、03_dds_pubsub、04_config
 docs/                        API、架构、RTPS 报文与时序、错误和测试文档
 tests/                       单元、端到端与契约测试
-3rdparty/                    ntk、elog、cJSON、uthash、Cyclone DDS、micro-cdr
+3rdparty/                    ntk、elog、cJSON、uthash、micro-cdr
 ```
 
 库目标：`nb_base`、`nb_json`、`nb_log`、`ntk_discovery`、`rtps_core`、`rtps`、
 `nb_rpc`、`nb_dds`，以及链接两条主干的便利目标 `nb`。`nb_rpc` 不链接
-`rtps`/`ddsc`，`nb_dds` 不链接 `ntk_discovery`。
+`rtps`，`nb_dds` 不链接 `ntk_discovery`。
 
 ## 构建
 
@@ -166,7 +166,6 @@ NB_BUILD_TOOLS       构建压测客户端和基准服务端（默认 ON）
 NB_BUILD_EXAMPLES    构建示例（默认 ON）
 NB_BUILD_GTESTS      构建 GoogleTest 模块测试（默认 OFF）
 NB_BUILD_BENCHMARKS  构建 Google Benchmark 微基准（默认 OFF）
-NB_ENABLE_DDS        启用 Cyclone DDS provider（默认 ON，从 3rdparty/cyclonedds 构建）
 NB_SANITIZE          address | undefined | thread | address,undefined
 ```
 

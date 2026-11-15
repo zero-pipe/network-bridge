@@ -32,7 +32,7 @@ static void waitset_drop_links_locked(struct rtps_waitset *waitset)
         if (history) {
             rtps_ws_link_t **slot;
 
-            ntk_mutex_lock(history->lock);
+            zb_mutex_lock(history->lock);
             slot = &history->listeners;
             while (*slot) {
                 if (*slot == link) {
@@ -41,7 +41,7 @@ static void waitset_drop_links_locked(struct rtps_waitset *waitset)
                 }
                 slot = &(*slot)->hist_next;
             }
-            ntk_mutex_unlock(history->lock);
+            zb_mutex_unlock(history->lock);
         }
         free(link);
     }
@@ -60,15 +60,15 @@ int rtps_waitset_create(rtps_participant_t *participant, rtps_waitset_t **out)
         return RTPS_ERR_NOMEM;
     }
     waitset->participant = participant;
-    waitset->sem = ntk_sem_create(0);
+    waitset->sem = zb_sem_create(0);
     if (!waitset->sem) {
         free(waitset);
         return RTPS_ERR_NOMEM;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     waitset->next = participant->waitsets;
     participant->waitsets = waitset;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     *out = waitset;
     return RTPS_OK;
 }
@@ -78,11 +78,11 @@ void rtps_waitset_destroy(rtps_waitset_t *waitset)
     if (!waitset) {
         return;
     }
-    ntk_mutex_lock(waitset->participant->lock);
+    zb_mutex_lock(waitset->participant->lock);
     waitset_unlink_locked(waitset);
     waitset_drop_links_locked(waitset);
-    ntk_mutex_unlock(waitset->participant->lock);
-    ntk_sem_destroy(waitset->sem);
+    zb_mutex_unlock(waitset->participant->lock);
+    zb_sem_destroy(waitset->sem);
     free(waitset);
 }
 
@@ -99,12 +99,12 @@ int rtps_waitset_attach(rtps_waitset_t *waitset,
         return RTPS_ERR_INVALID;
     }
     participant = waitset->participant;
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     /* Attaching implies a history: read/take and wait need somewhere to look. */
     if (!reader->history) {
         reader->history = rtps_history_create(1);
         if (!reader->history) {
-            ntk_mutex_unlock(participant->lock);
+            zb_mutex_unlock(participant->lock);
             return RTPS_ERR_NOMEM;
         }
     }
@@ -115,7 +115,7 @@ int rtps_waitset_attach(rtps_waitset_t *waitset,
             } else {
                 rtps_sample_filter_init(&(*slot)->filter);
             }
-            ntk_mutex_unlock(participant->lock);
+            zb_mutex_unlock(participant->lock);
             return RTPS_OK;
         }
     }
@@ -132,12 +132,12 @@ int rtps_waitset_attach(rtps_waitset_t *waitset,
         }
         link->ws_next = waitset->links;
         waitset->links = link;
-        ntk_mutex_lock(reader->history->lock);
+        zb_mutex_lock(reader->history->lock);
         link->hist_next = reader->history->listeners;
         reader->history->listeners = link;
-        ntk_mutex_unlock(reader->history->lock);
+        zb_mutex_unlock(reader->history->lock);
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     return rc;
 }
 
@@ -149,7 +149,7 @@ int rtps_waitset_detach(rtps_waitset_t *waitset, rtps_reader_t *reader)
     if (!waitset || !reader) {
         return RTPS_ERR_INVALID;
     }
-    ntk_mutex_lock(waitset->participant->lock);
+    zb_mutex_lock(waitset->participant->lock);
     slot = &waitset->links;
     while (*slot) {
         rtps_ws_link_t *link = *slot;
@@ -161,7 +161,7 @@ int rtps_waitset_detach(rtps_waitset_t *waitset, rtps_reader_t *reader)
             if (history) {
                 rtps_ws_link_t **hist_slot;
 
-                ntk_mutex_lock(history->lock);
+                zb_mutex_lock(history->lock);
                 hist_slot = &history->listeners;
                 while (*hist_slot) {
                     if (*hist_slot == link) {
@@ -170,7 +170,7 @@ int rtps_waitset_detach(rtps_waitset_t *waitset, rtps_reader_t *reader)
                     }
                     hist_slot = &(*hist_slot)->hist_next;
                 }
-                ntk_mutex_unlock(history->lock);
+                zb_mutex_unlock(history->lock);
             }
             free(link);
             found = 1;
@@ -178,7 +178,7 @@ int rtps_waitset_detach(rtps_waitset_t *waitset, rtps_reader_t *reader)
         }
         slot = &(*slot)->ws_next;
     }
-    ntk_mutex_unlock(waitset->participant->lock);
+    zb_mutex_unlock(waitset->participant->lock);
     return found ? RTPS_OK : RTPS_ERR_NOTFOUND;
 }
 
@@ -193,28 +193,28 @@ int rtps_waitset_wait(rtps_waitset_t *waitset,
     if (!waitset || !out || max == 0) {
         return RTPS_ERR_INVALID;
     }
-    start_ms = ntk_wall_ms();
+    start_ms = zn_wall_ms();
     for (;;) {
         size_t count = 0;
         rtps_ws_link_t *link;
-        ntk_err_t rc;
+        zn_err_t rc;
         uint64_t now;
 
-        ntk_mutex_lock(waitset->participant->lock);
+        zb_mutex_lock(waitset->participant->lock);
         for (link = waitset->links; link && count < max; link = link->ws_next) {
             if (link->reader->history &&
                 rtps_history_match_count(link->reader->history, &link->filter) > 0) {
                 out[count++] = link->reader;
             }
         }
-        ntk_mutex_unlock(waitset->participant->lock);
+        zb_mutex_unlock(waitset->participant->lock);
         if (count > 0) {
             return (int)count;
         }
 
-        now = ntk_wall_ms();
+        now = zn_wall_ms();
         if (timeout_ms < 0) {
-            rc = ntk_sem_wait(waitset->sem);
+            rc = zb_sem_wait(waitset->sem);
         } else {
             uint64_t elapsed = now >= start_ms ? now - start_ms : 0;
 
@@ -222,9 +222,9 @@ int rtps_waitset_wait(rtps_waitset_t *waitset,
                 return 0;
             }
             sem_timeout = (uint32_t)((uint64_t)timeout_ms - elapsed);
-            rc = ntk_sem_timedwait(waitset->sem, sem_timeout);
+            rc = zb_sem_timedwait(waitset->sem, sem_timeout);
         }
-        if (rc != NTK_OK) {
+        if (rc != ZN_OK) {
             /* Timeout (or a destroyed semaphore): report "not ready". */
             return 0;
         }

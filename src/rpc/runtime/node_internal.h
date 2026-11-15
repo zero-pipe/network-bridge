@@ -12,7 +12,7 @@
 #include <nb/rpc/types.h>
 #include <nb/rpc/node.h>
 #include <nb/rpc/codec.h>
-#include <ntk.h>
+#include <zn/zn.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -40,7 +40,7 @@ typedef struct nb_codec_entry {
  */
 typedef struct nb_obj_pool {
     void *free_list;
-    ntk_mutex *lock;
+    zb_mutex *lock;
     unsigned count;
     unsigned limit;
 } nb_obj_pool_t;
@@ -58,11 +58,13 @@ struct nb_node {
     char name[NB_NAME_MAX];
     uint32_t node_id;
     char bind_host[NB_HOST_MAX];
-    char discovery_host[NB_HOST_MAX];
+    char discovery_host[NB_HOST_MAX];   /* 组播组；空 = 由 formation 推导 */
     uint16_t discovery_port;
+    uint32_t discovery_formation;       /* 编队隔离 ID */
+    uint32_t discovery_service_mask;    /* 随心跳携带的核心服务掩码 */
     unsigned io_threads;
-    uint32_t hello_interval_ms;
-    uint32_t node_ttl_ms;
+    uint32_t hello_interval_ms;         /* mesh 心跳周期 */
+    uint32_t node_ttl_ms;               /* 对端租约 */
     uint16_t frag_bytes;
     uint32_t max_msg_bytes;
     uint32_t bp_high_water;
@@ -71,23 +73,23 @@ struct nb_node {
     int disable_rtcp;
     uint32_t max_recv_streams;
     uint32_t rate_limit_pps;
-    ntk_mutex *rate_lock;
+    zb_mutex *rate_lock;
     nb_rate_slot_t rates[NB_NODE_RATE_LIMIT_SLOTS];
 
-    ntk_poller_pool *pool;
-    ntk_poller *io_pollers[NB_TRANSPORT_MAX_IO];      /* 出站分片：按 request_id 固定到某个 poller */
+    zn_poller_pool *pool;
+    zn_poller *io_pollers[NB_TRANSPORT_MAX_IO];      /* 出站分片：按 request_id 固定到某个 poller */
     unsigned io_count;                                /* io_pollers 有效个数（>= 1） */
     /* 专用发送通道：把发布循环与接收/分发的 io poller 隔离（send_lanes>0 时创建）。 */
-    ntk_poller_pool *send_pool;
-    ntk_poller *send_poller;                          /* send_pool 的 0 号 poller */
+    zn_poller_pool *send_pool;
+    zn_poller *send_poller;                          /* send_pool 的 0 号 poller */
     unsigned send_lanes;
     nb_pending_t *pending_lanes[NB_TRANSPORT_MAX_IO]; /* 每 poller 的 pending lane（owner-only 访问） */
-    ntk_mutex *pending_lock;                          /* 保护 pending_hash 的跨 poller 查找 */
-    ntk_timer *pending_timers[NB_TRANSPORT_MAX_IO];   /* 每 poller 的 pending 超时/重传定时器 */
-    ntk_poller *poller;                               /* io 0，用于发现/客户端调用 */
-    ntk_thread_pool *handler_pool;                    /* 可选：业务 handler 线程池（0 = 关闭） */
+    zb_mutex *pending_lock;                          /* 保护 pending_hash 的跨 poller 查找 */
+    zn_timer *pending_timers[NB_TRANSPORT_MAX_IO];   /* 每 poller 的 pending 超时/重传定时器 */
+    zn_poller *poller;                               /* io 0，用于发现/客户端调用 */
+    zn_thread_pool *handler_pool;                    /* 可选：业务 handler 线程池（0 = 关闭） */
     int worker_fallback_warned;                       /* handler_threads=0 时只告警一次 */
-    ntk_mutex *handler_limit_mutex;                   /* 保护 handler_inflight / external_inflight */
+    zb_mutex *handler_limit_mutex;                   /* 保护 handler_inflight / external_inflight */
     unsigned handler_max_concurrency;                 /* 0 = 不限制 */
     unsigned handler_inflight;                        /* worker 排队 + 执行中的任务数 */
     unsigned external_inflight;                       /* 自定义 executor 未完成任务数（诊断用） */
@@ -99,12 +101,12 @@ struct nb_node {
     nb_obj_pool_t reply_task_pool;                    /* 跨线程回复任务头复用池 */
     nb_transport_t *transports[NB_MAX_BINDINGS];
     size_t transport_count;
-    ntk_timer *hello_timer;
-    ntk_timer *node_timer;
+    zn_timer *hello_timer;
+    zn_timer *node_timer;
 
     nb_service_t *services;
-    ntk_mutex *services_lock;                         /* 保护 services/methods 链表（注册 vs 请求分发） */
-    ntk_mutex *codecs_lock;                           /* 保护 codecs 链表 */
+    zb_mutex *services_lock;                         /* 保护 services/methods 链表（注册 vs 请求分发） */
+    zb_mutex *codecs_lock;                           /* 保护 codecs 链表 */
     nb_discovery_state_t discovery;
     nb_pending_t *pending;                            /* 全部 pending 槽位（按需分配） */
     nb_pending_t *pending_hash;                       /* request_id -> pending，O(1) 查找 */
@@ -121,7 +123,7 @@ struct nb_node {
     const nb_registry_backend_t *registry_backend;
     nb_metrics_t metrics;
 
-    ntk_mutex *id_lock;
+    zb_mutex *id_lock;
     uint64_t next_request_id;
     int started;
 };
@@ -129,9 +131,9 @@ struct nb_node {
 /* node.c */
 uint64_t nb_now_ms(void);
 /* 出站分片：按 key 稳定选择 poller；未启用池时回退到 node->poller。 */
-ntk_poller *nb_node_pick_poller(const nb_node_t *node, uint64_t key);
+zn_poller *nb_node_pick_poller(const nb_node_t *node, uint64_t key);
 /* poller 在 node 出站分片中的下标；找不到返回 -1。 */
-int nb_node_poller_index(const nb_node_t *node, ntk_poller *poller);
+int nb_node_poller_index(const nb_node_t *node, zn_poller *poller);
 /* 当前线程是否为 node 的专用发送通道线程。 */
 int nb_node_is_send_thread(const nb_node_t *node);
 void nb_node_on_message(nb_node_t *node, nb_transport_t *transport, nb_message_t *message);

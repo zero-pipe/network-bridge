@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <ntk.h>
+#include <zn/zn.h>
 
 #include "rtps_message.h"
 #include "rtps_param.h"
@@ -19,7 +19,7 @@
 #include "rtps_spdp.h"
 #include "rtps_wire.h"
 
-ntk_socket *participant_data_socket(const nb_rtps_participant_t *participant)
+zn_socket *participant_data_socket(const nb_rtps_participant_t *participant)
 {
     return participant && participant->data_sock ? participant->data_sock
                                                   : participant->unicast_sock;
@@ -62,14 +62,14 @@ static void nb_rtps_dump_frame(nb_rtps_participant_t *participant,
 }
 
 /* One datagram on the wire: counters plus the optional frame dump. */
-ntk_ssize_t nb_rtps_sendto(nb_rtps_participant_t *participant,
-                                  ntk_socket *socket,
+zn_ssize_t nb_rtps_sendto(nb_rtps_participant_t *participant,
+                                  zn_socket *socket,
                                   const void *data,
                                   size_t len,
                                   const char *host,
                                   uint16_t port)
 {
-    ntk_ssize_t rc;
+    zn_ssize_t rc;
 
     if (!participant || !socket) {
         return -1;
@@ -86,9 +86,9 @@ ntk_ssize_t nb_rtps_sendto(nb_rtps_participant_t *participant,
         }
         participant->stats.packets_sent++;
         participant->stats.bytes_sent += len;
-        return (ntk_ssize_t)len;
+        return (zn_ssize_t)len;
     }
-    rc = ntk_socket_sendto(socket, data, len, host, port);
+    rc = zn_socket_sendto(socket, data, len, host, port);
     if (rc >= 0) {
         participant->stats.packets_sent++;
         participant->stats.bytes_sent += len;
@@ -182,10 +182,10 @@ void notify(nb_rtps_participant_t *participant,
     nb_rtps_participant_callback_t callback;
     void *user;
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     callback = participant->callback;
     user = participant->callback_user;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     if (callback) {
         callback(user, event, info);
     }
@@ -358,10 +358,10 @@ void notify_endpoint(nb_rtps_participant_t *participant,
     nb_rtps_endpoint_callback_t callback;
     void *user;
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     callback = participant->endpoint_callback;
     user = participant->endpoint_user;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     if (callback) {
         callback(user, event, kind, info);
     }
@@ -500,30 +500,30 @@ void maybe_tcp_connect(nb_rtps_participant_t *participant,
     if (!participant->tcp || !prefix) {
         return;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     remote = find_remote(participant, prefix);
     if (!remote || remote->tcp_key[0] != '\0' ||
         remote->info.metatraffic_tcp.kind == NB_RTPS_LOCATOR_KIND_INVALID) {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return;
     }
     if (locator_to_host_any(&remote->info.metatraffic_tcp,
                             host,
                             sizeof(host),
                             &port) != NB_OK) {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return;
     }
     dial = memcmp(participant->local_guid.prefix.bytes,
                   remote->info.guid.prefix.bytes,
                   sizeof(participant->local_guid.prefix.bytes)) < 0;
-    now = ntk_wall_ms();
+    now = zn_wall_ms();
     if (!dial || now < remote->next_tcp_connect_ms) {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return;
     }
     remote->next_tcp_connect_ms = now + 1000u;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     if (nb_rtps_tcp_has_link(participant->tcp, host, port)) {
         return;
@@ -546,7 +546,7 @@ static void retry_tcp_links(nb_rtps_participant_t *participant)
     if (!participant->tcp) {
         return;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (i = 0; i < participant->max_remotes &&
                 count < NB_RTPS_TCP_MAX_CONNECTIONS;
          i++) {
@@ -558,7 +558,7 @@ static void retry_tcp_links(nb_rtps_participant_t *participant)
         }
         prefixes[count++] = remote->info.guid.prefix;
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     for (i = 0; i < count; i++) {
         maybe_tcp_connect(participant, &prefixes[i]);
     }
@@ -578,7 +578,7 @@ void replay_retained_history(nb_rtps_participant_t *participant,
     if (!participant || !reader_info) {
         return;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (i = 0; i < participant->max_local_endpoints; i++) {
         nb_rtps_local_endpoint_t *local = &participant->local_endpoints[i];
         nb_rtps_remote_endpoint_t *remote;
@@ -607,7 +607,7 @@ void replay_retained_history(nb_rtps_participant_t *participant,
             int has_handle = 0;
             uint32_t status = 0;
             uint64_t source_ns = 0;
-            uint64_t now = ntk_wall_ms();
+            uint64_t now = zn_wall_ms();
 
             if (nb_rtps_reliable_get_instance(local->history,
                                               sn,
@@ -640,7 +640,7 @@ void replay_retained_history(nb_rtps_participant_t *participant,
                 participant, local, reader_info, first_sn, last_sn, &targets);
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 
 /* Peers may GAP built-in SEDP writers when their endpoint history is trimmed.
@@ -844,17 +844,17 @@ static void emit_match_event(nb_rtps_participant_t *participant,
     const char *reason;
 
     memset(&event, 0, sizeof(event));
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     callback = participant->status_callback;
     user = participant->status_user;
     local = find_local_endpoint(participant, local_guid);
     if (!callback || !local || !local->used) {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return;
     }
     if (strcmp(local->info.topic_name, remote_info->topic_name) != 0 ||
         strcmp(local->info.type_name, remote_info->type_name) != 0) {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return;
     }
     if (local->kind == NB_RTPS_ENDPOINT_PUBLICATION &&
@@ -866,14 +866,14 @@ static void emit_match_event(nb_rtps_participant_t *participant,
         event.kind = NB_RTPS_STATUS_SUBSCRIPTION_MATCHED;
         reason = endpoint_qos_mismatch(remote_info, &local->info);
     } else {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return;
     }
     if (reason) {
         /* A pair that never matched has nothing to un-match, and repeating the
          * same incompatibility on every SEDP refresh would be noise. */
         if (!added) {
-            ntk_mutex_unlock(participant->lock);
+            zb_mutex_unlock(participant->lock);
             return;
         }
         event.kind = NB_RTPS_STATUS_QOS_INCOMPATIBLE;
@@ -888,7 +888,7 @@ static void emit_match_event(nb_rtps_participant_t *participant,
     event.endpoint = local->info.endpoint_guid;
     event.writer = remote_info->endpoint_guid;
     event.has_peer = 1;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     callback(user, &event);
 }
@@ -908,12 +908,12 @@ void notify_matches(nb_rtps_participant_t *participant,
         nb_rtps_guid_t local_guid;
         int used = 0;
 
-        ntk_mutex_lock(participant->lock);
+        zb_mutex_lock(participant->lock);
         if (participant->local_endpoints[i].used) {
             local_guid = participant->local_endpoints[i].info.endpoint_guid;
             used = 1;
         }
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         if (used) {
             emit_match_event(participant, &local_guid, remote_info, remote_kind, added);
         }
@@ -938,13 +938,13 @@ static void notify_matches_for_local(nb_rtps_participant_t *participant,
         nb_rtps_endpoint_kind_t remote_kind;
         int used = 0;
 
-        ntk_mutex_lock(participant->lock);
+        zb_mutex_lock(participant->lock);
         if (participant->remote_endpoints[i].used) {
             remote_info = participant->remote_endpoints[i].info;
             remote_kind = participant->remote_endpoints[i].kind;
             used = 1;
         }
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         if (used) {
             emit_match_event(participant, local_guid, &remote_info, remote_kind, 1);
         }
@@ -1082,7 +1082,7 @@ nb_rtps_data_reader_state_t *get_data_reader(nb_rtps_participant_t *participant,
     }
     participant->data_reader_count++;
     nb_rtps_reader_state_reset(&state->state, first_expected ? first_expected : 1u);
-    state->last_sample_ms = ntk_wall_ms();
+    state->last_sample_ms = zn_wall_ms();
     /* DDS considers a writer alive as soon as it is matched; the first missing
      * assertion is what changes that. */
     state->alive = 1;
@@ -1449,12 +1449,12 @@ static void tcp_bind_remote(nb_rtps_participant_t *participant,
     if (!key) {
         return;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     remote = find_remote(participant, prefix);
     if (remote && remote->tcp_key[0] == '\0') {
         copy_str(remote->tcp_key, sizeof(remote->tcp_key), key);
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 
 static void tcp_on_message(void *user,
@@ -1501,7 +1501,7 @@ static void tcp_on_link(void *user, int index)
         /* Inbound: the peer identifies itself with its first message. */
         return;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (i = 0; i < participant->max_remotes; i++) {
         nb_rtps_remote_participant_t *remote = &participant->remotes[i];
         char remote_host[NB_RTPS_PEER_HOST_MAX];
@@ -1522,7 +1522,7 @@ static void tcp_on_link(void *user, int index)
             break;
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 
 /* The link is gone: fall back to UDP until a new connection is established. */
@@ -1535,7 +1535,7 @@ static void tcp_on_unlink(void *user, int index)
     if (!key) {
         return;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (i = 0; i < participant->max_remotes; i++) {
         nb_rtps_remote_participant_t *remote = &participant->remotes[i];
 
@@ -1544,17 +1544,17 @@ static void tcp_on_unlink(void *user, int index)
             remote->next_tcp_connect_ms = 0;
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 
-static void drain_socket(nb_rtps_participant_t *participant, ntk_socket *socket)
+static void drain_socket(nb_rtps_participant_t *participant, zn_socket *socket)
 {
     uint8_t buf[NB_RTPS_RX_MAX];
     char host[NB_RTPS_PEER_HOST_MAX];
     uint16_t port;
 
     for (;;) {
-        ntk_ssize_t n = ntk_socket_recvfrom(
+        zn_ssize_t n = zn_socket_recvfrom(
             socket, buf, sizeof(buf), host, sizeof(host), &port);
         if (n <= 0) {
             break;
@@ -1582,7 +1582,7 @@ static void check_deadlines(nb_rtps_participant_t *participant, uint64_t now)
     nb_rtps_status_callback_t callback;
     void *user;
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     callback = participant->status_callback;
     user = participant->status_user;
     if (callback) {
@@ -1637,7 +1637,7 @@ static void check_deadlines(nb_rtps_participant_t *participant, uint64_t now)
             state->next_deadline_ms = now + local->info.deadline_ms;
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     if (callback) {
         for (i = 0; i < count; i++) {
@@ -1722,12 +1722,12 @@ void send_pmd(nb_rtps_participant_t *participant, uint32_t kind)
         return;
     }
     init_header(participant, &header);
-    now = ntk_wall_ms();
+    now = zn_wall_ms();
     timestamp.seconds = (int32_t)(now / 1000u);
     timestamp.fraction = (uint32_t)(((now % 1000u) << 32) / 1000u);
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     sn = ++participant->pmd_sn;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     memset(&data, 0, sizeof(data));
     data.reader_id = nb_rtps_eid_participant_message_reader;
@@ -1741,7 +1741,7 @@ void send_pmd(nb_rtps_participant_t *participant, uint32_t kind)
         return;
     }
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (i = 0; i < participant->max_remotes; i++) {
         nb_rtps_remote_participant_t *remote = &participant->remotes[i];
         char host[NB_RTPS_PEER_HOST_MAX];
@@ -1753,7 +1753,7 @@ void send_pmd(nb_rtps_participant_t *participant, uint32_t kind)
         }
         (void)nb_rtps_sendto(participant, participant->unicast_sock, message, message_len, host, port);
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 
 /*
@@ -1781,8 +1781,8 @@ void handle_pmd_data(nb_rtps_participant_t *participant,
     if (pmd.kind != NB_RTPS_PMD_KIND_AUTOMATIC && pmd.kind != NB_RTPS_PMD_KIND_MANUAL) {
         return;
     }
-    now = ntk_wall_ms();
-    ntk_mutex_lock(participant->lock);
+    now = zn_wall_ms();
+    zb_mutex_lock(participant->lock);
     remote = find_remote(participant, prefix);
     if (remote) {
         remote->last_pmd_ms = now;
@@ -1803,7 +1803,7 @@ void handle_pmd_data(nb_rtps_participant_t *participant,
             state->last_liveliness_ms = now;
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 
 /* LivelinessChangedStatus counts, over the writers matched to one reader.
@@ -1848,7 +1848,7 @@ static void check_liveliness(nb_rtps_participant_t *participant, uint64_t now)
     void *user;
 
     memset(events, 0, sizeof(events));
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     callback = participant->status_callback;
     user = participant->status_user;
     if (callback && participant->data_readers) {
@@ -1894,7 +1894,7 @@ static void check_liveliness(nb_rtps_participant_t *participant, uint64_t now)
             count++;
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     if (callback) {
         for (i = 0; i < count; i++) {
@@ -1910,7 +1910,7 @@ static void sweep(nb_rtps_participant_t *participant, uint64_t now)
         int found = 0;
         uint32_t i;
 
-        ntk_mutex_lock(participant->lock);
+        zb_mutex_lock(participant->lock);
         for (i = 0; i < participant->max_remotes; i++) {
             nb_rtps_remote_participant_t *remote = &participant->remotes[i];
             if (remote->used && now >= remote->last_seen_ms &&
@@ -1925,7 +1925,7 @@ static void sweep(nb_rtps_participant_t *participant, uint64_t now)
                 break;
             }
         }
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         if (!found) {
             break;
         }
@@ -1970,7 +1970,7 @@ static void service_frag_assemblies(nb_rtps_participant_t *participant, uint64_t
     if (!participant || !participant->frag_assemblies) {
         return;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (i = 0; i < participant->max_frag_assemblies; i++) {
         nb_rtps_frag_assembly_t *assembly = &participant->frag_assemblies[i];
 
@@ -1990,7 +1990,7 @@ static void service_frag_assemblies(nb_rtps_participant_t *participant, uint64_t
         }
         (void)send_frag_nack(participant, assembly, now);
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 
 static void thread_main(void *user)
@@ -1998,7 +1998,7 @@ static void thread_main(void *user)
     nb_rtps_participant_t *participant = (nb_rtps_participant_t *)user;
 
     while (!participant->stop) {
-        int rc = ntk_poller_poll(participant->poller, 100);
+        int rc = zn_poller_poll(participant->poller, 100);
         uint64_t now;
 
         if (rc > 0) {
@@ -2009,7 +2009,7 @@ static void thread_main(void *user)
             }
         }
         nb_rtps_tcp_service(participant->tcp);
-        now = ntk_wall_ms();
+        now = zn_wall_ms();
         if (now >= participant->next_announce_ms) {
             (void)send_spdp(participant);
             participant->next_announce_ms = now + next_announce_delay(participant);
@@ -2046,19 +2046,19 @@ static void free_participant(nb_rtps_participant_t *participant)
      * before the poller itself. */
     nb_rtps_tcp_destroy(participant->tcp);
     if (participant->poller) {
-        ntk_poller_destroy(participant->poller);
+        zn_poller_destroy(participant->poller);
     }
     if (participant->rx_sock) {
-        ntk_socket_destroy(participant->rx_sock);
+        zn_socket_destroy(participant->rx_sock);
     }
     if (participant->unicast_sock) {
-        ntk_socket_destroy(participant->unicast_sock);
+        zn_socket_destroy(participant->unicast_sock);
     }
     if (participant->data_sock) {
-        ntk_socket_destroy(participant->data_sock);
+        zn_socket_destroy(participant->data_sock);
     }
     if (participant->lock) {
-        ntk_mutex_destroy(participant->lock);
+        zb_mutex_destroy(participant->lock);
     }
     nb_rtps_reliable_writer_destroy(participant->publications_writer);
     nb_rtps_reliable_writer_destroy(participant->subscriptions_writer);
@@ -2265,7 +2265,7 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
         return NULL;
     }
 
-    participant->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    participant->lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     participant->remotes =
         (nb_rtps_remote_participant_t *)calloc(participant->max_remotes,
                                                sizeof(nb_rtps_remote_participant_t));
@@ -2294,23 +2294,23 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
         return NULL;
     }
 
-    participant->rx_sock = ntk_socket_create();
+    participant->rx_sock = zn_socket_create();
     if (!participant->rx_sock) {
         free_participant(participant);
         return NULL;
     }
-    if (ntk_socket_bind_udp(participant->rx_sock,
+    if (zn_socket_bind_udp(participant->rx_sock,
                             participant->bind_host,
                             (uint16_t)spdp_port,
-                            1) != NTK_OK) {
+                            1) != ZN_OK) {
         free_participant(participant);
         return NULL;
     }
     local_ip[0] = '\0';
-    if (ntk_socket_get_local(participant->rx_sock,
+    if (zn_socket_get_local(participant->rx_sock,
                              local_ip,
                              sizeof(local_ip),
-                             &local_port) != NTK_OK ||
+                             &local_port) != ZN_OK ||
         local_port == 0) {
         free_participant(participant);
         return NULL;
@@ -2319,34 +2319,34 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
     if (participant->multicast_enabled) {
         const char *local_if =
             strcmp(participant->bind_host, "0.0.0.0") == 0 ? NULL : participant->bind_host;
-        if (ntk_socket_join_multicast(participant->rx_sock,
+        if (zn_socket_join_multicast(participant->rx_sock,
                                       participant->multicast_group,
-                                      local_if) != NTK_OK) {
+                                      local_if) != ZN_OK) {
             free_participant(participant);
             return NULL;
         }
-        (void)ntk_socket_set_multicast_ttl(participant->rx_sock, 1);
-        (void)ntk_socket_set_multicast_loop(participant->rx_sock, 1);
+        (void)zn_socket_set_multicast_ttl(participant->rx_sock, 1);
+        (void)zn_socket_set_multicast_loop(participant->rx_sock, 1);
     }
 
-    participant->unicast_sock = ntk_socket_create();
+    participant->unicast_sock = zn_socket_create();
     if (!participant->unicast_sock) {
         free_participant(participant);
         return NULL;
     }
-    if (ntk_socket_bind_udp(participant->unicast_sock,
+    if (zn_socket_bind_udp(participant->unicast_sock,
                             participant->bind_host,
                             (uint16_t)unicast_port,
-                            0) != NTK_OK) {
+                            0) != ZN_OK) {
         free_participant(participant);
         return NULL;
     }
     local_ip[0] = '\0';
     local_port = 0;
-    if (ntk_socket_get_local(participant->unicast_sock,
+    if (zn_socket_get_local(participant->unicast_sock,
                              local_ip,
                              sizeof(local_ip),
-                             &local_port) != NTK_OK ||
+                             &local_port) != ZN_OK ||
         local_port == 0) {
         free_participant(participant);
         return NULL;
@@ -2362,21 +2362,21 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
         /* User data gets its own unicast socket on d3 + PG*participant_id. The
          * metatraffic socket keeps SEDP and SPDP unicast; peers learn this
          * locator from PID_DEFAULT_UNICAST_LOCATOR. */
-        participant->data_sock = ntk_socket_create();
+        participant->data_sock = zn_socket_create();
         if (!participant->data_sock ||
-            ntk_socket_bind_udp(participant->data_sock,
+            zn_socket_bind_udp(participant->data_sock,
                                 participant->bind_host,
                                 (uint16_t)data_port,
-                                0) != NTK_OK) {
+                                0) != ZN_OK) {
             free_participant(participant);
             return NULL;
         }
         local_ip[0] = '\0';
         local_port = 0;
-        if (ntk_socket_get_local(participant->data_sock,
+        if (zn_socket_get_local(participant->data_sock,
                                  local_ip,
                                  sizeof(local_ip),
-                                 &local_port) != NTK_OK ||
+                                 &local_port) != ZN_OK ||
             local_port == 0) {
             free_participant(participant);
             return NULL;
@@ -2427,7 +2427,7 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
         participant->metatraffic_tcp.kind = NB_RTPS_LOCATOR_KIND_TCPV4;
     }
 
-    now = ntk_wall_ms();
+    now = zn_wall_ms();
     make_guid(participant, now);
     participant->rng = (uint32_t)(now ^ (uint32_t)(uintptr_t)participant);
     if (participant->rng == 0) {
@@ -2441,37 +2441,37 @@ int nb_rtps_participant_start(nb_rtps_participant_t *participant)
     if (!participant || participant->started) {
         return NB_ERR_STATE;
     }
-    participant->poller = ntk_poller_create();
+    participant->poller = zn_poller_create();
     if (!participant->poller) {
         return NB_ERR_NOMEM;
     }
-    if (ntk_poller_add(participant->poller,
-                       ntk_socket_fd(participant->rx_sock),
-                       NTK_POLL_IN,
+    if (zn_poller_add(participant->poller,
+                       zn_socket_fd(participant->rx_sock),
+                       ZN_POLL_IN,
                        NULL,
-                       NULL) != NTK_OK ||
-        ntk_poller_add(participant->poller,
-                       ntk_socket_fd(participant->unicast_sock),
-                       NTK_POLL_IN,
+                       NULL) != ZN_OK ||
+        zn_poller_add(participant->poller,
+                       zn_socket_fd(participant->unicast_sock),
+                       ZN_POLL_IN,
                        NULL,
-                       NULL) != NTK_OK) {
-        ntk_poller_destroy(participant->poller);
+                       NULL) != ZN_OK) {
+        zn_poller_destroy(participant->poller);
         participant->poller = NULL;
         return NB_ERR_IO;
     }
     if (participant->data_sock &&
-        ntk_poller_add(participant->poller,
-                       ntk_socket_fd(participant->data_sock),
-                       NTK_POLL_IN,
+        zn_poller_add(participant->poller,
+                       zn_socket_fd(participant->data_sock),
+                       ZN_POLL_IN,
                        NULL,
-                       NULL) != NTK_OK) {
-        ntk_poller_destroy(participant->poller);
+                       NULL) != ZN_OK) {
+        zn_poller_destroy(participant->poller);
         participant->poller = NULL;
         return NB_ERR_IO;
     }
     if (participant->tcp &&
         nb_rtps_tcp_set_poller(participant->tcp, participant->poller) != 0) {
-        ntk_poller_destroy(participant->poller);
+        zn_poller_destroy(participant->poller);
         participant->poller = NULL;
         return NB_ERR_IO;
     }
@@ -2480,15 +2480,15 @@ int nb_rtps_participant_start(nb_rtps_participant_t *participant)
     participant->next_sweep_ms = 0;
     participant->next_sedp_heartbeat_ms = 0;
     participant->next_data_heartbeat_ms = 0;
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     refresh_pmd_interval(participant);
-    ntk_mutex_unlock(participant->lock);
-    participant->thread = ntk_thread_create(thread_main, participant);
+    zb_mutex_unlock(participant->lock);
+    participant->thread = zb_thread_create(thread_main, participant);
     if (!participant->thread) {
         if (participant->tcp) {
             (void)nb_rtps_tcp_set_poller(participant->tcp, NULL);
         }
-        ntk_poller_destroy(participant->poller);
+        zn_poller_destroy(participant->poller);
         participant->poller = NULL;
         return NB_ERR_NOMEM;
     }
@@ -2505,11 +2505,11 @@ void nb_rtps_participant_stop(nb_rtps_participant_t *participant)
     }
     participant->stop = 1;
     if (participant->poller) {
-        (void)ntk_poller_wake(participant->poller);
+        (void)zn_poller_wake(participant->poller);
     }
     if (participant->thread) {
-        (void)ntk_thread_join(participant->thread);
-        ntk_thread_destroy(participant->thread);
+        (void)zb_thread_join(participant->thread);
+        zb_thread_destroy(participant->thread);
         participant->thread = NULL;
     }
     /* The TCP sockets are registered in the poller that is about to go away;
@@ -2518,11 +2518,11 @@ void nb_rtps_participant_stop(nb_rtps_participant_t *participant)
         (void)nb_rtps_tcp_set_poller(participant->tcp, NULL);
     }
     if (participant->poller) {
-        ntk_poller_destroy(participant->poller);
+        zn_poller_destroy(participant->poller);
         participant->poller = NULL;
     }
     participant->started = 0;
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (i = 0; i < participant->max_remotes; i++) {
         participant->remotes[i].used = 0;
     }
@@ -2531,7 +2531,7 @@ void nb_rtps_participant_stop(nb_rtps_participant_t *participant)
     }
     participant->remotes_used_count = 0;
     participant->remote_ep_used_count = 0;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 
 void nb_rtps_participant_destroy(nb_rtps_participant_t *participant)
@@ -2546,10 +2546,10 @@ void nb_rtps_participant_set_callback(nb_rtps_participant_t *participant,
     if (!participant) {
         return;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     participant->callback = callback;
     participant->callback_user = user;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 
 void nb_rtps_participant_set_endpoint_callback(nb_rtps_participant_t *participant,
@@ -2559,10 +2559,10 @@ void nb_rtps_participant_set_endpoint_callback(nb_rtps_participant_t *participan
     if (!participant) {
         return;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     participant->endpoint_callback = callback;
     participant->endpoint_user = user;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 
 void nb_rtps_participant_set_data_callback(nb_rtps_participant_t *participant,
@@ -2572,10 +2572,10 @@ void nb_rtps_participant_set_data_callback(nb_rtps_participant_t *participant,
     if (!participant) {
         return;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     participant->data_callback = callback;
     participant->data_user = user;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 
 int nb_rtps_participant_set_status_callback(nb_rtps_participant_t *participant,
@@ -2585,10 +2585,10 @@ int nb_rtps_participant_set_status_callback(nb_rtps_participant_t *participant,
     if (!participant) {
         return NB_ERR_INVALID;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     participant->status_callback = callback;
     participant->status_user = user;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     return NB_OK;
 }
 
@@ -2619,14 +2619,14 @@ int nb_rtps_participant_add_endpoint(nb_rtps_participant_t *participant,
         local.max_instances = info->max_instances;
     }
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (i = 0; i < participant->max_local_endpoints; i++) {
         if (!participant->local_endpoints[i].used) {
             slot = i;
             break;
         }
         if (i + 1u == participant->max_local_endpoints) {
-            ntk_mutex_unlock(participant->lock);
+            zb_mutex_unlock(participant->lock);
             return NB_ERR_TOOBIG;
         }
     }
@@ -2652,7 +2652,7 @@ int nb_rtps_participant_add_endpoint(nb_rtps_participant_t *participant,
         }
     }
     if (nb_rtps_sedp_build(&local.info, payload, sizeof(payload), &payload_len) != NB_OK) {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return NB_ERR_BAD_MESSAGE;
     }
     /* Reliable writers need a history for retransmission. A durable writer
@@ -2671,7 +2671,7 @@ int nb_rtps_participant_add_endpoint(nb_rtps_participant_t *participant,
         }
         local.history = nb_rtps_reliable_writer_create(depth);
         if (!local.history) {
-            ntk_mutex_unlock(participant->lock);
+            zb_mutex_unlock(participant->lock);
             return NB_ERR_NOMEM;
         }
     }
@@ -2680,13 +2680,13 @@ int nb_rtps_participant_add_endpoint(nb_rtps_participant_t *participant,
     rc = nb_rtps_reliable_add(history, payload, payload_len, 0, &sn);
     if (rc != NB_OK) {
         nb_rtps_reliable_writer_destroy(local.history);
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return rc;
     }
     local.sn = sn;
     /* A writer that never writes misses its first deadline one period after it
      * was created; the sweep counts from here. */
-    local.last_write_ms = ntk_wall_ms();
+    local.last_write_ms = zn_wall_ms();
     local.next_deadline_ms = 0;
     participant->local_endpoints[slot] = local;
     nb_rtps_used_add(participant->local_used,
@@ -2696,7 +2696,7 @@ int nb_rtps_participant_add_endpoint(nb_rtps_participant_t *participant,
     participant->local_endpoint_count++;
     refresh_pmd_interval(participant);
     *info = local.info;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     /* Manual liveliness needs an explicit assertion this API does not offer, so
      * a peer would declare the writer dead once the lease runs out. Say so
@@ -2723,10 +2723,10 @@ int nb_rtps_participant_remove_endpoint(nb_rtps_participant_t *participant,
     if (!participant || !endpoint_guid) {
         return NB_ERR_INVALID;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     slot = find_local_endpoint(participant, endpoint_guid);
     if (!slot) {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return NB_ERR_NOTFOUND;
     }
     local = *slot;
@@ -2750,7 +2750,7 @@ int nb_rtps_participant_remove_endpoint(nb_rtps_participant_t *participant,
             }
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     for (i = 0; i < dispose_count; i++) {
         (void)nb_rtps_participant_publish_instance(
@@ -2763,11 +2763,11 @@ int nb_rtps_participant_remove_endpoint(nb_rtps_participant_t *participant,
     }
     free(dispose_handles);
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     slot = find_local_endpoint(participant, endpoint_guid);
     if (!slot) {
         /* Somebody else removed it while the disposes were in flight. */
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return NB_ERR_NOTFOUND;
     }
     local = *slot;
@@ -2786,7 +2786,7 @@ int nb_rtps_participant_remove_endpoint(nb_rtps_participant_t *participant,
         drop_data_readers_for_reader(participant, &local.info.endpoint_guid.entity);
     }
     refresh_pmd_interval(participant);
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     if (nb_rtps_sedp_build_key(
             &local.info.endpoint_guid, payload, sizeof(payload), &payload_len) != NB_OK) {
@@ -2851,10 +2851,10 @@ static int publish_internal(nb_rtps_participant_t *participant,
         return NB_ERR_INVALID;
     }
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     local = find_local_endpoint(participant, writer_guid);
     if (!local || local->kind != NB_RTPS_ENDPOINT_PUBLICATION) {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return NB_ERR_NOTFOUND;
     }
 
@@ -2878,7 +2878,7 @@ static int publish_internal(nb_rtps_participant_t *participant,
                                            status,
                                            &sn);
         if (rc != NB_OK) {
-            ntk_mutex_unlock(participant->lock);
+            zb_mutex_unlock(participant->lock);
             return rc;
         }
         nb_rtps_reliable_state(local->history, &first_sn, NULL, NULL);
@@ -2898,7 +2898,7 @@ static int publish_internal(nb_rtps_participant_t *participant,
     }
     /* Offered deadline is measured from the last write, not from the last
      * delivery, so it is independent of how many readers are matched. */
-    local->last_write_ms = ntk_wall_ms();
+    local->last_write_ms = zn_wall_ms();
 
     /* Remember the instances this writer registered, so that deleting the
      * writer can dispose them when WriterDataLifecycle asks for it. */
@@ -2983,7 +2983,7 @@ static int publish_internal(nb_rtps_participant_t *participant,
             }
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     for (i = 0; i < batch_count; i++) {
         if (evicted_first) {
@@ -3083,10 +3083,10 @@ int nb_rtps_participant_reader_consumed(nb_rtps_participant_t *participant,
     if (!participant || !writer_guid || !reader_guid || sn == 0) {
         return 0;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     state = find_data_reader(participant, writer_guid, &reader_guid->entity);
     consumed = state ? nb_rtps_reader_has_sample(&state->state, sn) : 0;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     return consumed;
 }
 
@@ -3124,13 +3124,13 @@ int nb_rtps_participant_add_peer(nb_rtps_participant_t *participant,
     if (participant->peer_count >= NB_RTPS_MAX_PEERS) {
         return NB_ERR_TOOBIG;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     copy_str(participant->peers[participant->peer_count].host,
              sizeof(participant->peers[participant->peer_count].host),
              host);
     participant->peers[participant->peer_count].port = port;
     participant->peer_count++;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     return NB_OK;
 }
 
@@ -3147,13 +3147,13 @@ size_t nb_rtps_participant_remote_count(const nb_rtps_participant_t *participant
     if (!participant) {
         return 0;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (i = 0; i < participant->max_remotes; i++) {
         if (participant->remotes[i].used) {
             count++;
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     return count;
 }
 
@@ -3164,9 +3164,9 @@ size_t nb_rtps_participant_local_endpoint_count(const nb_rtps_participant_t *par
     if (!participant) {
         return 0;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     count = participant->local_endpoint_count;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     return count;
 }
 
@@ -3178,13 +3178,13 @@ size_t nb_rtps_participant_remote_endpoint_count(const nb_rtps_participant_t *pa
     if (!participant) {
         return 0;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (i = 0; i < participant->max_remote_endpoints; i++) {
         if (participant->remote_endpoints[i].used) {
             count++;
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     return count;
 }
 
@@ -3206,7 +3206,7 @@ size_t nb_rtps_participant_matched_count(const nb_rtps_participant_t *participan
     if (!participant || !endpoint_guid) {
         return 0;
     }
-    ntk_mutex_lock(mutable_participant->lock);
+    zb_mutex_lock(mutable_participant->lock);
     {
         const nb_rtps_local_endpoint_t *local =
             find_local_endpoint(mutable_participant, endpoint_guid);
@@ -3215,7 +3215,7 @@ size_t nb_rtps_participant_matched_count(const nb_rtps_participant_t *participan
             count = matched_remote_count(mutable_participant, local);
         }
     }
-    ntk_mutex_unlock(mutable_participant->lock);
+    zb_mutex_unlock(mutable_participant->lock);
     return count;
 }
 
@@ -3333,7 +3333,7 @@ size_t nb_rtps_participant_discovery_read(nb_rtps_participant_t *participant,
         topic > NB_DDS_BUILTIN_TOPIC_TOPIC) {
         return 0;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     if (topic == NB_DDS_BUILTIN_TOPIC_PARTICIPANT) {
         if (count < max) {
             nb_dds_discovery_sample_t *sample = &out[count++];
@@ -3402,7 +3402,7 @@ size_t nb_rtps_participant_discovery_read(nb_rtps_participant_t *participant,
             }
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     return count;
 }
 
@@ -3440,7 +3440,7 @@ void nb_rtps_participant_metrics(const nb_rtps_participant_t *participant, nb_me
     if (!participant || !out) {
         return;
     }
-    ntk_mutex_lock((ntk_mutex *)participant->lock);
+    zb_mutex_lock((zb_mutex *)participant->lock);
     out->rtps_packets_sent = participant->stats.packets_sent;
     out->rtps_packets_received = participant->stats.packets_received;
     out->rtps_bytes_sent = participant->stats.bytes_sent;
@@ -3496,5 +3496,5 @@ void nb_rtps_participant_metrics(const nb_rtps_participant_t *participant, nb_me
             out->rtps_subscriptions++;
         }
     }
-    ntk_mutex_unlock((ntk_mutex *)participant->lock);
+    zb_mutex_unlock((zb_mutex *)participant->lock);
 }

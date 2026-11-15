@@ -148,7 +148,7 @@ static uint64_t nb_stream_send_task_fn(void *user)
     message.peer_port = stream->endpoint.port;
     rc = nb_node_send(stream->node, &stream->endpoint, &message);
     if (rc == NB_ERR_AGAIN && task->retries++ < 1000) {
-        if (ntk_poller_do_delay(stream->node->poller, 1, nb_stream_send_task_fn, task) != NULL) {
+        if (zn_poller_do_delay(stream->node->poller, 1, nb_stream_send_task_fn, task) != NULL) {
             return 0; /* 保留 task/data，稍后重试 */
         }
     }
@@ -229,9 +229,9 @@ int nb_proxy_open_client_stream(nb_proxy_t *proxy,
     stream->timeout_ms = options ? options->timeout_ms : 0;
     nb_copy_str(stream->service, sizeof(stream->service), service, "");
     nb_copy_str(stream->method, sizeof(stream->method), method, "");
-    ntk_mutex_lock(proxy->node->id_lock);
+    zb_mutex_lock(proxy->node->id_lock);
     stream->request_id = (nb_request_id_t)(proxy->node->next_request_id++);
-    ntk_mutex_unlock(proxy->node->id_lock);
+    zb_mutex_unlock(proxy->node->id_lock);
     if (stream->request_id == 0) {
         stream->request_id = 1;
     }
@@ -246,7 +246,7 @@ int nb_proxy_open_client_stream(nb_proxy_t *proxy,
         return NB_ERR_NOMEM;
     }
     task->stream = stream;
-    if (ntk_poller_async(proxy->node->poller, nb_stream_open_task_fn, task, 1) != NTK_OK) {
+    if (zn_poller_async(proxy->node->poller, nb_stream_open_task_fn, task, 1) != ZN_OK) {
         free(task);
         free(stream);
         return NB_ERR_IO;
@@ -284,9 +284,9 @@ int nb_proxy_open_bidi_stream(nb_proxy_t *proxy,
     stream->timeout_ms = options ? options->timeout_ms : 0;
     nb_copy_str(stream->service, sizeof(stream->service), service, "");
     nb_copy_str(stream->method, sizeof(stream->method), method, "");
-    ntk_mutex_lock(proxy->node->id_lock);
+    zb_mutex_lock(proxy->node->id_lock);
     stream->request_id = (nb_request_id_t)(proxy->node->next_request_id++);
-    ntk_mutex_unlock(proxy->node->id_lock);
+    zb_mutex_unlock(proxy->node->id_lock);
     if (stream->request_id == 0) {
         stream->request_id = 1;
     }
@@ -301,7 +301,7 @@ int nb_proxy_open_bidi_stream(nb_proxy_t *proxy,
         return NB_ERR_NOMEM;
     }
     task->stream = stream;
-    if (ntk_poller_async(proxy->node->poller, nb_stream_open_task_fn, task, 1) != NTK_OK) {
+    if (zn_poller_async(proxy->node->poller, nb_stream_open_task_fn, task, 1) != ZN_OK) {
         free(task);
         free(stream);
         return NB_ERR_IO;
@@ -369,7 +369,7 @@ int nb_proxy_stream_send(nb_stream_t *stream, const nb_chunk_t *chunk)
         }
         memcpy(task->data, chunk->data, chunk->len);
     }
-    if (ntk_poller_async(stream->node->poller, nb_stream_send_async_fn, task, 1) != NTK_OK) {
+    if (zn_poller_async(stream->node->poller, nb_stream_send_async_fn, task, 1) != ZN_OK) {
         free(task->data);
         free(task);
         return NB_ERR_IO;
@@ -382,11 +382,11 @@ int nb_proxy_stream_cancel(nb_stream_t *stream)
     if (!stream || stream->closed) {
         return NB_ERR_NOTFOUND;
     }
-    if (ntk_poller_is_current_thread(stream->node->poller)) {
+    if (zn_poller_is_current_thread(stream->node->poller)) {
         nb_stream_cancel_task_fn(stream);
         return NB_OK;
     }
-    if (ntk_poller_async(stream->node->poller, nb_stream_cancel_task_fn, stream, 1) != NTK_OK) {
+    if (zn_poller_async(stream->node->poller, nb_stream_cancel_task_fn, stream, 1) != ZN_OK) {
         return NB_ERR_IO;
     }
     return NB_OK;

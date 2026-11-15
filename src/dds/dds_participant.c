@@ -17,10 +17,10 @@ static void nb_dds_status_trampoline(void *user, const nb_dds_status_event_t *ev
     if (!participant) {
         return;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     callback = participant->status_cb;
     cb_user = participant->status_user;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     if (callback) {
         callback(cb_user, event);
     }
@@ -87,7 +87,7 @@ int nb_dds_participant_create(const nb_dds_participant_options_t *options,
     }
     participant->backend_id = options->backend;
     participant->ops = ops;
-    participant->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    participant->lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     if (!participant->lock) {
         free(participant);
         return NB_ERR_NOMEM;
@@ -100,14 +100,14 @@ int nb_dds_participant_create(const nb_dds_participant_options_t *options,
     backend_options.default_qos = &participant->default_qos;
     rc = ops->participant_create(&backend_options, &participant->backend);
     if (rc != NB_OK) {
-        ntk_mutex_destroy(participant->lock);
+        zb_mutex_destroy(participant->lock);
         free(participant);
         return rc;
     }
     rc = ops->participant_start(participant->backend);
     if (rc != NB_OK) {
         ops->participant_destroy(participant->backend);
-        ntk_mutex_destroy(participant->lock);
+        zb_mutex_destroy(participant->lock);
         free(participant);
         return rc;
     }
@@ -126,10 +126,10 @@ void nb_dds_participant_destroy(nb_dds_participant_t *participant)
     if (!participant) {
         return;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     topic = participant->topics;
     participant->topics = NULL;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     while (topic) {
         nb_dds_topic_t *next = topic->next;
         if (participant->ops->topic_destroy) {
@@ -142,7 +142,7 @@ void nb_dds_participant_destroy(nb_dds_participant_t *participant)
         participant->ops->participant_stop(participant->backend);
     }
     participant->ops->participant_destroy(participant->backend);
-    ntk_mutex_destroy(participant->lock);
+    zb_mutex_destroy(participant->lock);
     free(participant);
 }
 
@@ -163,10 +163,10 @@ int nb_dds_participant_set_status_callback(nb_dds_participant_t *participant,
     if (!participant) {
         return NB_ERR_INVALID;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     participant->status_cb = callback;
     participant->status_user = user;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     return NB_OK;
 }
 

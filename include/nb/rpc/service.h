@@ -10,7 +10,7 @@
  *
  * Threading model: the caller selects an execution mode per method through
  * nb_service_method_options_t:
- *   - NB_SERVICE_EXEC_MODE_INLINE (default): runs inline on the ntk poller thread
+ *   - NB_SERVICE_EXEC_MODE_INLINE (default): runs inline on the znet poller thread
  *     that received the request. Must not block; blocking stalls every
  *     connection on that poller.
  *   - NB_SERVICE_EXEC_MODE_WORKER: runs on the node's handler_threads pool. Suited

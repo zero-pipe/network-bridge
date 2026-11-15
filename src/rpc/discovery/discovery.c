@@ -1,9 +1,15 @@
-/* mesh 服务发现：nb 适配层。
+/* mesh 服务发现：nb_mesh 的适配层。
  *
- * 协议、分帧、CRC、序号/epoch、哈希表都在 ntk_discovery 库里；这里只做三件事：
- *   1. 把本地服务映射成 key（服务名），把 binding 映射成 peer 端点；
- *   2. 把库的对端/键回调写进 node registry；
- *   3. 实现 registry backend 的 start/stop/tick/announce。
+ * 三个要点：
+ *   1. 位图快速路径：心跳带 64 位服务掩码（bit = 服务名哈希低位）。位命中
+ *      即认为对端提供该服务，registry 直接映射，零单播。
+ *   2. 按需内省：掩码为 0（对端没通告）或版本号与本地缓存不一致时，单播拉
+ *      一次对端服务清单并缓存；版本号变了才重拉。
+ *   3. 端点如何拼：心跳带 rpc_port 与显式 IPv4；scheme 取本节点主绑定
+ *      （tcp 优先），因此编队内约定“每个节点一个 RPC 服务端口”。
+ *
+ * 注意：这里从不拿“对端版本号”和“本地版本号”相比——两者本来就不同（各
+ * 自提供不同的服务集）。版本号只用于判断本地缓存是否过期。
  */
 #include "discovery.h"
 
@@ -17,248 +23,333 @@
 #include <nb/base/log.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-/* 实例的前 4 字节承载 nb 的 32 位 node id；其余字节保持 0。同一 node id 的
- * 进程重启会被库用 epoch 识别为新一次启动，不会产生重复对端。 */
-static uint32_t disc_instance_node_id(const uint8_t instance[NTK_DISC_INSTANCE_SIZE])
+/* RPC node id 是 32 位；mesh 用 64 位 node_id，高 32 位保留给将来的编队序号。 */
+static uint64_t disc_node_id64(uint32_t node_id)
 {
-    return (uint32_t)instance[0] | ((uint32_t)instance[1] << 8) |
-           ((uint32_t)instance[2] << 16) | ((uint32_t)instance[3] << 24);
+    return (uint64_t)node_id;
 }
 
-static void disc_instance_from_node(uint32_t node_id,
-                                    uint8_t instance[NTK_DISC_INSTANCE_SIZE])
+static uint32_t disc_node_id32(uint64_t node_id)
 {
-    memset(instance, 0, NTK_DISC_INSTANCE_SIZE);
-    instance[0] = (uint8_t)(node_id & 0xffu);
-    instance[1] = (uint8_t)((node_id >> 8) & 0xffu);
-    instance[2] = (uint8_t)((node_id >> 16) & 0xffu);
-    instance[3] = (uint8_t)((node_id >> 24) & 0xffu);
+    return (uint32_t)(node_id & 0xffffffffu);
 }
 
-/* Local bindings -> endpoints carried in every HELLO. */
-static size_t disc_local_endpoints(nb_node_t *node,
-                                   ntk_disc_endpoint_t *out,
-                                   size_t max)
+/* 本节点对外宣告的 RPC 服务端口与 scheme：取主绑定，tcp 优先。 */
+static void disc_primary_endpoint(nb_node_t *node, char *scheme, size_t scheme_cap,
+                                  uint16_t *port)
 {
-    size_t count = 0;
-    size_t bindings = nb_node_binding_count(node);
+    size_t count = nb_node_binding_count(node);
     size_t i;
+    const char *picked = NULL;
+    uint16_t picked_port = 0;
 
-    for (i = 0; i < bindings && count < max; i++) {
-        char uri[NB_ENDPOINT_URI_MAX];
+    for (i = 0; i < count; i++) {
+        const char *s = nb_node_binding_scheme(node, i);
+        uint16_t p = nb_node_binding_port(node, i);
 
-        if (nb_node_binding_uri(node, i, uri, sizeof(uri)) == NB_OK && uri[0]) {
-            memset(&out[count], 0, sizeof(out[count]));
-            out[count].kind = 0;
-            nb_copy_str(out[count].uri, sizeof(out[count].uri), uri, "");
-            count++;
+        if (!s || p == 0) {
+            continue;
+        }
+        if (strcmp(s, "tcp") == 0) {
+            picked = s;
+            picked_port = p;
+            break;
+        }
+        if (!picked) {
+            picked = s;
+            picked_port = p;
         }
     }
-    return count;
+    if (picked) {
+        nb_copy_str(scheme, scheme_cap, picked, "udp");
+        *port = picked_port;
+    } else {
+        nb_copy_str(scheme, scheme_cap, "udp", "udp");
+        *port = 0;
+    }
 }
 
-/* Publish the current local state (services as keys, bindings as endpoints). */
-static void disc_sync_local(nb_node_t *node)
+/* 本地服务清单（堆上指针数组，调用方用 disc_free_names 释放）。 */
+static char **disc_local_names(nb_node_t *node, size_t *count_out)
 {
-    nb_discovery_state_t *st = nb_node_discovery(node);
-    ntk_disc_endpoint_t eps[NTK_DISC_MAX_ENDPOINTS];
-    size_t ep_count;
-    size_t services;
+    size_t count = nb_node_service_count(node);
+    char **names;
     size_t i;
 
-    if (!st || !st->disc) {
-        return;
+    *count_out = 0;
+    if (count == 0) {
+        return NULL;
     }
-    (void)ntk_discovery_clear_keys(st->disc);
-    ep_count = disc_local_endpoints(node, eps, NTK_DISC_MAX_ENDPOINTS);
-    (void)ntk_discovery_set_endpoints(st->disc, eps, ep_count);
-    services = nb_node_service_count(node);
-    for (i = 0; i < services; i++) {
+    names = (char **)calloc(count, sizeof(*names));
+    if (!names) {
+        return NULL;
+    }
+    for (i = 0; i < count; i++) {
         const char *name = nb_node_service_name(node, i);
 
         if (name && name[0]) {
-            /* The RPC adapter uses the service name as the key and keeps the
-             * endpoints on the peer; the value stays empty. */
-            (void)ntk_discovery_advertise(st->disc, name, NULL, 0, 0);
+            names[*count_out] = (char *)name;
+            (*count_out)++;
         }
     }
+    return names;
 }
 
-static void disc_registry_replace(nb_node_t *node,
-                                  uint32_t node_id,
-                                  const char *instance_name,
-                                  const ntk_disc_peer_info_t *peer,
-                                  const ntk_disc_key_info_t *keys,
-                                  size_t key_count)
+static void disc_free_names(char **names)
 {
-    const char *services[NB_DISCOVERY_MAX_SERVICES_PER_PEER];
-    nb_endpoint_t endpoints[NB_MAX_BINDINGS];
-    size_t endpoint_count = 0;
+    free(names);
+}
+
+/* 本地服务位图：bit = 服务名哈希低位。 */
+static void disc_update_mask(nb_discovery_state_t *st,
+                             const char *const *names,
+                             size_t count)
+{
+    uint64_t mask = 0;
     size_t i;
 
-    for (i = 0; i < key_count; i++) {
-        services[i] = keys[i].key;
+    for (i = 0; i < count; i++) {
+        mask |= nb_mesh_service_bit(names[i]);
     }
-    for (i = 0; i < peer->endpoint_count && endpoint_count < NB_MAX_BINDINGS; i++) {
-        nb_endpoint_t parsed;
+    (void)nb_mesh_set_service_mask(st->mesh, mask);
+}
 
-        if (nb_endpoint_parse(peer->endpoints[i].uri, &parsed) != NB_OK) {
-            continue;
-        }
-        if (nb_endpoint_is_network(&parsed)) {
-            /* The binding host is usually 0.0.0.0 or a local address; the
-             * datagram source is authoritative for a remote node. */
-            nb_copy_str(parsed.host, sizeof(parsed.host), peer->host, "0.0.0.0");
-            (void)nb_endpoint_refresh(&parsed);
-        }
-        endpoints[endpoint_count++] = parsed;
-    }
-    if (endpoint_count == 0) {
-        nb_log_debug("mesh: peer %08x has no usable endpoint", (unsigned)node_id);
+/* 把“服务名清单 + 对端”写入 registry。 */
+static void disc_registry_apply(nb_node_t *node,
+                                uint32_t node_id,
+                                const char *const *services,
+                                size_t service_count,
+                                const char *host,
+                                uint16_t rpc_port,
+                                const char *scheme)
+{
+    nb_endpoint_t endpoint;
+    char instance_name[NB_NAME_MAX];
+    int n;
+
+    if (service_count == 0 || !host || !host[0] || rpc_port == 0) {
         return;
     }
-    nb_log_debug("mesh: peer %08x %s services=%zu endpoints=%zu",
-                (unsigned)node_id,
-                instance_name,
-                key_count,
-                endpoint_count);
+    if (nb_endpoint_from_parts(&endpoint,
+                               scheme && scheme[0] ? scheme : "udp",
+                               host,
+                               rpc_port,
+                               nb_transport_kind_from_scheme(scheme && scheme[0] ? scheme : "udp")) !=
+        NB_OK) {
+        return;
+    }
+    n = snprintf(instance_name, sizeof(instance_name), "%08x", (unsigned)node_id);
+    if (n <= 0 || (size_t)n >= sizeof(instance_name)) {
+        return;
+    }
+    nb_log_debug("mesh: peer %08x services=%zu via %s:%u",
+                 (unsigned)node_id,
+                 service_count,
+                 host,
+                 (unsigned)rpc_port);
     (void)nb_registry_replace_node(nb_node_registry(node),
                                    node_id,
                                    instance_name,
                                    services,
-                                   key_count,
-                                   endpoints,
-                                   endpoint_count,
+                                   service_count,
+                                   &endpoint,
+                                   1,
                                    nb_now_ms());
 }
 
-static void disc_on_peer(void *user, const ntk_disc_peer_info_t *peer, int removed)
+/* 位图命中：只把对端掩码里声明过的服务映射过去。 */
+static void disc_apply_from_mask(nb_node_t *node, const nb_mesh_peer_info_t *peer)
+{
+    char scheme[NB_SCHEME_MAX];
+    uint16_t local_port = 0;
+    char **names;
+    const char *offered[NB_DISCOVERY_MAX_SERVICES_PER_PEER];
+    size_t count = 0;
+    size_t offered_count = 0;
+    size_t i;
+
+    disc_primary_endpoint(node, scheme, sizeof(scheme), &local_port);
+    names = disc_local_names(node, &count);
+    if (!names) {
+        return;
+    }
+    for (i = 0; i < count && offered_count < NB_DISCOVERY_MAX_SERVICES_PER_PEER; i++) {
+        if ((peer->service_mask & nb_mesh_service_bit(names[i])) != 0) {
+            offered[offered_count++] = names[i];
+        }
+    }
+    /* 一个都不命中：可能对端只是没通告掩码，交给按需内省。 */
+    if (offered_count > 0) {
+        disc_registry_apply(node,
+                            disc_node_id32(peer->node_id),
+                            offered,
+                            offered_count,
+                            peer->host,
+                            peer->rpc_port,
+                            scheme);
+    }
+    disc_free_names(names);
+}
+
+static void disc_on_peer(void *user, const nb_mesh_peer_info_t *peer, int removed)
 {
     nb_node_t *node = (nb_node_t *)user;
-    nb_discovery_state_t *st;
-    ntk_disc_key_info_t keys[NB_DISCOVERY_MAX_SERVICES_PER_PEER];
     uint32_t node_id;
-    char instance_name[NB_NAME_MAX];
-    size_t key_count;
-    int n;
 
     if (!node || !peer) {
         return;
     }
-    st = nb_node_discovery(node);
-    node_id = disc_instance_node_id(peer->instance);
+    node_id = disc_node_id32(peer->node_id);
     if (removed) {
         nb_log_debug("mesh: peer %08x removed", (unsigned)node_id);
         nb_registry_remove_node(nb_node_registry(node), node_id);
         return;
     }
-    key_count = st && st->disc
-                    ? ntk_discovery_peer_keys(st->disc, peer->instance, keys,
-                                              NB_DISCOVERY_MAX_SERVICES_PER_PEER)
-                    : 0;
-    n = snprintf(instance_name,
-                 sizeof(instance_name),
-                 "%s-%08x",
-                 peer->name[0] ? peer->name : "node",
-                 (unsigned)node_id);
-    if (n <= 0 || (size_t)n >= sizeof(instance_name)) {
+    nb_log_debug("mesh: peer %08x %s rpc_port=%u mask=0x%016llx hash=%08x",
+                 (unsigned)node_id,
+                 peer->host,
+                 (unsigned)peer->rpc_port,
+                 (unsigned long long)peer->service_mask,
+                 (unsigned)peer->service_hash);
+    if (peer->service_mask != 0) {
+        disc_apply_from_mask(node, peer);
+    }
+    /* 掩码为 0（对端没通告）时不做任何事：等真正要调用时按需内省。 */
+}
+
+static void disc_on_manifest(void *user,
+                             const nb_mesh_peer_info_t *peer,
+                             const char *const *services,
+                             size_t count)
+{
+    nb_node_t *node = (nb_node_t *)user;
+    char scheme[NB_SCHEME_MAX];
+    uint16_t local_port = 0;
+
+    if (!node || !peer || !services || count == 0) {
         return;
     }
-    disc_registry_replace(node, node_id, instance_name, peer, keys, key_count);
+    disc_primary_endpoint(node, scheme, sizeof(scheme), &local_port);
+    nb_log_debug("mesh: manifest from %08x: %zu services",
+                 (unsigned)disc_node_id32(peer->node_id),
+                 count);
+    disc_registry_apply(node,
+                        disc_node_id32(peer->node_id),
+                        services,
+                        count,
+                        peer->host,
+                        peer->rpc_port,
+                        scheme);
 }
 
 int nb_discovery_init(nb_node_t *node)
 {
     nb_discovery_state_t *st = nb_node_discovery(node);
-    ntk_discovery_config_t config;
-    uint8_t instance[NTK_DISC_INSTANCE_SIZE];
-    uint16_t port;
+    nb_mesh_config_t config;
+    char scheme[NB_SCHEME_MAX];
+    uint16_t rpc_port = 0;
+    char **names;
+    size_t name_count = 0;
+    int rc = NB_MESH_OK;
 
     if (!st) {
         return NB_ERR_INVALID;
     }
+    disc_primary_endpoint(node, scheme, sizeof(scheme), &rpc_port);
+
     memset(&config, 0, sizeof(config));
-    ntk_discovery_config_init(&config);
+    nb_mesh_config_init(&config);
     config.bind_host = "0.0.0.0";
     config.port = nb_node_discovery_port(node);
-    config.broadcast = nb_node_discovery_host(node);
-    if (!config.broadcast || !config.broadcast[0]) {
-        config.broadcast = "255.255.255.255";
-    }
-    config.ttl_ms = nb_node_ttl_ms(node);
-    config.max_peers = 256;
-    config.max_keys = 4096;
+    /* 空字符串 = 不加入组播，只用单播目标（本机测试常用）。 */
+    config.multicast_group = nb_node_discovery_host(node);
+    config.formation_id = nb_node_discovery_formation(node);
+    config.node_id = disc_node_id64(nb_node_id(node));
+    config.rpc_port = rpc_port;
+    config.service_mask = nb_node_discovery_service_mask(node);
+    config.heartbeat_ms = nb_node_hello_interval_ms(node);
+    config.lease_ms = nb_node_ttl_ms(node);
+    config.max_peers = NB_DISCOVERY_MAX_PEERS;
     config.callbacks.on_peer = disc_on_peer;
+    config.callbacks.on_manifest = disc_on_manifest;
     config.user = node;
 
-    st->disc = ntk_discovery_create(nb_node_poller(node), &config);
-    if (!st->disc) {
+    st->mesh = nb_mesh_create(nb_node_poller(node), &config, &rc);
+    if (!st->mesh) {
+        nb_log_error("mesh: create failed: %s", nb_mesh_strerror(rc));
         return NB_ERR_IO;
     }
-    disc_instance_from_node(nb_node_id(node), instance);
-    (void)ntk_discovery_set_identity(st->disc, instance, nb_node_name(node));
-    port = ntk_discovery_port(st->disc);
-    if (port != 0) {
-        nb_node_set_discovery_port(node, port);
+    names = disc_local_names(node, &name_count);
+    (void)nb_mesh_set_services(st->mesh, (const char *const *)names, name_count);
+    disc_update_mask(st, (const char *const *)names, name_count);
+    disc_free_names(names);
+
+    if (nb_mesh_port(st->mesh) != 0) {
+        nb_node_set_discovery_port(node, nb_mesh_port(st->mesh));
     }
-    disc_sync_local(node);
-    nb_log_debug("mesh: init port=%u name=%s bindings=%zu",
-                (unsigned)port,
-                nb_node_name(node),
-                nb_node_binding_count(node));
+    nb_log_debug("mesh: init port=%u formation=%u node=%08x rpc_port=%u services=%zu",
+                 (unsigned)nb_mesh_port(st->mesh),
+                 (unsigned)nb_node_discovery_formation(node),
+                 (unsigned)nb_node_id(node),
+                 (unsigned)rpc_port,
+                 name_count);
     return NB_OK;
 }
 
 void nb_discovery_shutdown(nb_node_t *node)
 {
     nb_discovery_state_t *st = nb_node_discovery(node);
-    if (st && st->disc) {
-        ntk_discovery_destroy(st->disc);
-        st->disc = NULL;
+    if (st && st->mesh) {
+        nb_mesh_destroy(st->mesh);
+        st->mesh = NULL;
     }
 }
 
 void nb_discovery_send_hello(nb_node_t *node, int bye)
 {
     nb_discovery_state_t *st = nb_node_discovery(node);
+    char **names;
+    size_t count = 0;
     int i;
 
-    if (!st || !st->disc) {
+    if (!st || !st->mesh) {
         return;
     }
     if (st->targets_lock) {
-        ntk_mutex_lock(st->targets_lock);
+        zb_mutex_lock(st->targets_lock);
         for (i = 0; i < (int)NB_DISCOVERY_MAX_TARGETS; i++) {
             if (st->targets[i].used) {
-                (void)ntk_discovery_add_peer(st->disc,
-                                             st->targets[i].ip,
-                                             st->targets[i].port);
+                (void)nb_mesh_add_peer(st->mesh,
+                                       st->targets[i].ip,
+                                       st->targets[i].port);
             }
         }
-        ntk_mutex_unlock(st->targets_lock);
+        zb_mutex_unlock(st->targets_lock);
     }
     if (bye) {
-        nb_log_debug("mesh: bye");
-        (void)ntk_discovery_bye(st->disc);
+        nb_log_debug("mesh: leave");
+        (void)nb_mesh_leave(st->mesh);
         return;
     }
-    disc_sync_local(node);
-    nb_log_debug("mesh: announce port=%u", (unsigned)ntk_discovery_port(st->disc));
-    (void)ntk_discovery_announce(st->disc);
+    /* 服务可能运行期增删：每次公告前刷新清单与 schema_hash。 */
+    names = disc_local_names(node, &count);
+    (void)nb_mesh_set_services(st->mesh, (const char *const *)names, count);
+    disc_update_mask(st, (const char *const *)names, count);
+    disc_free_names(names);
+    (void)nb_mesh_announce(st->mesh);
 }
 
 void nb_discovery_tick(nb_node_t *node, uint64_t now_ms)
 {
     nb_discovery_state_t *st = nb_node_discovery(node);
 
-    /* The node tick passes a monotonic clock; the library timestamps peers
-     * with the wall clock, so translate here and keep the registry on the
-     * node's monotonic clock. */
+    /* mesh 内部用墙钟记录 last_seen；registry 用 node 的单调钟。 */
     (void)now_ms;
-    if (st && st->disc) {
-        ntk_discovery_tick(st->disc, ntk_wall_ms());
+    if (st && st->mesh) {
+        nb_mesh_tick(st->mesh, zn_wall_ms());
     }
     nb_registry_expire(nb_node_registry(node), nb_now_ms(), nb_node_ttl_ms(node));
 }
@@ -271,6 +362,11 @@ int nb_discovery_find(nb_node_t *node,
                        nb_transport_kind_t *transport_out)
 {
     nb_endpoint_t endpoint;
+    nb_discovery_state_t *st;
+    nb_mesh_peer_info_t peers[NB_DISCOVERY_MAX_PEERS];
+    size_t count;
+    size_t i;
+
     if (!node || !service || !ip_out || !port_out) {
         return NB_ERR_INVALID;
     }
@@ -281,6 +377,27 @@ int nb_discovery_find(nb_node_t *node,
             *transport_out = endpoint.transport;
         }
         return NB_OK;
+    }
+    /*
+     * 懒内省的触发点：本地没有这个服务，但可能有契约不一致、manifest 还没
+     * 拉回来的对端。催它们立刻内省一次，调用方下一轮重试即可命中。
+     */
+    st = nb_node_discovery(node);
+    if (st && st->mesh) {
+        count = nb_mesh_peers(st->mesh, peers, NB_DISCOVERY_MAX_PEERS);
+        for (i = 0; i < count; i++) {
+            const nb_mesh_peer_info_t *peer = &peers[i];
+
+            if (peer->manifest_state == NB_MESH_MANIFEST_READY) {
+                /* 拉过了仍然没有这个服务：确实不提供。 */
+                continue;
+            }
+            /* 缓存版本过期，或者对端根本没通告掩码：拉一次。 */
+            if (peer->cached_service_hash != peer->service_hash ||
+                peer->service_mask == 0) {
+                (void)nb_mesh_request_manifest(st->mesh, peer->node_id);
+            }
+        }
     }
     return NB_ERR_NOTFOUND;
 }

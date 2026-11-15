@@ -2,8 +2,8 @@
 #include <nb/rpc/proxy.h>
 #include <nb/rpc/node.h>
 #include <nb/rpc/service.h>
-#include <platform.h>
-#include <thread/sem.h>
+#include <zn/platform.h>
+#include <zb/os/sem.h>
 
 #define NB_LOG_TAG "test"
 #include <nb/base/log.h>
@@ -45,7 +45,7 @@ static void on_bidi(nb_call_t *call, const nb_request_t *req, const nb_chunk_t *
 }
 
 typedef struct client_state {
-    ntk_sem *sem;
+    zb_sem *sem;
     int status;
     char buf[256];
     size_t len;
@@ -60,7 +60,7 @@ static void on_response(int status, const nb_response_t *resp, void *user)
         st->len = resp->payload.len;
         st->buf[resp->payload.len] = '\0';
     }
-    ntk_sem_post(st->sem, 1);
+    zb_sem_post(st->sem, 1);
 }
 
 static const char k_download[] = "0123456789ABCDEF";
@@ -82,7 +82,7 @@ static void on_download(nb_call_t *call, const nb_request_t *req, void *user)
 }
 
 typedef struct download_client {
-    ntk_sem *sem;
+    zb_sem *sem;
     char buf[64];
     size_t len;
     int chunks;
@@ -113,7 +113,7 @@ static void on_download_done(int status, void *user)
     c->done = 1;
     c->status = status;
     if (c->sem) {
-        ntk_sem_post(c->sem, 1);
+        zb_sem_post(c->sem, 1);
     }
 }
 
@@ -152,21 +152,21 @@ static int run_case(nb_transport_kind_t transport, const char *label, uint16_t s
     scfg.name = "stream-srv";
     scfg.rpc.kind = transport;
     scfg.rpc.bind_host = "127.0.0.1";
-    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.multicast_group = "127.0.0.1";
     scfg.rpc.discovery.port = sdisc;
     scfg.runtime.io_threads = 1;
-    scfg.rpc.discovery.hello_interval_ms = 200;
-    scfg.rpc.discovery.node_ttl_ms = 3000;
+    scfg.rpc.discovery.heartbeat_interval_ms = 200;
+    scfg.rpc.discovery.lease_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "stream-cli";
     ccfg.rpc.kind = transport;
     ccfg.rpc.bind_host = "127.0.0.1";
-    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.multicast_group = "127.0.0.1";
     ccfg.rpc.discovery.port = cdisc;
     ccfg.runtime.io_threads = 1;
-    ccfg.rpc.discovery.hello_interval_ms = 200;
-    ccfg.rpc.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.heartbeat_interval_ms = 200;
+    ccfg.rpc.discovery.lease_ms = 3000;
 
     if (nb_node_create(&scfg, &server) != NB_OK || nb_node_create(&ccfg, &client) != NB_OK) {
         nb_log_error("[%s] node create failed", label);
@@ -196,7 +196,7 @@ static int run_case(nb_transport_kind_t transport, const char *label, uint16_t s
     stream_opt.timeout_ms = 3000;
 
     memset(&cst, 0, sizeof(cst));
-    cst.sem = ntk_sem_create(0);
+    cst.sem = zb_sem_create(0);
     if (!cst.sem) {
         failed = 1;
     } else if (nb_proxy_open_client_stream(proxy, "upload", "chunk", &stream_opt, on_response, &cst, &stream) !=
@@ -227,7 +227,7 @@ static int run_case(nb_transport_kind_t transport, const char *label, uint16_t s
         if (nb_proxy_stream_send(stream, &chunk) != NB_OK) {
             failed = 1;
         }
-        if (ntk_sem_timedwait(cst.sem, 3000) != NTK_OK) {
+        if (zb_sem_timedwait(cst.sem, 3000) != ZN_OK) {
             nb_log_error("[%s] response timeout", label);
             failed = 1;
         } else {
@@ -251,14 +251,14 @@ static int run_case(nb_transport_kind_t transport, const char *label, uint16_t s
         (void)nb_proxy_stream_destroy(stream);
     }
     if (cst.sem) {
-        ntk_sem_destroy(cst.sem);
+        zb_sem_destroy(cst.sem);
     }
 
     /* 下载方向：服务端流式响应，客户端按 chunk 接收。 */
     {
         download_client_t dc;
         memset(&dc, 0, sizeof(dc));
-        dc.sem = ntk_sem_create(0);
+        dc.sem = zb_sem_create(0);
         if (!dc.sem) {
             failed = 1;
         } else if (nb_proxy_call_server_stream(proxy,
@@ -271,7 +271,7 @@ static int run_case(nb_transport_kind_t transport, const char *label, uint16_t s
                                      &dc) != NB_OK) {
             nb_log_error("[%s] call_stream failed", label);
             failed = 1;
-        } else if (ntk_sem_timedwait(dc.sem, 3000) != NTK_OK) {
+        } else if (zb_sem_timedwait(dc.sem, 3000) != ZN_OK) {
             nb_log_error("[%s] download timeout", label);
             failed = 1;
         } else if (dc.status != NB_OK || dc.len != strlen(k_download) ||
@@ -285,7 +285,7 @@ static int run_case(nb_transport_kind_t transport, const char *label, uint16_t s
             failed = 1;
         }
         if (dc.sem) {
-            ntk_sem_destroy(dc.sem);
+            zb_sem_destroy(dc.sem);
         }
     }
 
@@ -294,7 +294,7 @@ static int run_case(nb_transport_kind_t transport, const char *label, uint16_t s
         client_state_t cc;
         nb_stream_t *s2 = NULL;
         memset(&cc, 0, sizeof(cc));
-        cc.sem = ntk_sem_create(0);
+        cc.sem = zb_sem_create(0);
         if (!cc.sem) {
             failed = 1;
         } else if (nb_proxy_open_client_stream(proxy, "upload", "chunk", &stream_opt, on_response, &cc, &s2) != NB_OK) {
@@ -309,7 +309,7 @@ static int run_case(nb_transport_kind_t transport, const char *label, uint16_t s
             ck.flags = NB_STREAM_FLAG_FIRST;
             (void)nb_proxy_stream_send(s2, &ck);
             (void)nb_proxy_stream_cancel(s2);
-            if (ntk_sem_timedwait(cc.sem, 3000) != NTK_OK) {
+            if (zb_sem_timedwait(cc.sem, 3000) != ZN_OK) {
                 nb_log_error("[%s] cancel timeout", label);
                 failed = 1;
             } else if (cc.status != NB_ERR_CLOSED) {
@@ -319,7 +319,7 @@ static int run_case(nb_transport_kind_t transport, const char *label, uint16_t s
             (void)nb_proxy_stream_destroy(s2);
         }
         if (cc.sem) {
-            ntk_sem_destroy(cc.sem);
+            zb_sem_destroy(cc.sem);
         }
     }
 
@@ -328,7 +328,7 @@ static int run_case(nb_transport_kind_t transport, const char *label, uint16_t s
         download_client_t bc;
         nb_stream_t *bidi = NULL;
         memset(&bc, 0, sizeof(bc));
-        bc.sem = ntk_sem_create(0);
+        bc.sem = zb_sem_create(0);
         if (!bc.sem ||
             nb_proxy_open_bidi_stream(
                 proxy, "upload", "chat", &stream_opt, on_bidi_chunk, on_download_done, &bc, &bidi) != NB_OK) {
@@ -347,7 +347,7 @@ static int run_case(nb_transport_kind_t transport, const char *label, uint16_t s
             ck.offset = 4;
             ck.flags = NB_STREAM_FLAG_LAST;
             (void)nb_proxy_stream_send(bidi, &ck);
-            if (ntk_sem_timedwait(bc.sem, 3000) != NTK_OK || bc.status != NB_OK || bc.len != 8 ||
+            if (zb_sem_timedwait(bc.sem, 3000) != ZN_OK || bc.status != NB_OK || bc.len != 8 ||
                 memcmp(bc.buf, "pingpong", 8) != 0 || bc.chunks != 2 || bc.last != 1) {
                 nb_log_error("[%s] bidi mismatch status=%d len=%zu chunks=%d last=%d",
                               label,
@@ -360,7 +360,7 @@ static int run_case(nb_transport_kind_t transport, const char *label, uint16_t s
             (void)nb_proxy_stream_destroy(bidi);
         }
         if (bc.sem) {
-            ntk_sem_destroy(bc.sem);
+            zb_sem_destroy(bc.sem);
         }
     }
 

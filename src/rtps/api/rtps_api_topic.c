@@ -44,20 +44,20 @@ int rtps_topic_create(rtps_participant_t *participant,
         return RTPS_ERR_INVALID;
     }
     *out = NULL;
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     existing = find_topic_locked(participant, desc->name);
     if (existing) {
         int same_type = strcmp(existing->type_name, desc->type_name) == 0;
 
         if (same_type) {
             *out = existing;
-            ntk_mutex_unlock(participant->lock);
+            zb_mutex_unlock(participant->lock);
             return RTPS_OK;
         }
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return RTPS_ERR_PRECONDITION;
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     topic = (struct rtps_topic *)calloc(1, sizeof(*topic));
     if (!topic) {
@@ -68,13 +68,13 @@ int rtps_topic_create(rtps_participant_t *participant,
     rtps_api_copy(topic->type_name, sizeof(topic->type_name), desc->type_name);
     topic->qos = desc->qos;
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     /* Re-check: another thread may have created it while we allocated. */
     existing = find_topic_locked(participant, desc->name);
     if (existing) {
         int same_type = strcmp(existing->type_name, desc->type_name) == 0;
 
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         free(topic);
         if (!same_type) {
             return RTPS_ERR_PRECONDITION;
@@ -84,7 +84,7 @@ int rtps_topic_create(rtps_participant_t *participant,
     }
     topic->next = participant->topics;
     participant->topics = topic;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     *out = topic;
     return RTPS_OK;
 }
@@ -130,10 +130,10 @@ int rtps_topic_destroy(rtps_topic_t *topic)
         struct rtps_writer *writer;
         struct rtps_reader *reader;
 
-        ntk_mutex_lock(participant->lock);
+        zb_mutex_lock(participant->lock);
         writer = topic_any_writer(participant, topic);
         reader = writer ? NULL : topic_any_reader(participant, topic);
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         if (writer) {
             (void)rtps_writer_destroy(writer);
             continue;
@@ -145,14 +145,14 @@ int rtps_topic_destroy(rtps_topic_t *topic)
         break;
     }
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (link = &participant->topics; *link; link = &(*link)->next) {
         if (*link == topic) {
             *link = topic->next;
             break;
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     free(topic);
     return RTPS_OK;
 }
@@ -167,9 +167,9 @@ int rtps_topic_find(rtps_participant_t *participant,
         return RTPS_ERR_INVALID;
     }
     *out = NULL;
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     topic = find_topic_locked(participant, name);
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     *out = topic;
     return topic ? RTPS_OK : RTPS_ERR_NOTFOUND;
 }

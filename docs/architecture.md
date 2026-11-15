@@ -9,7 +9,7 @@ Network Bridge 由**三层结构 + 两条并列的语义主干**组成。最底�
            │  node / service / proxy         │ participant / topic / writer / reader│
            │  call / stream / cancel         │ sample / history / wait set / status │
            │  nb_rpc_qos_t (超时、并发)      │ nb_dds_qos_t (DDS 策略全集)        │
-           │  tcp / udp / shm 链路           │ rtps / cyclone 后端              │
+           │  tcp / udp / shm 链路           │ 内建 rtps 后端                   │
            │  static routes / ntk_discovery  │ SPDP/SEDP（后端自己的发现）      │
            └──────────────┬──────────────────┴──────────────┬─────────────────┘
                           │                                   │
@@ -62,18 +62,18 @@ socket、poller、timer、thread、mutex、monotonic clock。所有 I/O 与线�
 - **传输**：`rpc.listen` 里的 URI scheme 选择 tcp、udp 或 shm；provider SPI 只描述点对点链路（send/reply/loan/subscribe），没有 topic/QoS 概念。
 - **发现**：`mode: "mesh"` 使用广播式 `ntk_discovery`；`mode: "static"` 只用静态路由。`routes` 优先于发现结果，二者可共存。
 - **失败模型**：每次调用一个状态码；超时、取消、重试、流控属于 RPC 面。
-- **库依赖**：`nb_rpc` 链接 `nb_base`、`nb_json`、`ntk_discovery`；不链接 `rtps`/`ddsc`。
+- **库依赖**：`nb_rpc` 链接 `nb_base`、`nb_json`、`ntk_discovery`；不链接 `rtps`。
 
 ### 第 4 层：DDS 主干
 
 `include/nb/dds/` + `src/dds/`：participant / topic / writer / reader；sample / history / wait set / status；QoS 继承（participant → topic → writer/reader）。
 
 - **核心字段**：`domain`、`partition`、`prefix`（topic 名前缀）、`qos`。QoS 从 participant 默认值 → topic → writer/reader 逐级继承；`present` 位掩码区分“显式 false”和“继承”。
-- **后端**：`NB_DDS_BACKEND_RTPS` 直接映射内建 RTPS 引擎；`NB_DDS_BACKEND_CYCLONE` 映射 Cyclone DDS。两者使用同一套 DDS 默认值与线上类型 `dds::Message`，可互通。
-- **history / wait set**：由 DDS 模块统一实现（KEEP_LAST、read/take、状态掩码），后端只回调样本，避免两个后端语义分叉。
+- **后端**：内建 RTPS 引擎是唯一后端（`NB_DDS_BACKEND_RTPS`）。后端只把 topic/writer/reader 映射到引擎上，线上类型是 `dds::Message`，与 Cyclone DDS / Fast DDS 互通。
+- **history / wait set**：由 DDS 模块统一实现（KEEP_LAST、read/take、状态掩码），后端只回调样本，语义与后端解耦。
 - **样本与信封**：应用写什么字节，reader 读什么字节；不再套 RPC 信封。
 - **发现**：后端自己跑 SPDP/SEDP，不依赖 `ntk_discovery`，也不需要 RPC node。
-- **库依赖**：`nb_dds` 链接 `nb_base`、`nb_json`、`rtps`、可选 `ddsc`；不链接 `ntk_discovery`。
+- **库依赖**：`nb_dds` 链接 `nb_base`、`nb_json`、`rtps`；不链接 `ntk_discovery`。
 
 ### 第 5 层：RTPS 引擎（内建，供 DDS RTPS 后端使用）
 
@@ -91,12 +91,12 @@ socket、poller、timer、thread、mutex、monotonic clock。所有 I/O 与线�
 | `nb_base` | 缓冲区、错误、日志、指标、payload | ntk |
 | `nb_json` | 共享 JSON 读取器 + cJSON | `nb_base` |
 | `nb_rpc` | RPC 主干 + tcp/udp/shm + 配置 | `nb_base`、`nb_json`、`ntk_discovery` |
-| `nb_dds` | DDS 主干 + rtps/cyclone 后端 + 配置 | `nb_base`、`nb_json`、`rtps`、可选 `ddsc` |
+| `nb_dds` | DDS 主干 + 内建 rtps 后端 + 配置 | `nb_base`、`nb_json`、`rtps` |
 | `nb` | 便利目标，链接 `nb_rpc` + `nb_dds` | 两条主干 |
 | `rtps_core` | RTPS 协议引擎（内部，不安装公共头） | ntk、micro-cdr |
 | `rtps` | RTPS 公共 API (`rtps_*`) | `rtps_core` |
 
-`nb_rpc` 不链接 `rtps`/`ddsc`，`nb_dds` 不链接 `ntk_discovery`；两条主干可以从链接层独立裁剪。
+`nb_rpc` 不链接 `rtps`，`nb_dds` 不链接 `ntk_discovery`；两条主干可以从链接层独立裁剪。
 
 ## 配置
 

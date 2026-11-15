@@ -85,18 +85,17 @@ scheme 决定传输；同一 scheme 有多个 binding 时出站固定用第一�
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `backend` | string | `"rtps"` | `rtps`（内建引擎）或 `cyclone`（`NB_ENABLE_DDS=ON`） |
+| `backend` | string | `"rtps"` | 只支持 `rtps`（内建引擎，唯一后端）；其它取值报错 |
 | `domain` | uint | 0 | DDS domain id |
 | `partition` | string | 空 | DDS partition，作为默认 QoS 继承 |
 | `prefix` | string | 空 | topic 名前缀，线上名 = `prefix/name` |
 | `name` | string | 顶层 `name` | participant 名称 |
 | `qos` | object | DDS 默认 | topic/endpoint 的默认 QoS |
 | `rtps` | object | 引擎默认 | RTPS 后端调优 |
-| `cyclone` | object | 无 | `config_xml` |
 
-DDS 面**不依赖** RPC node、binding、路由或 ntk_discovery：后端自己做 SPDP/SEDP
-发现。两个后端使用同一套 DDS 默认值（`best_effort` / `volatile` /
-`keep_last depth 1`），topic/writer/reader 的 QoS 逐级继承。
+DDS 面**不依赖** RPC node、binding、路由或 ntk_discovery：内建 RTPS 后端自己做
+SPDP/SEDP 发现。DDS 默认值为 `best_effort` / `volatile` / `keep_last depth 1`，
+topic/writer/reader 的 QoS 逐级继承；线上格式与 Cyclone DDS / Fast DDS 互通。
 
 `dds.rtps` 字段：`bind_host`、`advertise_host`、`multicast_group`（空字符串关闭
 组播）、`spdp_port`、`unicast_port`、`announce_interval`、`lease`、
@@ -129,7 +128,7 @@ DDS 面**不依赖** RPC node、binding、路由或 ntk_discovery：后端自己
 | `rpc.listen[i]` | 不是字符串或 URI 非法 |
 | `rpc.routes[i].endpoint` | 缺少 service 或 URI 非法 |
 | `rpc.discovery.peers[i]` | 不是合法 `host:port` |
-| `dds.backend` | 不是 `rtps` / `cyclone` |
+| `dds.backend` | 不是 `rtps`（内建 RTPS 是唯一后端） |
 | `dds.qos.<field>` | 类型或取值非法 |
 | `dds.rtps.peers[i]` | 不是合法 `host:port` |
 | `log.level` | 不支持的级别 |

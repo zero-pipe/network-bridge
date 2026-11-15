@@ -7,8 +7,8 @@
 #include <nb/rpc/proxy.h>
 #include <nb/rpc/node.h>
 #include <nb/rpc/shm.h>
-#include <platform.h>
-#include <thread/sem.h>
+#include <zn/platform.h>
+#include <zb/os/sem.h>
 
 #define NB_LOG_TAG "loadgen"
 #include <nb/base/log.h>
@@ -114,7 +114,7 @@ typedef struct options {
 } options_t;
 
 typedef struct callout {
-    ntk_sem *sem;
+    zb_sem *sem;
     int status;
     int app_status;
     size_t resp_len;
@@ -207,7 +207,7 @@ static void on_response(int status, const nb_response_t *resp, void *user)
         co->verify_ok = (resp->payload.len == g_expect_len &&
                          memcmp(resp->payload.data, g_expect_data, g_expect_len) == 0);
     }
-    ntk_sem_post(co->sem, 1);
+    zb_sem_post(co->sem, 1);
 }
 
 static uint64_t sleep_until_ns(uint64_t deadline)
@@ -220,7 +220,7 @@ static uint64_t sleep_until_ns(uint64_t deadline)
         }
         remain = deadline - now;
         if (remain > 2000000ull) {
-            ntk_sleep_ms((unsigned)((remain - 1000000ull) / 1000000ull));
+            zn_sleep_ms((unsigned)((remain - 1000000ull) / 1000000ull));
         } else {
             /* 自旋等待亚毫秒精度 */
         }
@@ -287,7 +287,7 @@ static void error_add(error_entry_t *errors, int *error_count, int code)
 
 static nb_node_t *g_node;
 static nb_proxy_t *g_proxy;
-static ntk_sem *g_done;
+static zb_sem *g_done;
 static options_t g_opt;
 static const uint8_t *g_payload;
 static uint64_t g_deadline_ns;
@@ -311,7 +311,7 @@ static void ed_finish(void)
         return;
     }
     g_finished = 1;
-    ntk_sem_post(g_done, 1);
+    zb_sem_post(g_done, 1);
 }
 
 static void ed_resp(int status, const nb_response_t *resp, void *user)
@@ -441,7 +441,7 @@ int main(int argc, char **argv)
     nb_node_t *node = NULL;
     nb_proxy_t *proxy = NULL;
     nb_binding_config_t shm_binding;
-    ntk_sem *sem = NULL;
+    zb_sem *sem = NULL;
     callout_t co;
     uint8_t *payload = NULL;
     error_entry_t errors[16];
@@ -577,12 +577,12 @@ int main(int argc, char **argv)
     cfg.rpc.kind = opt.transport;
     cfg.rpc.bind_host = opt.bind;
     cfg.rpc.data_port = opt.data_port;
-    cfg.rpc.discovery.broadcast_host = "255.255.255.255";
+    cfg.rpc.discovery.multicast_group = "";  /* 空串 = 只用单播目标 */
     cfg.rpc.discovery.port = opt.discovery_port;
     cfg.rpc.mode = mode;
     cfg.runtime.io_threads = opt.io_threads ? opt.io_threads : 1;
-    cfg.rpc.discovery.hello_interval_ms = 100;
-    cfg.rpc.discovery.node_ttl_ms = 3000;
+    cfg.rpc.discovery.heartbeat_interval_ms = 100;
+    cfg.rpc.discovery.lease_ms = 3000;
     cfg.rpc.frag_bytes = opt.frag_bytes;
     cfg.rpc.max_msg_bytes = opt.max_msg_bytes;
     cfg.rpc.backpressure_bytes = opt.backpressure_bytes;
@@ -602,7 +602,7 @@ int main(int argc, char **argv)
         cfg.rpc.mode = NB_NODE_MODE_STATIC;
     }
 
-    sem = ntk_sem_create(0);
+    sem = zb_sem_create(0);
     if (!sem) {
         nb_log_error("sem create failed");
         return 1;
@@ -673,14 +673,14 @@ int main(int argc, char **argv)
                 nb_node_destroy(node);
                 return 1;
             }
-            (void)ntk_sem_timedwait(sem, (unsigned)(opt.timeout_ms + 100));
+            (void)zb_sem_timedwait(sem, (unsigned)(opt.timeout_ms + 100));
             /* DDS discovery may still be converging: require a real reply. */
             if (co.status != NB_ERR_NOTFOUND &&
                 (!opt.use_shm || co.status == NB_OK)) {
                 warmed = 1;
                 break;
             }
-            ntk_sleep_ms(20);
+            zn_sleep_ms(20);
         }
         if (!warmed) {
             g_status = 1; /* discovery_error */
@@ -797,7 +797,7 @@ int main(int argc, char **argv)
                     index++;
                     continue;
                 }
-                if (ntk_sem_timedwait(sem, (unsigned)(opt.timeout_ms + 100)) != NTK_OK) {
+                if (zb_sem_timedwait(sem, (unsigned)(opt.timeout_ms + 100)) != ZN_OK) {
                     failed++;
                     error_add(errors, &error_count, NB_ERR_TIMEOUT);
                     index++;
@@ -840,12 +840,12 @@ int main(int argc, char **argv)
             g_inflight = 0;
             g_inflight_peak = 0;
             g_finished = 0;
-            g_done = ntk_sem_create(0);
+            g_done = zb_sem_create(0);
             if (g_done) {
                 (void)nb_node_post(node, ed_issue, NULL);
-                (void)ntk_sem_timedwait(
+                (void)zb_sem_timedwait(
                     g_done, (unsigned)(opt.duration_seconds * 1000 + opt.timeout_ms + 2000));
-                ntk_sem_destroy(g_done);
+                zb_sem_destroy(g_done);
                 g_done = NULL;
             }
             attempted = g_attempted;
@@ -979,7 +979,7 @@ int main(int argc, char **argv)
     }
     spike_log_write();
     free(payload);
-    ntk_sem_destroy(sem);
+    zb_sem_destroy(sem);
     nb_proxy_destroy(proxy);
     nb_node_destroy(node);
     return 0;

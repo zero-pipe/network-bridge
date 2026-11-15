@@ -6,9 +6,6 @@
 #include <stddef.h>
 
 extern const nb_dds_backend_ops_t nb_dds_rtps_backend_ops;
-#ifdef NB_ENABLE_DDS
-extern const nb_dds_backend_ops_t nb_dds_cyclone_backend_ops;
-#endif
 
 #define NB_DDS_MAX_CUSTOM_BACKENDS 4
 
@@ -22,10 +19,6 @@ const nb_dds_backend_ops_t *nb_dds_backend_find(nb_dds_backend_t backend)
     switch (backend) {
     case NB_DDS_BACKEND_RTPS:
         return &nb_dds_rtps_backend_ops;
-#ifdef NB_ENABLE_DDS
-    case NB_DDS_BACKEND_CYCLONE:
-        return &nb_dds_cyclone_backend_ops;
-#endif
     default:
         break;
     }

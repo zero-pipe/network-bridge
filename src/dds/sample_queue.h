@@ -12,7 +12,7 @@
 
 #include <nb/dds/sample.h>
 
-#include <ntk.h>
+#include <zn/zn.h>
 
 #include <stddef.h>
 #include <stdint.h>

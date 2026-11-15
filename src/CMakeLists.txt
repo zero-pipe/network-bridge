@@ -113,16 +113,10 @@ set(NB_DDS_SOURCES
     dds/config/dds_config.c
 )
 
-if(NB_ENABLE_DDS)
-    list(APPEND NB_DDS_SOURCES
-        dds/cyclone_backend.c
-        dds/cyclone/cy_dds_message.c)
-endif()
-
 # ---- RTPS engine and public API -----------------------------------------
 # log.c is shared by the framework and the RTPS engine. Keeping it in a small
 # library lets the engine build without pulling in the framework: rtps_core
-# depends on nb_base, ntk, microcdr and nb_log only.
+# depends on nb_base, znet, microcdr and nb_log only.
 add_library(nb_log STATIC base/log.c)
 target_include_directories(nb_log
     PUBLIC ${CMAKE_SOURCE_DIR}/include
@@ -137,19 +131,19 @@ install(TARGETS nb_log
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-# Standalone discovery library: depends on ntk only.
-add_library(ntk_discovery STATIC ntk_discovery/ntk_discovery.c)
-add_library(nb::ntk_discovery ALIAS ntk_discovery)
-target_include_directories(ntk_discovery
+# Mesh discovery library: 定长组播心跳 + 编队隔离 + 按需内省。只依赖 znet。
+add_library(nb_mesh STATIC mesh/nb_mesh.c)
+add_library(nb::nb_mesh ALIAS nb_mesh)
+target_include_directories(nb_mesh
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-target_link_libraries(ntk_discovery PUBLIC ntk)
-set_target_properties(ntk_discovery PROPERTIES
+target_link_libraries(nb_mesh PUBLIC znet)
+set_target_properties(nb_mesh PROPERTIES
     C_STANDARD 99
     C_STANDARD_REQUIRED ON
-    OUTPUT_NAME ntk_discovery)
-install(TARGETS ntk_discovery
+    OUTPUT_NAME nb_mesh)
+install(TARGETS nb_mesh
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
@@ -179,7 +173,7 @@ target_include_directories(rtps_core
         ${CMAKE_CURRENT_SOURCE_DIR}/rtps/internal
         ${CMAKE_CURRENT_SOURCE_DIR}/base)
 target_link_libraries(rtps_core
-    PUBLIC ntk nb_base microcdr
+    PUBLIC znet nb_base microcdr
     PRIVATE nb_log)
 set_target_properties(rtps_core PROPERTIES
     C_STANDARD 99
@@ -210,7 +204,7 @@ target_include_directories(rtps
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/rtps/internal)
 target_link_libraries(rtps
-    PUBLIC rtps_core ntk nb_base
+    PUBLIC rtps_core znet nb_base
     PRIVATE nb_log)
 set_target_properties(rtps PROPERTIES
     C_STANDARD 99
@@ -244,7 +238,7 @@ target_include_directories(nb_rpc
         ${CMAKE_SOURCE_DIR}/3rdparty/uthash
         ${CMAKE_SOURCE_DIR}/3rdparty/cjson
 )
-target_link_libraries(nb_rpc PUBLIC ntk nb_base PRIVATE nb_json nb_log ntk_discovery)
+target_link_libraries(nb_rpc PUBLIC znet nb_base PRIVATE nb_json nb_log nb_mesh)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(nb_rpc PUBLIC rt)
 endif()
@@ -267,13 +261,9 @@ target_include_directories(nb_dds
         ${CMAKE_CURRENT_SOURCE_DIR}/base
         ${CMAKE_CURRENT_SOURCE_DIR}/dds
         ${CMAKE_CURRENT_SOURCE_DIR}/dds/config
-        ${CMAKE_CURRENT_SOURCE_DIR}/dds/cyclone
         ${CMAKE_SOURCE_DIR}/3rdparty/cjson
 )
-target_link_libraries(nb_dds PUBLIC ntk nb_base rtps PRIVATE nb_json nb_log)
-if(NB_ENABLE_DDS)
-    target_link_libraries(nb_dds PUBLIC nb_cyclonedds)
-endif()
+target_link_libraries(nb_dds PUBLIC znet nb_base rtps PRIVATE nb_json nb_log)
 set_target_properties(nb_dds PROPERTIES
     C_STANDARD 99
     C_STANDARD_REQUIRED ON
@@ -307,15 +297,11 @@ install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLU
     PATTERN "internal" EXCLUDE)
 
 # elog 只是 log.c 的实现细节：静态库最终仍需链接，但不向使用者传播头文件路径�?
-target_link_libraries(nb PUBLIC ntk nb_base microcdr rtps PRIVATE nb_log ntk_discovery)
+target_link_libraries(nb PUBLIC znet nb_base microcdr rtps PRIVATE nb_log nb_mesh)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # shm_open()/sem_timedwait() live in librt on older glibc.
     target_link_libraries(nb PUBLIC rt)
-endif()
-
-if(NB_ENABLE_DDS)
-    target_link_libraries(nb PUBLIC nb_cyclonedds)
 endif()
 
 set_target_properties(nb PROPERTIES

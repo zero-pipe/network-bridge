@@ -7,7 +7,7 @@
 #include <nb/config.h>
 #include <nb/dds.h>
 
-#include <ntk.h>
+#include <zn/zn.h>
 
 #include <nb/base/log.h>
 
@@ -67,7 +67,7 @@ int main(int argc, char **argv)
 
     for (i = 0; i < 100 && received == 0; i++) {
         (void)nb_dds_writer_write(writer, "hello config", 12);
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     if (received == 0) {
         nb_log_error("no sample delivered");

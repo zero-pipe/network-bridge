@@ -37,7 +37,7 @@
 #define NB_RTPS_TCP_TX_MAX (512u * 1024u)
 
 typedef struct nb_rtps_tcp nb_rtps_tcp_t;
-struct ntk_poller;
+struct zn_poller;
 
 /* One decoded submessage. `index` is the connection it arrived on. */
 typedef void (*nb_rtps_tcp_message_fn)(void *user,
@@ -63,7 +63,7 @@ typedef struct nb_rtps_tcp_stats {
  * and set later with nb_rtps_tcp_set_poller(). */
 nb_rtps_tcp_t *nb_rtps_tcp_create(const char *bind_host,
                                   uint16_t port,
-                                  struct ntk_poller *poller,
+                                  struct zn_poller *poller,
                                   nb_rtps_tcp_message_fn on_message,
                                   nb_rtps_tcp_link_fn on_link,
                                   nb_rtps_tcp_link_fn on_unlink,
@@ -73,7 +73,7 @@ void nb_rtps_tcp_destroy(nb_rtps_tcp_t *tcp);
 
 /* Register the listening socket (and any open connection) with the poller.
  * Called once the participant's poller exists. */
-int nb_rtps_tcp_set_poller(nb_rtps_tcp_t *tcp, struct ntk_poller *poller);
+int nb_rtps_tcp_set_poller(nb_rtps_tcp_t *tcp, struct zn_poller *poller);
 
 uint16_t nb_rtps_tcp_port(const nb_rtps_tcp_t *tcp);
 

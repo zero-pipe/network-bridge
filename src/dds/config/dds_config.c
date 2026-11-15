@@ -353,47 +353,35 @@ static int cfg_parse_rtps(dds_doc_t *doc, const cJSON *dds, nb_config_error_t *e
     return rc;
 }
 
-static int cfg_parse_cyclone(dds_doc_t *doc, const cJSON *dds, nb_config_error_t *err)
+/* 内建 RTPS 是唯一后端：其它取值（含已移除的 cyclone）一律明确报错。 */
+static int cfg_parse_backend(const char *text, nb_dds_backend_t *out, nb_config_error_t *err)
 {
-    static const char *const known[] = {"config_xml"};
-    const cJSON *obj = NULL;
-    const char *text = NULL;
-    int rc = nb_json_object(dds, "cyclone", &obj, err, "dds");
-
-    if (rc != NB_OK || !obj) {
-        return rc;
+    if (strcmp(text, "rtps") == 0) {
+        *out = NB_DDS_BACKEND_RTPS;
+        return NB_OK;
     }
-    nb_json_warn_unknown(obj, CFG_KEYS(known), "dds.cyclone");
-    doc->dds.has_cyclone = true;
-    rc = nb_json_string_field(obj, "config_xml", &text, err, "dds.cyclone");
-    if (rc == NB_OK) {
-        rc = cfg_copy_string(doc->dds.cyclone_config_xml, sizeof(doc->dds.cyclone_config_xml),
-                             text, err, "dds.cyclone.config_xml");
-    }
-    return rc;
+    return nb_json_fail(err, "dds.backend",
+                        "unsupported backend; only \"rtps\" is available");
 }
 
 static int cfg_parse_dds(dds_doc_t *doc, const cJSON *root, nb_config_error_t *err)
 {
     static const char *const known[] = {"backend", "domain", "partition", "prefix", "name",
-                                        "qos", "rtps", "cyclone"};
-    static const char *const backend_names[] = {"rtps", "cyclone"};
-    static const int backend_values[] = {NB_DDS_BACKEND_RTPS, NB_DDS_BACKEND_CYCLONE};
+                                        "qos", "rtps"};
     const cJSON *dds = NULL;
     const cJSON *qos = NULL;
     const char *text = NULL;
-    int backend = NB_DDS_BACKEND_RTPS;
     int rc = nb_json_object(root, "dds", &dds, err, "");
 
     if (rc != NB_OK || !dds) {
         return rc;
     }
     nb_json_warn_unknown(dds, CFG_KEYS(known), "dds");
-    rc = nb_json_enum_field(dds, "backend", CFG_KEYS(backend_names), backend_values, &backend,
-                            err, "dds");
-    if (rc == NB_OK) {
-        doc->dds.backend = (nb_dds_backend_t)backend;
+    rc = nb_json_string_field(dds, "backend", &text, err, "dds");
+    if (rc == NB_OK && text) {
+        rc = cfg_parse_backend(text, &doc->dds.backend, err);
     }
+    text = NULL;
     if (rc == NB_OK) {
         rc = nb_json_u32_field(dds, "domain", &doc->dds.domain, err, "dds");
     }
@@ -426,9 +414,6 @@ static int cfg_parse_dds(dds_doc_t *doc, const cJSON *root, nb_config_error_t *e
     }
     if (rc == NB_OK) {
         rc = cfg_parse_rtps(doc, dds, err);
-    }
-    if (rc == NB_OK) {
-        rc = cfg_parse_cyclone(doc, dds, err);
     }
     return rc;
 }
@@ -527,7 +512,6 @@ int nb_dds_participant_create_from_config(const nb_dds_config_doc_t *doc,
 {
     nb_dds_participant_options_t options;
     nb_dds_rtps_options_t rtps;
-    nb_dds_cyclone_options_t cyclone;
     const char *peer_strings[NB_DDS_CONFIG_MAX_PEERS];
     char peer_text[NB_DDS_CONFIG_MAX_PEERS][NB_HOST_MAX + 8];
     const nb_dds_config_t *cfg;
@@ -574,13 +558,6 @@ int nb_dds_participant_create_from_config(const nb_dds_config_doc_t *doc,
             rtps.peer_count = cfg->rtps.peer_count;
         }
         options.rtps = &rtps;
-    }
-    if (cfg->has_cyclone || cfg->backend == NB_DDS_BACKEND_CYCLONE) {
-        memset(&cyclone, 0, sizeof(cyclone));
-        cyclone.struct_size = sizeof(cyclone);
-        cyclone.config_xml =
-            cfg->cyclone_config_xml[0] ? cfg->cyclone_config_xml : NULL;
-        options.cyclone = &cyclone;
     }
     return nb_dds_participant_create(&options, out);
 }

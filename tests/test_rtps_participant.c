@@ -7,7 +7,7 @@
 #define NB_LOG_TAG "test"
 #include <nb/base/log.h>
 
-#include <ntk.h>
+#include <zn/zn.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +24,7 @@ static int g_fail;
     } while (0)
 
 typedef struct test_state {
-    ntk_mutex *lock;
+    zb_mutex *lock;
     int added;
     int updated;
     int removed;
@@ -37,7 +37,7 @@ typedef struct test_state {
 } test_state_t;
 
 typedef struct test_data_state {
-    ntk_mutex *lock;
+    zb_mutex *lock;
     int received;
     nb_rtps_guid_t reader_guid;
     nb_rtps_guid_t writer_guid;
@@ -46,7 +46,7 @@ typedef struct test_data_state {
 } test_data_state_t;
 
 typedef struct reliable_data_state {
-    ntk_mutex *lock;
+    zb_mutex *lock;
     int count;
     uint8_t payloads[8][8];
     size_t payload_lens[8];
@@ -68,7 +68,7 @@ static void on_participant(void *user,
 {
     test_state_t *state = (test_state_t *)user;
 
-    ntk_mutex_lock(state->lock);
+    zb_mutex_lock(state->lock);
     if (event == NB_RTPS_PARTICIPANT_ADDED) {
         state->added++;
         (void)snprintf(state->last_name, sizeof(state->last_name), "%s", info->name);
@@ -77,7 +77,7 @@ static void on_participant(void *user,
     } else if (event == NB_RTPS_PARTICIPANT_REMOVED) {
         state->removed++;
     }
-    ntk_mutex_unlock(state->lock);
+    zb_mutex_unlock(state->lock);
 }
 
 static void on_endpoint(void *user,
@@ -87,7 +87,7 @@ static void on_endpoint(void *user,
 {
     test_state_t *state = (test_state_t *)user;
 
-    ntk_mutex_lock(state->lock);
+    zb_mutex_lock(state->lock);
     if (event == NB_RTPS_ENDPOINT_ADDED) {
         state->endpoint_added++;
     } else if (event == NB_RTPS_ENDPOINT_UPDATED) {
@@ -97,7 +97,7 @@ static void on_endpoint(void *user,
     }
     state->last_endpoint_kind = (int)kind;
     state->last_endpoint = *info;
-    ntk_mutex_unlock(state->lock);
+    zb_mutex_unlock(state->lock);
 }
 
 static void on_data(void *user,
@@ -111,9 +111,9 @@ static void on_data(void *user,
     if (!state || !reader_guid || !writer_guid || !message) {
         return;
     }
-    ntk_mutex_lock(state->lock);
+    zb_mutex_lock(state->lock);
     if (state->received) {
-        ntk_mutex_unlock(state->lock);
+        zb_mutex_unlock(state->lock);
         return;
     }
     state->reader_guid = *reader_guid;
@@ -127,16 +127,16 @@ static void on_data(void *user,
         memcpy(state->payload, message->payload, copy_len);
     }
     state->received = 1;
-    ntk_mutex_unlock(state->lock);
+    zb_mutex_unlock(state->lock);
 }
 
 static int data_received(test_data_state_t *state)
 {
     int received;
 
-    ntk_mutex_lock(state->lock);
+    zb_mutex_lock(state->lock);
     received = state->received;
-    ntk_mutex_unlock(state->lock);
+    zb_mutex_unlock(state->lock);
     return received;
 }
 
@@ -151,7 +151,7 @@ static void on_reliable_data(void *user,
     if (!state || !reader_guid || !writer_guid || !message) {
         return;
     }
-    ntk_mutex_lock(state->lock);
+    zb_mutex_lock(state->lock);
     index = state->count;
     if (index < (int)(sizeof(state->payloads) / sizeof(state->payloads[0]))) {
         size_t copy_len = message->payload_len;
@@ -177,16 +177,16 @@ static void on_reliable_data(void *user,
         state->generation_ranks[index] = message->sample.generation_rank;
     }
     state->count++;
-    ntk_mutex_unlock(state->lock);
+    zb_mutex_unlock(state->lock);
 }
 
 static int reliable_data_count(reliable_data_state_t *state)
 {
     int count;
 
-    ntk_mutex_lock(state->lock);
+    zb_mutex_lock(state->lock);
     count = state->count;
-    ntk_mutex_unlock(state->lock);
+    zb_mutex_unlock(state->lock);
     return count;
 }
 
@@ -198,7 +198,7 @@ static int wait_reliable_data(reliable_data_state_t *state, int wanted, int time
         if (reliable_data_count(state) >= wanted) {
             return 1;
         }
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
         waited += 20;
     }
     return 0;
@@ -215,7 +215,7 @@ static int send_gap_datagram(const nb_rtps_guid_prefix_t *dst_prefix,
                              uint32_t gap_bitmap,
                              uint16_t port)
 {
-    ntk_socket *sock;
+    zn_socket *sock;
     uint8_t message[256];
     (void)dst_prefix;
     nb_rtps_header_t header;
@@ -224,12 +224,12 @@ static int send_gap_datagram(const nb_rtps_guid_prefix_t *dst_prefix,
     size_t message_len;
     int rc = NB_ERR_IO;
 
-    sock = ntk_socket_create();
+    sock = zn_socket_create();
     if (!sock) {
         return NB_ERR_NOMEM;
     }
-    if (ntk_socket_bind_udp(sock, "127.0.0.1", 0, 0) != NTK_OK) {
-        ntk_socket_destroy(sock);
+    if (zn_socket_bind_udp(sock, "127.0.0.1", 0, 0) != ZN_OK) {
+        zn_socket_destroy(sock);
         return NB_ERR_IO;
     }
     memset(&header, 0, sizeof(header));
@@ -251,11 +251,11 @@ static int send_gap_datagram(const nb_rtps_guid_prefix_t *dst_prefix,
         nb_rtps_info_dst(&cdr, &reader->prefix) == NB_OK &&
         nb_rtps_gap(&cdr, &gap) == NB_OK && nb_cdr_writer_ok(&cdr)) {
         message_len = nb_cdr_writer_len(&cdr);
-        if (ntk_socket_sendto(sock, message, message_len, "127.0.0.1", port) > 0) {
+        if (zn_socket_sendto(sock, message, message_len, "127.0.0.1", port) > 0) {
             rc = NB_OK;
         }
     }
-    ntk_socket_destroy(sock);
+    zn_socket_destroy(sock);
     return rc;
 }
 
@@ -279,7 +279,7 @@ static int send_instance_datagram(const nb_rtps_guid_prefix_t *dst_prefix,
                                   int status,
                                   uint16_t port)
 {
-    ntk_socket *sock;
+    zn_socket *sock;
     uint8_t message[256];
     (void)dst_prefix;
     uint8_t key[4] = {0x00, 0x01, 0x00, 0x00};
@@ -312,12 +312,12 @@ static int send_instance_datagram(const nb_rtps_guid_prefix_t *dst_prefix,
     }
     qos_len = nb_rtps_param_writer_len(&params);
 
-    sock = ntk_socket_create();
+    sock = zn_socket_create();
     if (!sock) {
         return NB_ERR_NOMEM;
     }
-    if (ntk_socket_bind_udp(sock, "127.0.0.1", 0, 0) != NTK_OK) {
-        ntk_socket_destroy(sock);
+    if (zn_socket_bind_udp(sock, "127.0.0.1", 0, 0) != ZN_OK) {
+        zn_socket_destroy(sock);
         return NB_ERR_IO;
     }
     memset(&header, 0, sizeof(header));
@@ -341,11 +341,11 @@ static int send_instance_datagram(const nb_rtps_guid_prefix_t *dst_prefix,
         nb_rtps_info_dst(&cdr, &reader->prefix) == NB_OK && nb_rtps_data(&cdr, &data) == NB_OK &&
         nb_cdr_writer_ok(&cdr)) {
         message_len = nb_cdr_writer_len(&cdr);
-        if (ntk_socket_sendto(sock, message, message_len, "127.0.0.1", port) > 0) {
+        if (zn_socket_sendto(sock, message, message_len, "127.0.0.1", port) > 0) {
             rc = NB_OK;
         }
     }
-    ntk_socket_destroy(sock);
+    zn_socket_destroy(sock);
     return rc;
 }
 
@@ -363,9 +363,9 @@ static int state_count(test_state_t *state, int removed)
 {
     int value;
 
-    ntk_mutex_lock(state->lock);
+    zb_mutex_lock(state->lock);
     value = removed ? state->removed : state->added;
-    ntk_mutex_unlock(state->lock);
+    zb_mutex_unlock(state->lock);
     return value;
 }
 
@@ -377,7 +377,7 @@ static int wait_count(test_state_t *state, int removed, int wanted, int timeout_
         if (state_count(state, removed) >= wanted) {
             return 1;
         }
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
         waited += 20;
     }
     return 0;
@@ -387,9 +387,9 @@ static int endpoint_count(test_state_t *state, int removed)
 {
     int value;
 
-    ntk_mutex_lock(state->lock);
+    zb_mutex_lock(state->lock);
     value = removed ? state->endpoint_removed : state->endpoint_added;
-    ntk_mutex_unlock(state->lock);
+    zb_mutex_unlock(state->lock);
     return value;
 }
 
@@ -401,7 +401,7 @@ static int wait_endpoint_count(test_state_t *state, int removed, int wanted, int
         if (endpoint_count(state, removed) >= wanted) {
             return 1;
         }
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
         waited += 20;
     }
     return 0;
@@ -478,18 +478,18 @@ static void test_unicast_peers(void)
     CHECK(nb_rtps_participant_add_peer(a, "127.0.0.1", port_b) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(b, "127.0.0.1", port_a) == NB_OK);
 
-    state_a.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    state_b.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    state_a.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    state_b.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(state_a.lock != NULL);
     CHECK(state_b.lock != NULL);
     if (!state_a.lock || !state_b.lock) {
         nb_rtps_participant_destroy(a);
         nb_rtps_participant_destroy(b);
         if (state_a.lock) {
-            ntk_mutex_destroy(state_a.lock);
+            zb_mutex_destroy(state_a.lock);
         }
         if (state_b.lock) {
-            ntk_mutex_destroy(state_b.lock);
+            zb_mutex_destroy(state_b.lock);
         }
         return;
     }
@@ -513,8 +513,8 @@ static void test_unicast_peers(void)
     nb_rtps_participant_stop(a);
     nb_rtps_participant_destroy(a);
     nb_rtps_participant_destroy(b);
-    ntk_mutex_destroy(state_a.lock);
-    ntk_mutex_destroy(state_b.lock);
+    zb_mutex_destroy(state_a.lock);
+    zb_mutex_destroy(state_b.lock);
 }
 
 static void test_create_destroy(void)
@@ -567,18 +567,18 @@ static void test_sedp_endpoints(void)
     CHECK(nb_rtps_participant_add_peer(a, "127.0.0.1", port_b) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(b, "127.0.0.1", port_a) == NB_OK);
 
-    state_a.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    state_b.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    state_a.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    state_b.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(state_a.lock != NULL);
     CHECK(state_b.lock != NULL);
     if (!state_a.lock || !state_b.lock) {
         nb_rtps_participant_destroy(a);
         nb_rtps_participant_destroy(b);
         if (state_a.lock) {
-            ntk_mutex_destroy(state_a.lock);
+            zb_mutex_destroy(state_a.lock);
         }
         if (state_b.lock) {
-            ntk_mutex_destroy(state_b.lock);
+            zb_mutex_destroy(state_b.lock);
         }
         return;
     }
@@ -634,8 +634,8 @@ static void test_sedp_endpoints(void)
     nb_rtps_participant_stop(b);
     nb_rtps_participant_destroy(a);
     nb_rtps_participant_destroy(b);
-    ntk_mutex_destroy(state_a.lock);
-    ntk_mutex_destroy(state_b.lock);
+    zb_mutex_destroy(state_a.lock);
+    zb_mutex_destroy(state_b.lock);
 }
 
 static void test_metrics_counters(void)
@@ -670,15 +670,15 @@ static void test_metrics_counters(void)
     port_b = nb_rtps_participant_spdp_port(b);
     CHECK(nb_rtps_participant_add_peer(a, "127.0.0.1", port_b) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(b, "127.0.0.1", port_a) == NB_OK);
-    state_a.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    state_b.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    state_a.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    state_b.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(state_a.lock != NULL);
     CHECK(state_b.lock != NULL);
     if (!state_a.lock || !state_b.lock) {
         nb_rtps_participant_destroy(a);
         nb_rtps_participant_destroy(b);
-        ntk_mutex_destroy(state_a.lock);
-        ntk_mutex_destroy(state_b.lock);
+        zb_mutex_destroy(state_a.lock);
+        zb_mutex_destroy(state_b.lock);
         return;
     }
     nb_rtps_participant_set_callback(a, on_participant, &state_a);
@@ -731,7 +731,7 @@ static void test_metrics_counters(void)
         if (dumping) {
             CHECK(nb_rtps_participant_add_peer(dumping, "127.0.0.1", port_a) == NB_OK);
             CHECK(nb_rtps_participant_start(dumping) == NB_OK);
-            ntk_sleep_ms(150);
+            zn_sleep_ms(150);
             memset(&again, 0, sizeof(again));
             nb_rtps_participant_metrics(dumping, &again);
             CHECK(again.rtps_packets_sent > 0);
@@ -745,8 +745,8 @@ static void test_metrics_counters(void)
     nb_rtps_participant_stop(b);
     nb_rtps_participant_destroy(a);
     nb_rtps_participant_destroy(b);
-    ntk_mutex_destroy(state_a.lock);
-    ntk_mutex_destroy(state_b.lock);
+    zb_mutex_destroy(state_a.lock);
+    zb_mutex_destroy(state_b.lock);
 }
 
 static void test_discovery_views(void)
@@ -787,14 +787,14 @@ static void test_discovery_views(void)
     CHECK(nb_rtps_participant_add_peer(a, "127.0.0.1", port_b) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(b, "127.0.0.1", port_a) == NB_OK);
 
-    state_a.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    state_b.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    state_a.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    state_b.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     if (!state_a.lock || !state_b.lock) {
         CHECK(0);
         nb_rtps_participant_destroy(a);
         nb_rtps_participant_destroy(b);
-        ntk_mutex_destroy(state_a.lock);
-        ntk_mutex_destroy(state_b.lock);
+        zb_mutex_destroy(state_a.lock);
+        zb_mutex_destroy(state_b.lock);
         return;
     }
     nb_rtps_participant_set_callback(a, on_participant, &state_a);
@@ -884,8 +884,8 @@ static void test_discovery_views(void)
     nb_rtps_participant_stop(b);
     nb_rtps_participant_destroy(a);
     nb_rtps_participant_destroy(b);
-    ntk_mutex_destroy(state_a.lock);
-    ntk_mutex_destroy(state_b.lock);
+    zb_mutex_destroy(state_a.lock);
+    zb_mutex_destroy(state_b.lock);
 }
 
 static void test_data_roundtrip(void)
@@ -928,9 +928,9 @@ static void test_data_roundtrip(void)
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    data_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    data_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock != NULL);
     CHECK(subscriber_state.lock != NULL);
     CHECK(data_state.lock != NULL);
@@ -938,13 +938,13 @@ static void test_data_roundtrip(void)
         nb_rtps_participant_destroy(publisher);
         nb_rtps_participant_destroy(subscriber);
         if (publisher_state.lock) {
-            ntk_mutex_destroy(publisher_state.lock);
+            zb_mutex_destroy(publisher_state.lock);
         }
         if (subscriber_state.lock) {
-            ntk_mutex_destroy(subscriber_state.lock);
+            zb_mutex_destroy(subscriber_state.lock);
         }
         if (data_state.lock) {
-            ntk_mutex_destroy(data_state.lock);
+            zb_mutex_destroy(data_state.lock);
         }
         return;
     }
@@ -1002,7 +1002,7 @@ static void test_data_roundtrip(void)
             received = data_received(&data_state);
         }
         if (!received) {
-            ntk_sleep_ms(50);
+            zn_sleep_ms(50);
         }
     }
     CHECK(received);
@@ -1018,9 +1018,9 @@ static void test_data_roundtrip(void)
     nb_rtps_participant_stop(subscriber);
     nb_rtps_participant_destroy(publisher);
     nb_rtps_participant_destroy(subscriber);
-    ntk_mutex_destroy(publisher_state.lock);
-    ntk_mutex_destroy(subscriber_state.lock);
-    ntk_mutex_destroy(data_state.lock);
+    zb_mutex_destroy(publisher_state.lock);
+    zb_mutex_destroy(subscriber_state.lock);
+    zb_mutex_destroy(data_state.lock);
 }
 
 /*
@@ -1029,7 +1029,7 @@ static void test_data_roundtrip(void)
  * used because a partly received sample stays missing and has to be replayed.
  */
 typedef struct frag_state {
-    ntk_mutex *lock;
+    zb_mutex *lock;
     int received;
     size_t len;
     uint32_t hash;
@@ -1061,22 +1061,22 @@ static void on_frag_data(void *user,
         return;
     }
     hash = payload_hash(message->payload, message->payload_len);
-    ntk_mutex_lock(state->lock);
+    zb_mutex_lock(state->lock);
     if (!state->received) {
         state->received = 1;
         state->len = message->payload_len;
         state->hash = hash;
     }
-    ntk_mutex_unlock(state->lock);
+    zb_mutex_unlock(state->lock);
 }
 
 static int frag_data_received(frag_state_t *state)
 {
     int received;
 
-    ntk_mutex_lock(state->lock);
+    zb_mutex_lock(state->lock);
     received = state->received;
-    ntk_mutex_unlock(state->lock);
+    zb_mutex_unlock(state->lock);
     return received;
 }
 
@@ -1095,20 +1095,20 @@ static int send_raw_sample(nb_rtps_participant_t *publisher,
     int ok = 0;
 
     for (waited = 0; waited < 5000; waited += 50) {
-        ntk_mutex_lock(state->lock);
+        zb_mutex_lock(state->lock);
         state->received = 0;
-        ntk_mutex_unlock(state->lock);
+        zb_mutex_unlock(state->lock);
         if (nb_rtps_participant_publish(publisher, writer_guid, sample, sample_len) == NB_OK) {
-            ntk_sleep_ms(50);
-            ntk_mutex_lock(state->lock);
+            zn_sleep_ms(50);
+            zb_mutex_lock(state->lock);
             ok = state->received && state->len == expected_len &&
                  state->hash == expected_hash;
-            ntk_mutex_unlock(state->lock);
+            zb_mutex_unlock(state->lock);
             if (ok) {
                 break;
             }
         } else {
-            ntk_sleep_ms(50);
+            zn_sleep_ms(50);
         }
     }
     return ok;
@@ -1187,9 +1187,9 @@ static void test_fragmented_data(void)
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    frag_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    frag_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock && subscriber_state.lock && frag_state.lock);
     if (!publisher_state.lock || !subscriber_state.lock || !frag_state.lock) {
         goto cleanup;
@@ -1266,20 +1266,20 @@ cleanup:
         nb_rtps_participant_destroy(subscriber);
     }
     if (publisher_state.lock) {
-        ntk_mutex_destroy(publisher_state.lock);
+        zb_mutex_destroy(publisher_state.lock);
     }
     if (subscriber_state.lock) {
-        ntk_mutex_destroy(subscriber_state.lock);
+        zb_mutex_destroy(subscriber_state.lock);
     }
     if (frag_state.lock) {
-        ntk_mutex_destroy(frag_state.lock);
+        zb_mutex_destroy(frag_state.lock);
     }
 }
 
 /* Open a UDP socket on the loopback interface and report the port it got. */
-static int open_raw_socket(ntk_socket **out, uint16_t *port)
+static int open_raw_socket(zn_socket **out, uint16_t *port)
 {
-    ntk_socket *sock = ntk_socket_create();
+    zn_socket *sock = zn_socket_create();
     char host[64];
 
     *out = NULL;
@@ -1287,9 +1287,9 @@ static int open_raw_socket(ntk_socket **out, uint16_t *port)
     if (!sock) {
         return 0;
     }
-    if (ntk_socket_bind_udp(sock, "127.0.0.1", 0, 0) != NTK_OK ||
-        ntk_socket_get_local(sock, host, sizeof(host), port) != NTK_OK || *port == 0) {
-        ntk_socket_destroy(sock);
+    if (zn_socket_bind_udp(sock, "127.0.0.1", 0, 0) != ZN_OK ||
+        zn_socket_get_local(sock, host, sizeof(host), port) != ZN_OK || *port == 0) {
+        zn_socket_destroy(sock);
         return 0;
     }
     *out = sock;
@@ -1306,7 +1306,7 @@ static void test_frag_nack_repair(void)
     nb_rtps_participant_config_t config;
     nb_rtps_participant_t *subscriber;
     nb_rtps_participant_info_t info;
-    ntk_socket *raw = NULL;
+    zn_socket *raw = NULL;
     uint16_t raw_port = 0;
     uint32_t unicast_port;
     uint8_t payload[2500];
@@ -1367,7 +1367,7 @@ static void test_frag_nack_repair(void)
     fragment.payload_len = 1024;
     CHECK(nb_rtps_message_init(&writer, datagram, sizeof(datagram), &header) == NB_OK);
     CHECK(nb_rtps_data_frag(&writer, &fragment) == NB_OK);
-    CHECK(ntk_socket_sendto(
+    CHECK(zn_socket_sendto(
               raw, datagram, nb_cdr_writer_len(&writer), "127.0.0.1", (uint16_t)unicast_port) > 0);
 
     fragment.fragment_starting_num = 3;
@@ -1375,11 +1375,11 @@ static void test_frag_nack_repair(void)
     fragment.payload_len = sizeof(payload) - 2048u;
     CHECK(nb_rtps_message_init(&writer, datagram, sizeof(datagram), &header) == NB_OK);
     CHECK(nb_rtps_data_frag(&writer, &fragment) == NB_OK);
-    CHECK(ntk_socket_sendto(
+    CHECK(zn_socket_sendto(
               raw, datagram, nb_cdr_writer_len(&writer), "127.0.0.1", (uint16_t)unicast_port) > 0);
 
     for (waited = 0; waited < 2000 && !got_nack; waited += 20) {
-        ntk_ssize_t n = ntk_socket_recvfrom(
+        zn_ssize_t n = zn_socket_recvfrom(
             raw, received, sizeof(received), from_host, sizeof(from_host), &from_port);
 
         if (n > 0) {
@@ -1408,11 +1408,11 @@ static void test_frag_nack_repair(void)
                 }
             }
         }
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     CHECK(got_nack);
 
-    ntk_socket_destroy(raw);
+    zn_socket_destroy(raw);
     nb_rtps_participant_stop(subscriber);
     nb_rtps_participant_destroy(subscriber);
 }
@@ -1427,7 +1427,7 @@ static void test_frag_nack_repair_writer(void)
     nb_rtps_participant_t *publisher;
     nb_rtps_participant_info_t info;
     nb_rtps_endpoint_info_t publication;
-    ntk_socket *raw = NULL;
+    zn_socket *raw = NULL;
     uint16_t raw_port = 0;
     uint32_t unicast_port;
     uint8_t payload[2500];
@@ -1467,7 +1467,7 @@ static void test_frag_nack_repair_writer(void)
 
     CHECK(open_raw_socket(&raw, &raw_port));
     if (!raw || unicast_port == 0) {
-        ntk_socket_destroy(raw);
+        zn_socket_destroy(raw);
         nb_rtps_participant_stop(publisher);
         nb_rtps_participant_destroy(publisher);
         return;
@@ -1491,11 +1491,11 @@ static void test_frag_nack_repair_writer(void)
 
     CHECK(nb_rtps_message_init(&writer, datagram, sizeof(datagram), &header) == NB_OK);
     CHECK(nb_rtps_nack_frag(&writer, &nack) == NB_OK);
-    CHECK(ntk_socket_sendto(
+    CHECK(zn_socket_sendto(
               raw, datagram, nb_cdr_writer_len(&writer), "127.0.0.1", (uint16_t)unicast_port) > 0);
 
     for (waited = 0; waited < 2000 && !(got_frag2 && got_frag3 && got_heartbeat); waited += 20) {
-        ntk_ssize_t n = ntk_socket_recvfrom(
+        zn_ssize_t n = zn_socket_recvfrom(
             raw, received, sizeof(received), from_host, sizeof(from_host), &from_port);
 
         if (n > 0) {
@@ -1541,13 +1541,13 @@ static void test_frag_nack_repair_writer(void)
                 }
             }
         }
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     CHECK(got_frag2);
     CHECK(got_frag3);
     CHECK(got_heartbeat);
 
-    ntk_socket_destroy(raw);
+    zn_socket_destroy(raw);
     nb_rtps_participant_stop(publisher);
     nb_rtps_participant_destroy(publisher);
 }
@@ -1563,7 +1563,7 @@ static void test_lifespan_expiry(void)
     nb_rtps_participant_t *publisher;
     nb_rtps_participant_info_t info;
     nb_rtps_endpoint_info_t publication;
-    ntk_socket *raw = NULL;
+    zn_socket *raw = NULL;
     uint16_t raw_port = 0;
     uint32_t unicast_port;
     uint8_t payload[64];
@@ -1601,13 +1601,13 @@ static void test_lifespan_expiry(void)
 
     CHECK(open_raw_socket(&raw, &raw_port));
     if (!raw || unicast_port == 0) {
-        ntk_socket_destroy(raw);
+        zn_socket_destroy(raw);
         nb_rtps_participant_stop(publisher);
         nb_rtps_participant_destroy(publisher);
         return;
     }
     /* Let the sample age past its 100 ms lifespan. */
-    ntk_sleep_ms(250);
+    zn_sleep_ms(250);
 
     memset(&header, 0, sizeof(header));
     header.version_major = NB_RTPS_PROTOCOL_VERSION_MAJOR;
@@ -1628,11 +1628,11 @@ static void test_lifespan_expiry(void)
 
     CHECK(nb_rtps_message_init(&writer, datagram, sizeof(datagram), &header) == NB_OK);
     CHECK(nb_rtps_acknack(&writer, &acknack) == NB_OK);
-    CHECK(ntk_socket_sendto(
+    CHECK(zn_socket_sendto(
               raw, datagram, nb_cdr_writer_len(&writer), "127.0.0.1", (uint16_t)unicast_port) > 0);
 
     for (waited = 0; waited < 1000 && !got_gap; waited += 20) {
-        ntk_ssize_t n = ntk_socket_recvfrom(
+        zn_ssize_t n = zn_socket_recvfrom(
             raw, received, sizeof(received), from_host, sizeof(from_host), &from_port);
 
         if (n > 0) {
@@ -1661,18 +1661,18 @@ static void test_lifespan_expiry(void)
                 }
             }
         }
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     CHECK(got_gap);
     CHECK(!got_data);
 
-    ntk_socket_destroy(raw);
+    zn_socket_destroy(raw);
     nb_rtps_participant_stop(publisher);
     nb_rtps_participant_destroy(publisher);
 }
 
 typedef struct status_state {
-    ntk_mutex *lock;
+    zb_mutex *lock;
     int offered;
     int requested;
     int liveliness;
@@ -1700,7 +1700,7 @@ static void on_status(void *user, const nb_rtps_status_event_t *event)
     if (!state || !event) {
         return;
     }
-    ntk_mutex_lock(state->lock);
+    zb_mutex_lock(state->lock);
     if (event->kind == NB_RTPS_STATUS_OFFERED_DEADLINE_MISSED) {
         state->offered++;
     } else if (event->kind == NB_RTPS_STATUS_REQUESTED_DEADLINE_MISSED) {
@@ -1730,16 +1730,16 @@ static void on_status(void *user, const nb_rtps_status_event_t *event)
     }
     state->last_endpoint = event->endpoint;
     state->last_count = event->count;
-    ntk_mutex_unlock(state->lock);
+    zb_mutex_unlock(state->lock);
 }
 
 static int status_count(status_state_t *state, int offered)
 {
     int count;
 
-    ntk_mutex_lock(state->lock);
+    zb_mutex_lock(state->lock);
     count = offered ? state->offered : state->requested;
-    ntk_mutex_unlock(state->lock);
+    zb_mutex_unlock(state->lock);
     return count;
 }
 
@@ -1747,17 +1747,17 @@ static int liveliness_count(status_state_t *state)
 {
     int count;
 
-    ntk_mutex_lock(state->lock);
+    zb_mutex_lock(state->lock);
     count = state->liveliness;
-    ntk_mutex_unlock(state->lock);
+    zb_mutex_unlock(state->lock);
     return count;
 }
 
 static void status_snapshot(status_state_t *state, status_state_t *out)
 {
-    ntk_mutex_lock(state->lock);
+    zb_mutex_lock(state->lock);
     *out = *state;
-    ntk_mutex_unlock(state->lock);
+    zb_mutex_unlock(state->lock);
 }
 
 /*
@@ -1802,9 +1802,9 @@ static void test_liveliness_lease(void)
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    status.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    status.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock && subscriber_state.lock && status.lock);
     if (!publisher_state.lock || !subscriber_state.lock || !status.lock) {
         goto cleanup;
@@ -1834,7 +1834,7 @@ static void test_liveliness_lease(void)
 
     /* Three lease periods with the publisher running: the assertions keep the
      * writer alive, so no status event may arrive. */
-    ntk_sleep_ms(900);
+    zn_sleep_ms(900);
     CHECK(liveliness_count(&status) == 0);
 
     /* The publisher stops asserting. Its participant lease is longer than the
@@ -1842,16 +1842,16 @@ static void test_liveliness_lease(void)
      * participant is still known. */
     nb_rtps_participant_stop(publisher);
     for (waited = 0; waited < 2000 && liveliness_count(&status) == 0; waited += 20) {
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     CHECK(liveliness_count(&status) > 0);
-    ntk_mutex_lock(status.lock);
+    zb_mutex_lock(status.lock);
     CHECK(status.last_alive == 0);
     CHECK(status.not_alive_count == 1);
     CHECK(status.alive_count == 0);
     CHECK(nb_rtps_guid_equal(&status.last_endpoint, &subscription.endpoint_guid));
     CHECK(nb_rtps_guid_equal(&status.last_writer, &publication.endpoint_guid));
-    ntk_mutex_unlock(status.lock);
+    zb_mutex_unlock(status.lock);
 
 cleanup:
     nb_rtps_participant_stop(publisher);
@@ -1859,13 +1859,13 @@ cleanup:
     nb_rtps_participant_destroy(publisher);
     nb_rtps_participant_destroy(subscriber);
     if (publisher_state.lock) {
-        ntk_mutex_destroy(publisher_state.lock);
+        zb_mutex_destroy(publisher_state.lock);
     }
     if (subscriber_state.lock) {
-        ntk_mutex_destroy(subscriber_state.lock);
+        zb_mutex_destroy(subscriber_state.lock);
     }
     if (status.lock) {
-        ntk_mutex_destroy(status.lock);
+        zb_mutex_destroy(status.lock);
     }
 }
 
@@ -1914,9 +1914,9 @@ static void test_manual_liveliness(void)
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    status.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    status.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock && subscriber_state.lock && status.lock);
     if (!publisher_state.lock || !subscriber_state.lock || !status.lock) {
         goto cleanup;
@@ -1950,7 +1950,7 @@ static void test_manual_liveliness(void)
     for (i = 0; i < 8; i++) {
         CHECK(nb_rtps_participant_publish(
                   publisher, &publication.endpoint_guid, payload, sizeof(payload)) == NB_OK);
-        ntk_sleep_ms(100);
+        zn_sleep_ms(100);
     }
     CHECK(liveliness_count(&status) == 0);
 
@@ -1958,13 +1958,13 @@ static void test_manual_liveliness(void)
      * declared not-alive, which only the manual assertion rules can do (an
      * automatic lease would have been renewed by ParticipantMessageData). */
     for (waited = 0; waited < 3000 && liveliness_count(&status) == 0; waited += 20) {
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     CHECK(liveliness_count(&status) > 0);
-    ntk_mutex_lock(status.lock);
+    zb_mutex_lock(status.lock);
     CHECK(status.last_alive == 0);
     CHECK(status.not_alive_count == 1);
-    ntk_mutex_unlock(status.lock);
+    zb_mutex_unlock(status.lock);
 
     /* A single write asserts the writer again. */
     before = liveliness_count(&status);
@@ -1976,21 +1976,21 @@ static void test_manual_liveliness(void)
         /* liveliness_count() takes the lock itself, so read the flag the same
          * way instead of nesting a second acquisition (the mutex is not
          * recursive outside Windows). */
-        ntk_mutex_lock(status.lock);
+        zb_mutex_lock(status.lock);
         alive = status.last_alive;
-        ntk_mutex_unlock(status.lock);
+        zb_mutex_unlock(status.lock);
         if (liveliness_count(&status) > before && alive == 1) {
             break;
         }
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     CHECK(liveliness_count(&status) > before);
     {
         int alive;
 
-        ntk_mutex_lock(status.lock);
+        zb_mutex_lock(status.lock);
         alive = status.last_alive;
-        ntk_mutex_unlock(status.lock);
+        zb_mutex_unlock(status.lock);
         CHECK(alive == 1);
     }
 
@@ -2000,13 +2000,13 @@ cleanup:
     nb_rtps_participant_destroy(publisher);
     nb_rtps_participant_destroy(subscriber);
     if (publisher_state.lock) {
-        ntk_mutex_destroy(publisher_state.lock);
+        zb_mutex_destroy(publisher_state.lock);
     }
     if (subscriber_state.lock) {
-        ntk_mutex_destroy(subscriber_state.lock);
+        zb_mutex_destroy(subscriber_state.lock);
     }
     if (status.lock) {
-        ntk_mutex_destroy(status.lock);
+        zb_mutex_destroy(status.lock);
     }
 }
 
@@ -2059,10 +2059,10 @@ static void test_match_status(void)
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    pub_status.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    sub_status.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    pub_status.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    sub_status.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock && subscriber_state.lock &&
           pub_status.lock && sub_status.lock);
     if (!publisher_state.lock || !subscriber_state.lock ||
@@ -2094,7 +2094,7 @@ static void test_match_status(void)
         if (snap.pub_matched > 0) {
             break;
         }
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     status_snapshot(&pub_status, &snap);
     CHECK(snap.pub_matched > 0);
@@ -2122,7 +2122,7 @@ static void test_match_status(void)
         if (snap.incompatible > 0) {
             break;
         }
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     status_snapshot(&pub_status, &snap);
     CHECK(snap.incompatible > 0);
@@ -2146,7 +2146,7 @@ static void test_match_status(void)
         if (strcmp(snap.reason, "presentation scope") == 0) {
             break;
         }
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     status_snapshot(&pub_status, &snap);
     CHECK(strcmp(snap.reason, "presentation scope") == 0);
@@ -2161,7 +2161,7 @@ static void test_match_status(void)
         if (snap.pub_matched > 1) {
             break;
         }
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     status_snapshot(&pub_status, &snap);
     CHECK(snap.pub_matched > 1);
@@ -2173,16 +2173,16 @@ cleanup:
     nb_rtps_participant_destroy(publisher);
     nb_rtps_participant_destroy(subscriber);
     if (publisher_state.lock) {
-        ntk_mutex_destroy(publisher_state.lock);
+        zb_mutex_destroy(publisher_state.lock);
     }
     if (subscriber_state.lock) {
-        ntk_mutex_destroy(subscriber_state.lock);
+        zb_mutex_destroy(subscriber_state.lock);
     }
     if (pub_status.lock) {
-        ntk_mutex_destroy(pub_status.lock);
+        zb_mutex_destroy(pub_status.lock);
     }
     if (sub_status.lock) {
-        ntk_mutex_destroy(sub_status.lock);
+        zb_mutex_destroy(sub_status.lock);
     }
 }
 
@@ -2199,7 +2199,7 @@ static void test_offered_deadline_missed(void)
     int waited;
 
     memset(&status, 0, sizeof(status));
-    status.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    status.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(status.lock != NULL);
     fill_config(&config, "deadline-offered");
     participant = nb_rtps_participant_create(&config);
@@ -2209,7 +2209,7 @@ static void test_offered_deadline_missed(void)
             nb_rtps_participant_destroy(participant);
         }
         if (status.lock) {
-            ntk_mutex_destroy(status.lock);
+            zb_mutex_destroy(status.lock);
         }
         return;
     }
@@ -2221,7 +2221,7 @@ static void test_offered_deadline_missed(void)
     CHECK(nb_rtps_participant_start(participant) == NB_OK);
 
     for (waited = 0; waited < 1500 && status_count(&status, 1) == 0; waited += 20) {
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     CHECK(status_count(&status, 1) > 0);
     CHECK(status_count(&status, 0) == 0);
@@ -2230,7 +2230,7 @@ static void test_offered_deadline_missed(void)
 
     nb_rtps_participant_stop(participant);
     nb_rtps_participant_destroy(participant);
-    ntk_mutex_destroy(status.lock);
+    zb_mutex_destroy(status.lock);
 }
 
 /*
@@ -2274,9 +2274,9 @@ static void test_requested_deadline_missed(void)
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    status.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    status.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock && subscriber_state.lock && status.lock);
     if (!publisher_state.lock || !subscriber_state.lock || !status.lock) {
         goto cleanup;
@@ -2305,7 +2305,7 @@ static void test_requested_deadline_missed(void)
 
     /* The writer never writes; the reader must still notice. */
     for (waited = 0; waited < 2000 && status_count(&status, 0) == 0; waited += 20) {
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     CHECK(status_count(&status, 0) > 0);
     CHECK(nb_rtps_guid_equal(&status.last_endpoint, &subscription.endpoint_guid));
@@ -2316,18 +2316,18 @@ cleanup:
     nb_rtps_participant_destroy(publisher);
     nb_rtps_participant_destroy(subscriber);
     if (publisher_state.lock) {
-        ntk_mutex_destroy(publisher_state.lock);
+        zb_mutex_destroy(publisher_state.lock);
     }
     if (subscriber_state.lock) {
-        ntk_mutex_destroy(subscriber_state.lock);
+        zb_mutex_destroy(subscriber_state.lock);
     }
     if (status.lock) {
-        ntk_mutex_destroy(status.lock);
+        zb_mutex_destroy(status.lock);
     }
 }
 
 typedef struct count_state {
-    ntk_mutex *lock;
+    zb_mutex *lock;
     int count;
     size_t len;
 } count_state_t;
@@ -2344,19 +2344,19 @@ static void on_count_data(void *user,
     if (!state || !message) {
         return;
     }
-    ntk_mutex_lock(state->lock);
+    zb_mutex_lock(state->lock);
     state->count++;
     state->len = message->payload_len;
-    ntk_mutex_unlock(state->lock);
+    zb_mutex_unlock(state->lock);
 }
 
 static int count_delivered(count_state_t *state)
 {
     int count;
 
-    ntk_mutex_lock(state->lock);
+    zb_mutex_lock(state->lock);
     count = state->count;
-    ntk_mutex_unlock(state->lock);
+    zb_mutex_unlock(state->lock);
     return count;
 }
 
@@ -2408,9 +2408,9 @@ static void test_multi_locator_delivery(void)
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    count_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    count_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock && subscriber_state.lock && count_state.lock);
     if (!publisher_state.lock || !subscriber_state.lock || !count_state.lock) {
         goto cleanup;
@@ -2452,7 +2452,7 @@ static void test_multi_locator_delivery(void)
     CHECK(nb_rtps_participant_publish_dds_message(
               publisher, &publication.endpoint_guid, &message) == NB_OK);
     for (waited = 0; waited < 2000 && count_delivered(&count_state) == 0; waited += 20) {
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     CHECK(count_delivered(&count_state) == 1);
     CHECK(count_state.len == sizeof(payload));
@@ -2471,13 +2471,13 @@ cleanup:
         nb_rtps_participant_destroy(subscriber);
     }
     if (publisher_state.lock) {
-        ntk_mutex_destroy(publisher_state.lock);
+        zb_mutex_destroy(publisher_state.lock);
     }
     if (subscriber_state.lock) {
-        ntk_mutex_destroy(subscriber_state.lock);
+        zb_mutex_destroy(subscriber_state.lock);
     }
     if (count_state.lock) {
-        ntk_mutex_destroy(count_state.lock);
+        zb_mutex_destroy(count_state.lock);
     }
 }
 
@@ -2523,9 +2523,9 @@ static void test_generic_type_delivery(void)
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    frag_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    frag_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock && subscriber_state.lock && frag_state.lock);
     if (!publisher_state.lock || !subscriber_state.lock || !frag_state.lock) {
         goto cleanup;
@@ -2600,13 +2600,13 @@ cleanup:
         nb_rtps_participant_destroy(subscriber);
     }
     if (publisher_state.lock) {
-        ntk_mutex_destroy(publisher_state.lock);
+        zb_mutex_destroy(publisher_state.lock);
     }
     if (subscriber_state.lock) {
-        ntk_mutex_destroy(subscriber_state.lock);
+        zb_mutex_destroy(subscriber_state.lock);
     }
     if (frag_state.lock) {
-        ntk_mutex_destroy(frag_state.lock);
+        zb_mutex_destroy(frag_state.lock);
     }
 }
 
@@ -2665,11 +2665,11 @@ static void test_partition_matching(void)
               nb_rtps_participant_spdp_port(unmatched)) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(unmatched, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    matched_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    unmatched_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    matched_data.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    unmatched_data.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    matched_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    unmatched_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    matched_data.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    unmatched_data.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock && matched_state.lock && unmatched_state.lock);
     CHECK(matched_data.lock && unmatched_data.lock);
     if (!publisher_state.lock || !matched_state.lock || !unmatched_state.lock ||
@@ -2710,10 +2710,10 @@ static void test_partition_matching(void)
     for (i = 0; i < 60 && !frag_data_received(&matched_data); i++) {
         (void)nb_rtps_participant_publish(
             publisher, &publication.endpoint_guid, serialized, serialized_len);
-        ntk_sleep_ms(50);
+        zn_sleep_ms(50);
     }
     CHECK(frag_data_received(&matched_data));
-    ntk_sleep_ms(500);
+    zn_sleep_ms(500);
     CHECK(!frag_data_received(&unmatched_data));
     if (frag_data_received(&unmatched_data)) {
         nb_log_error("a subscription in partition \"other\" received a sample");
@@ -2739,19 +2739,19 @@ cleanup:
         nb_rtps_participant_destroy(unmatched);
     }
     if (publisher_state.lock) {
-        ntk_mutex_destroy(publisher_state.lock);
+        zb_mutex_destroy(publisher_state.lock);
     }
     if (matched_state.lock) {
-        ntk_mutex_destroy(matched_state.lock);
+        zb_mutex_destroy(matched_state.lock);
     }
     if (unmatched_state.lock) {
-        ntk_mutex_destroy(unmatched_state.lock);
+        zb_mutex_destroy(unmatched_state.lock);
     }
     if (matched_data.lock) {
-        ntk_mutex_destroy(matched_data.lock);
+        zb_mutex_destroy(matched_data.lock);
     }
     if (unmatched_data.lock) {
-        ntk_mutex_destroy(unmatched_data.lock);
+        zb_mutex_destroy(unmatched_data.lock);
     }
 }
 
@@ -2787,18 +2787,18 @@ static void test_multicast(void)
         nb_rtps_participant_destroy(a);
         return;
     }
-    state_a.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    state_b.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    state_a.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    state_b.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(state_a.lock != NULL);
     CHECK(state_b.lock != NULL);
     if (!state_a.lock || !state_b.lock) {
         nb_rtps_participant_destroy(a);
         nb_rtps_participant_destroy(b);
         if (state_a.lock) {
-            ntk_mutex_destroy(state_a.lock);
+            zb_mutex_destroy(state_a.lock);
         }
         if (state_b.lock) {
-            ntk_mutex_destroy(state_b.lock);
+            zb_mutex_destroy(state_b.lock);
         }
         return;
     }
@@ -2812,8 +2812,8 @@ static void test_multicast(void)
     nb_rtps_participant_stop(b);
     nb_rtps_participant_destroy(a);
     nb_rtps_participant_destroy(b);
-    ntk_mutex_destroy(state_a.lock);
-    ntk_mutex_destroy(state_b.lock);
+    zb_mutex_destroy(state_a.lock);
+    zb_mutex_destroy(state_b.lock);
 }
 
 /*
@@ -2865,9 +2865,9 @@ static void test_reliable_late_joiner(void)
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    data_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    data_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock != NULL);
     CHECK(subscriber_state.lock != NULL);
     CHECK(data_state.lock != NULL);
@@ -2875,13 +2875,13 @@ static void test_reliable_late_joiner(void)
         nb_rtps_participant_destroy(publisher);
         nb_rtps_participant_destroy(subscriber);
         if (publisher_state.lock) {
-            ntk_mutex_destroy(publisher_state.lock);
+            zb_mutex_destroy(publisher_state.lock);
         }
         if (subscriber_state.lock) {
-            ntk_mutex_destroy(subscriber_state.lock);
+            zb_mutex_destroy(subscriber_state.lock);
         }
         if (data_state.lock) {
-            ntk_mutex_destroy(data_state.lock);
+            zb_mutex_destroy(data_state.lock);
         }
         return;
     }
@@ -2950,12 +2950,12 @@ static void test_reliable_late_joiner(void)
                 publisher, &publication.endpoint_guid, &message) == NB_OK) {
             sent = 1;
         } else {
-            ntk_sleep_ms(20);
+            zn_sleep_ms(20);
         }
     }
     CHECK(sent);
     CHECK(wait_reliable_data(&data_state, 4, 5000));
-    ntk_sleep_ms(300); /* allow any duplicate retransmit to show up */
+    zn_sleep_ms(300); /* allow any duplicate retransmit to show up */
     CHECK(reliable_data_count(&data_state) == 4);
 
     CHECK(nb_rtps_participant_local_info(publisher, &publisher_info) == NB_OK);
@@ -2974,9 +2974,9 @@ static void test_reliable_late_joiner(void)
     nb_rtps_participant_stop(subscriber);
     nb_rtps_participant_destroy(publisher);
     nb_rtps_participant_destroy(subscriber);
-    ntk_mutex_destroy(publisher_state.lock);
-    ntk_mutex_destroy(subscriber_state.lock);
-    ntk_mutex_destroy(data_state.lock);
+    zb_mutex_destroy(publisher_state.lock);
+    zb_mutex_destroy(subscriber_state.lock);
+    zb_mutex_destroy(data_state.lock);
 }
 
 /*
@@ -3033,9 +3033,9 @@ static void run_late_joiner_case(const char *prefix,
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    data_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    data_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock && subscriber_state.lock && data_state.lock);
     if (!publisher_state.lock || !subscriber_state.lock || !data_state.lock) {
         goto cleanup;
@@ -3065,7 +3065,7 @@ static void run_late_joiner_case(const char *prefix,
         (void)nb_rtps_participant_publish_dds_message(
             publisher, &publication.endpoint_guid, &message);
     }
-    ntk_sleep_ms(100);
+    zn_sleep_ms(100);
 
     init_data_endpoint(&subscription, 0);
     subscription.durability = durability;
@@ -3078,14 +3078,14 @@ static void run_late_joiner_case(const char *prefix,
 
     if (expect_count > 0) {
         CHECK(wait_reliable_data(&data_state, expect_count, 5000));
-        ntk_sleep_ms(300);
+        zn_sleep_ms(300);
         CHECK(reliable_data_count(&data_state) == expect_count);
         for (i = 0; i < expect_count; i++) {
             CHECK(data_state.payload_lens[i] == 1);
             CHECK(data_state.payloads[i][0] == samples[i]);
         }
     } else {
-        ntk_sleep_ms(1200);
+        zn_sleep_ms(1200);
         CHECK(reliable_data_count(&data_state) == 0);
     }
 
@@ -3103,13 +3103,13 @@ cleanup:
         nb_rtps_participant_destroy(subscriber);
     }
     if (publisher_state.lock) {
-        ntk_mutex_destroy(publisher_state.lock);
+        zb_mutex_destroy(publisher_state.lock);
     }
     if (subscriber_state.lock) {
-        ntk_mutex_destroy(subscriber_state.lock);
+        zb_mutex_destroy(subscriber_state.lock);
     }
     if (data_state.lock) {
-        ntk_mutex_destroy(data_state.lock);
+        zb_mutex_destroy(data_state.lock);
     }
 }
 
@@ -3171,9 +3171,9 @@ static void test_reliable_gap(void)
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    data_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    data_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock != NULL);
     CHECK(subscriber_state.lock != NULL);
     CHECK(data_state.lock != NULL);
@@ -3181,13 +3181,13 @@ static void test_reliable_gap(void)
         nb_rtps_participant_destroy(publisher);
         nb_rtps_participant_destroy(subscriber);
         if (publisher_state.lock) {
-            ntk_mutex_destroy(publisher_state.lock);
+            zb_mutex_destroy(publisher_state.lock);
         }
         if (subscriber_state.lock) {
-            ntk_mutex_destroy(subscriber_state.lock);
+            zb_mutex_destroy(subscriber_state.lock);
         }
         if (data_state.lock) {
-            ntk_mutex_destroy(data_state.lock);
+            zb_mutex_destroy(data_state.lock);
         }
         return;
     }
@@ -3255,7 +3255,7 @@ static void test_reliable_gap(void)
                             1,
                             0x80000000u,
                             data_port) == NB_OK);
-    ntk_sleep_ms(200);
+    zn_sleep_ms(200);
 
     /* The next two samples reuse the gapped sequence numbers and must be
      * dropped; the sample after that is delivered normally. */
@@ -3264,10 +3264,10 @@ static void test_reliable_gap(void)
         message.payload_len = 1;
         CHECK(nb_rtps_participant_publish_dds_message(
                   publisher, &publication.endpoint_guid, &message) == NB_OK);
-        ntk_sleep_ms(50);
+        zn_sleep_ms(50);
     }
     CHECK(wait_reliable_data(&data_state, 2, 5000));
-    ntk_sleep_ms(400);
+    zn_sleep_ms(400);
     CHECK(reliable_data_count(&data_state) == 2);
     CHECK(data_state.payloads[0][0] == expected[0]);
     CHECK(data_state.payloads[1][0] == expected[3]);
@@ -3278,9 +3278,9 @@ static void test_reliable_gap(void)
     nb_rtps_participant_stop(subscriber);
     nb_rtps_participant_destroy(publisher);
     nb_rtps_participant_destroy(subscriber);
-    ntk_mutex_destroy(publisher_state.lock);
-    ntk_mutex_destroy(subscriber_state.lock);
-    ntk_mutex_destroy(data_state.lock);
+    zb_mutex_destroy(publisher_state.lock);
+    zb_mutex_destroy(subscriber_state.lock);
+    zb_mutex_destroy(data_state.lock);
 }
 
 /*
@@ -3332,9 +3332,9 @@ static void test_reliable_reader_capacity(void)
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    data_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    data_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock != NULL);
     CHECK(subscriber_state.lock != NULL);
     CHECK(data_state.lock != NULL);
@@ -3342,13 +3342,13 @@ static void test_reliable_reader_capacity(void)
         nb_rtps_participant_destroy(publisher);
         nb_rtps_participant_destroy(subscriber);
         if (publisher_state.lock) {
-            ntk_mutex_destroy(publisher_state.lock);
+            zb_mutex_destroy(publisher_state.lock);
         }
         if (subscriber_state.lock) {
-            ntk_mutex_destroy(subscriber_state.lock);
+            zb_mutex_destroy(subscriber_state.lock);
         }
         if (data_state.lock) {
-            ntk_mutex_destroy(data_state.lock);
+            zb_mutex_destroy(data_state.lock);
         }
         return;
     }
@@ -3384,10 +3384,10 @@ static void test_reliable_reader_capacity(void)
             CHECK(nb_rtps_participant_publish_dds_message(
                       publisher, &publications[i].endpoint_guid, &message) == NB_OK);
         }
-        ntk_sleep_ms(50);
+        zn_sleep_ms(50);
     }
     CHECK(wait_reliable_data(&data_state, 6, 5000));
-    ntk_sleep_ms(300);
+    zn_sleep_ms(300);
     /* A pair without a window must not turn into a retransmission storm. */
     CHECK(reliable_data_count(&data_state) <= 64);
 
@@ -3395,9 +3395,9 @@ static void test_reliable_reader_capacity(void)
     nb_rtps_participant_stop(subscriber);
     nb_rtps_participant_destroy(publisher);
     nb_rtps_participant_destroy(subscriber);
-    ntk_mutex_destroy(publisher_state.lock);
-    ntk_mutex_destroy(subscriber_state.lock);
-    ntk_mutex_destroy(data_state.lock);
+    zb_mutex_destroy(publisher_state.lock);
+    zb_mutex_destroy(subscriber_state.lock);
+    zb_mutex_destroy(data_state.lock);
 }
 
 /*
@@ -3453,10 +3453,10 @@ static void test_exclusive_ownership(void)
     CHECK(nb_rtps_participant_add_peer(reader, "127.0.0.1", strong_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(reader, "127.0.0.1", weak_port) == NB_OK);
 
-    strong_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    weak_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    reader_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    data_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    strong_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    weak_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    reader_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    data_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(strong_state.lock && weak_state.lock && reader_state.lock && data_state.lock);
     if (!strong_state.lock || !weak_state.lock || !reader_state.lock || !data_state.lock) {
         goto cleanup;
@@ -3501,11 +3501,11 @@ static void test_exclusive_ownership(void)
         message.payload = &weak_byte;
         (void)nb_rtps_participant_publish_dds_message(
             weak, &weak_publication.endpoint_guid, &message);
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     CHECK(wait_reliable_data(&data_state, 1, 3000));
-    ntk_sleep_ms(200);
-    ntk_mutex_lock(data_state.lock);
+    zn_sleep_ms(200);
+    zb_mutex_lock(data_state.lock);
     for (i = 0; i < (size_t)data_state.count &&
                 i < sizeof(data_state.writer_guids) / sizeof(data_state.writer_guids[0]);
          i++) {
@@ -3514,7 +3514,7 @@ static void test_exclusive_ownership(void)
             all_strong = 0;
         }
     }
-    ntk_mutex_unlock(data_state.lock);
+    zb_mutex_unlock(data_state.lock);
     CHECK(all_strong);
 
     /* Withdraw the owner: ownership must move to the only remaining writer. */
@@ -3529,13 +3529,13 @@ static void test_exclusive_ownership(void)
         if (reliable_data_count(&data_state) > count_before) {
             break;
         }
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     CHECK(reliable_data_count(&data_state) > count_before);
-    ntk_mutex_lock(data_state.lock);
+    zb_mutex_lock(data_state.lock);
     CHECK(nb_rtps_guid_equal(&data_state.writer_guids[data_state.count - 1],
                              &weak_publication.endpoint_guid));
-    ntk_mutex_unlock(data_state.lock);
+    zb_mutex_unlock(data_state.lock);
 
 cleanup:
     if (strong) {
@@ -3551,16 +3551,16 @@ cleanup:
         nb_rtps_participant_destroy(reader);
     }
     if (strong_state.lock) {
-        ntk_mutex_destroy(strong_state.lock);
+        zb_mutex_destroy(strong_state.lock);
     }
     if (weak_state.lock) {
-        ntk_mutex_destroy(weak_state.lock);
+        zb_mutex_destroy(weak_state.lock);
     }
     if (reader_state.lock) {
-        ntk_mutex_destroy(reader_state.lock);
+        zb_mutex_destroy(reader_state.lock);
     }
     if (data_state.lock) {
-        ntk_mutex_destroy(data_state.lock);
+        zb_mutex_destroy(data_state.lock);
     }
 }
 
@@ -3611,9 +3611,9 @@ static void test_destination_order_by_source(void)
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    data_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    data_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock && subscriber_state.lock && data_state.lock);
     if (!publisher_state.lock || !subscriber_state.lock || !data_state.lock) {
         goto cleanup;
@@ -3655,14 +3655,14 @@ static void test_destination_order_by_source(void)
                                              serialized,
                                              serialized_len,
                                              &ts) == NB_OK);
-        ntk_sleep_ms(30);
+        zn_sleep_ms(30);
     }
 
     /* Four samples reach the unordered reader, two the ordered one. */
     CHECK(wait_reliable_data(&data_state, 6, 5000));
-    ntk_sleep_ms(200);
+    zn_sleep_ms(200);
 
-    ntk_mutex_lock(data_state.lock);
+    zb_mutex_lock(data_state.lock);
     for (i = 0; i < data_state.count &&
                 i < (int)(sizeof(data_state.payloads) / sizeof(data_state.payloads[0]));
          i++) {
@@ -3679,7 +3679,7 @@ static void test_destination_order_by_source(void)
             unordered_count++;
         }
     }
-    ntk_mutex_unlock(data_state.lock);
+    zb_mutex_unlock(data_state.lock);
 
     CHECK(ordered_count == 2);
     CHECK(unordered_count == 4);
@@ -3698,13 +3698,13 @@ cleanup:
         nb_rtps_participant_destroy(subscriber);
     }
     if (publisher_state.lock) {
-        ntk_mutex_destroy(publisher_state.lock);
+        zb_mutex_destroy(publisher_state.lock);
     }
     if (subscriber_state.lock) {
-        ntk_mutex_destroy(subscriber_state.lock);
+        zb_mutex_destroy(subscriber_state.lock);
     }
     if (data_state.lock) {
-        ntk_mutex_destroy(data_state.lock);
+        zb_mutex_destroy(data_state.lock);
     }
 }
 
@@ -3761,9 +3761,9 @@ static void test_time_based_filter(void)
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    data_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    data_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock && subscriber_state.lock && data_state.lock);
     if (!publisher_state.lock || !subscriber_state.lock || !data_state.lock) {
         goto cleanup;
@@ -3804,14 +3804,14 @@ static void test_time_based_filter(void)
                                              serialized,
                                              serialized_len,
                                              &ts) == NB_OK);
-        ntk_sleep_ms(30);
+        zn_sleep_ms(30);
     }
 
     /* Four samples reach the plain reader, three the filtered one. */
     CHECK(wait_reliable_data(&data_state, 7, 5000));
-    ntk_sleep_ms(200);
+    zn_sleep_ms(200);
 
-    ntk_mutex_lock(data_state.lock);
+    zb_mutex_lock(data_state.lock);
     for (i = 0; i < data_state.count &&
                 i < (int)(sizeof(data_state.payloads) / sizeof(data_state.payloads[0]));
          i++) {
@@ -3837,7 +3837,7 @@ static void test_time_based_filter(void)
             }
         }
     }
-    ntk_mutex_unlock(data_state.lock);
+    zb_mutex_unlock(data_state.lock);
 
     CHECK(plain_count == 4);
     CHECK(plain_saw_2);
@@ -3863,13 +3863,13 @@ cleanup:
         nb_rtps_participant_destroy(subscriber);
     }
     if (publisher_state.lock) {
-        ntk_mutex_destroy(publisher_state.lock);
+        zb_mutex_destroy(publisher_state.lock);
     }
     if (subscriber_state.lock) {
-        ntk_mutex_destroy(subscriber_state.lock);
+        zb_mutex_destroy(subscriber_state.lock);
     }
     if (data_state.lock) {
-        ntk_mutex_destroy(data_state.lock);
+        zb_mutex_destroy(data_state.lock);
     }
 }
 
@@ -3913,9 +3913,9 @@ static void test_dispose_is_consumed(void)
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    data_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    data_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock && subscriber_state.lock && data_state.lock);
     if (!publisher_state.lock || !subscriber_state.lock || !data_state.lock) {
         goto cleanup;
@@ -3962,21 +3962,21 @@ static void test_dispose_is_consumed(void)
                                               &subscription.endpoint_guid,
                                               2);
          waited += 20) {
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     CHECK(nb_rtps_participant_reader_consumed(subscriber,
                                               &publication.endpoint_guid,
                                               &subscription.endpoint_guid,
                                               2));
     CHECK(reliable_data_count(&data_state) == 2);
-    ntk_mutex_lock(data_state.lock);
+    zb_mutex_lock(data_state.lock);
     CHECK(data_state.states[0] == NB_SAMPLE_STATE_VALID);
     CHECK(data_state.payload_lens[0] == 1);
     CHECK(data_state.states[1] == NB_SAMPLE_STATE_DISPOSED);
     CHECK(data_state.payload_lens[1] == 0);
     CHECK(data_state.has_handle[1] == 1);
     CHECK(memcmp(data_state.handles[1], g_dispose_handle, sizeof(g_dispose_handle)) == 0);
-    ntk_mutex_unlock(data_state.lock);
+    zb_mutex_unlock(data_state.lock);
 
 cleanup:
     if (publisher) {
@@ -3988,13 +3988,13 @@ cleanup:
         nb_rtps_participant_destroy(subscriber);
     }
     if (publisher_state.lock) {
-        ntk_mutex_destroy(publisher_state.lock);
+        zb_mutex_destroy(publisher_state.lock);
     }
     if (subscriber_state.lock) {
-        ntk_mutex_destroy(subscriber_state.lock);
+        zb_mutex_destroy(subscriber_state.lock);
     }
     if (data_state.lock) {
-        ntk_mutex_destroy(data_state.lock);
+        zb_mutex_destroy(data_state.lock);
     }
 }
 
@@ -4035,9 +4035,9 @@ static void test_instance_states(void)
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    data_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    data_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock && subscriber_state.lock && data_state.lock);
     if (!publisher_state.lock || !subscriber_state.lock || !data_state.lock) {
         goto cleanup;
@@ -4085,7 +4085,7 @@ static void test_instance_states(void)
                                  data_port) == NB_OK);
     CHECK(wait_reliable_data(&data_state, 3, 5000));
 
-    ntk_mutex_lock(data_state.lock);
+    zb_mutex_lock(data_state.lock);
     CHECK(data_state.count == 3);
     /* First sample of the instance: alive, new view, rank 0. */
     CHECK(data_state.states[0] == NB_SAMPLE_STATE_VALID);
@@ -4104,7 +4104,7 @@ static void test_instance_states(void)
     CHECK(data_state.instance_states[2] == NB_INSTANCE_STATE_ALIVE);
     CHECK(data_state.view_states[2] == NB_VIEW_STATE_NEW);
     CHECK(data_state.generation_ranks[2] == 1);
-    ntk_mutex_unlock(data_state.lock);
+    zb_mutex_unlock(data_state.lock);
 
 cleanup:
     if (publisher) {
@@ -4116,13 +4116,13 @@ cleanup:
         nb_rtps_participant_destroy(subscriber);
     }
     if (publisher_state.lock) {
-        ntk_mutex_destroy(publisher_state.lock);
+        zb_mutex_destroy(publisher_state.lock);
     }
     if (subscriber_state.lock) {
-        ntk_mutex_destroy(subscriber_state.lock);
+        zb_mutex_destroy(subscriber_state.lock);
     }
     if (data_state.lock) {
-        ntk_mutex_destroy(data_state.lock);
+        zb_mutex_destroy(data_state.lock);
     }
 }
 
@@ -4171,9 +4171,9 @@ static void test_keyed_writer_lifecycle(void)
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    data_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    data_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock && subscriber_state.lock && data_state.lock);
     if (!publisher_state.lock || !subscriber_state.lock || !data_state.lock) {
         goto cleanup;
@@ -4228,7 +4228,7 @@ static void test_keyed_writer_lifecycle(void)
                                                sizeof(live)) == NB_OK);
     CHECK(wait_reliable_data(&data_state, 5, 5000));
 
-    ntk_mutex_lock(data_state.lock);
+    zb_mutex_lock(data_state.lock);
     CHECK(data_state.count == 5);
     CHECK(data_state.states[0] == NB_SAMPLE_STATE_VALID);
     CHECK(data_state.instance_states[0] == NB_INSTANCE_STATE_ALIVE);
@@ -4247,18 +4247,18 @@ static void test_keyed_writer_lifecycle(void)
     CHECK(data_state.instance_states[3] == NB_INSTANCE_STATE_NOT_ALIVE_NO_WRITERS);
     CHECK(data_state.states[4] == NB_SAMPLE_STATE_VALID);
     CHECK(data_state.instance_states[4] == NB_INSTANCE_STATE_ALIVE);
-    ntk_mutex_unlock(data_state.lock);
+    zb_mutex_unlock(data_state.lock);
 
     /* Deleting the writer disposes the instance that is still alive. */
     CHECK(nb_rtps_participant_remove_endpoint(publisher, &publication.endpoint_guid) ==
           NB_OK);
     CHECK(wait_reliable_data(&data_state, 6, 5000));
-    ntk_mutex_lock(data_state.lock);
+    zb_mutex_lock(data_state.lock);
     CHECK(data_state.count == 6);
     CHECK(data_state.states[5] == NB_SAMPLE_STATE_DISPOSED);
     CHECK(data_state.instance_states[5] == NB_INSTANCE_STATE_NOT_ALIVE_DISPOSED);
     CHECK(memcmp(data_state.handles[5], handle_c, NB_INSTANCE_HANDLE_SIZE) == 0);
-    ntk_mutex_unlock(data_state.lock);
+    zb_mutex_unlock(data_state.lock);
 
 cleanup:
     if (publisher) {
@@ -4270,13 +4270,13 @@ cleanup:
         nb_rtps_participant_destroy(subscriber);
     }
     if (publisher_state.lock) {
-        ntk_mutex_destroy(publisher_state.lock);
+        zb_mutex_destroy(publisher_state.lock);
     }
     if (subscriber_state.lock) {
-        ntk_mutex_destroy(subscriber_state.lock);
+        zb_mutex_destroy(subscriber_state.lock);
     }
     if (data_state.lock) {
-        ntk_mutex_destroy(data_state.lock);
+        zb_mutex_destroy(data_state.lock);
     }
 }
 
@@ -4339,9 +4339,9 @@ static void test_tcp_transport(void)
     CHECK(nb_rtps_participant_add_peer(publisher, "127.0.0.1", subscriber_port) == NB_OK);
     CHECK(nb_rtps_participant_add_peer(subscriber, "127.0.0.1", publisher_port) == NB_OK);
 
-    publisher_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    subscriber_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    data_state.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    publisher_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    subscriber_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    data_state.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(publisher_state.lock && subscriber_state.lock && data_state.lock);
     if (!publisher_state.lock || !subscriber_state.lock || !data_state.lock) {
         nb_rtps_participant_destroy(publisher);
@@ -4365,7 +4365,7 @@ static void test_tcp_transport(void)
             nb_rtps_participant_tcp_links(subscriber) > 0) {
             break;
         }
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
     CHECK(nb_rtps_participant_tcp_links(publisher) == 1);
     CHECK(nb_rtps_participant_tcp_links(subscriber) == 1);
@@ -4380,7 +4380,7 @@ static void test_tcp_transport(void)
     CHECK(wait_endpoint_count(&publisher_state, 0, 1, 5000));
     /* Let SEDP settle on the stream so the publisher's remote has a TCP key
      * before the sample is written. */
-    ntk_sleep_ms(200);
+    zn_sleep_ms(200);
     nb_rtps_participant_tcp_stats(publisher, &before);
 
     message.payload = expected;
@@ -4391,7 +4391,7 @@ static void test_tcp_transport(void)
             received = data_received(&data_state);
         }
         if (!received) {
-            ntk_sleep_ms(50);
+            zn_sleep_ms(50);
         }
     }
     CHECK(received);
@@ -4410,9 +4410,9 @@ static void test_tcp_transport(void)
     nb_rtps_participant_stop(subscriber);
     nb_rtps_participant_destroy(publisher);
     nb_rtps_participant_destroy(subscriber);
-    ntk_mutex_destroy(publisher_state.lock);
-    ntk_mutex_destroy(subscriber_state.lock);
-    ntk_mutex_destroy(data_state.lock);
+    zb_mutex_destroy(publisher_state.lock);
+    zb_mutex_destroy(subscriber_state.lock);
+    zb_mutex_destroy(data_state.lock);
 }
 
 static void test_standard_ports(void)

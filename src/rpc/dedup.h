@@ -16,7 +16,7 @@
 
 #include <nb/rpc/types.h>
 
-#include <ntk.h>
+#include <zn/zn.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -53,7 +53,7 @@ typedef struct nb_dedup_slot {
 } nb_dedup_slot_t;
 
 typedef struct nb_dedup_shard {
-    ntk_mutex *lock;
+    zb_mutex *lock;
     size_t bytes;
     nb_dedup_slot_t slots[NB_DEDUP_SLOTS_PER_SHARD];
 } nb_dedup_shard_t;

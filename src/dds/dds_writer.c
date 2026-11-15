@@ -41,9 +41,9 @@ int nb_dds_writer_create(nb_dds_topic_t *topic,
         free(writer);
         return rc;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     topic->writer_count++;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     *out = writer;
     return NB_OK;
 }
@@ -57,11 +57,11 @@ void nb_dds_writer_destroy(nb_dds_writer_t *writer)
     }
     participant = writer->topic->participant;
     participant->ops->writer_destroy(participant->backend, writer->backend);
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     if (writer->topic->writer_count > 0) {
         writer->topic->writer_count--;
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     free(writer);
 }
 

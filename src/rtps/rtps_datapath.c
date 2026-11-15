@@ -70,7 +70,7 @@ static int send_user_fragment(nb_rtps_participant_t *participant,
         chunk = NB_RTPS_FRAGMENT_SIZE;
     }
     init_header(participant, &header);
-    timestamp = rtps_time_from_ns(source_ns ? source_ns : ntk_wall_ms() * 1000000ull);
+    timestamp = rtps_time_from_ns(source_ns ? source_ns : zn_wall_ms() * 1000000ull);
     memset(&fragment, 0, sizeof(fragment));
     fragment.reader_id = reader_guid->entity;
     fragment.writer_id = writer_guid->entity;
@@ -134,7 +134,7 @@ static int send_user_heartbeat_frag(nb_rtps_participant_t *participant,
     size_t message_len;
 
     init_header(participant, &header);
-    now = ntk_wall_ms();
+    now = zn_wall_ms();
     timestamp.seconds = (int32_t)(now / 1000u);
     timestamp.fraction = (uint32_t)(((now % 1000u) << 32) / 1000u);
     memset(&heartbeat, 0, sizeof(heartbeat));
@@ -274,7 +274,7 @@ static int send_user_data(nb_rtps_participant_t *participant,
                                          port);
     }
     init_header(participant, &header);
-    timestamp = rtps_time_from_ns(source_ns ? source_ns : ntk_wall_ms() * 1000000ull);
+    timestamp = rtps_time_from_ns(source_ns ? source_ns : zn_wall_ms() * 1000000ull);
     memset(&data, 0, sizeof(data));
     data.reader_id = reader_guid->entity;
     data.writer_id = writer_guid->entity;
@@ -329,7 +329,7 @@ static int send_user_gap(nb_rtps_participant_t *participant,
         return NB_ERR_INVALID;
     }
     init_header(participant, &header);
-    now = ntk_wall_ms();
+    now = zn_wall_ms();
     timestamp.seconds = (int32_t)(now / 1000u);
     timestamp.fraction = (uint32_t)(((now % 1000u) << 32) / 1000u);
     memset(&gap, 0, sizeof(gap));
@@ -377,7 +377,7 @@ static int send_user_acknack(nb_rtps_participant_t *participant,
         return NB_ERR_INVALID;
     }
     init_header(participant, &header);
-    now = ntk_wall_ms();
+    now = zn_wall_ms();
     timestamp.seconds = (int32_t)(now / 1000u);
     timestamp.fraction = (uint32_t)(((now % 1000u) << 32) / 1000u);
     message_len = nb_rtps_wire_acknack(message,
@@ -412,7 +412,7 @@ int send_user_heartbeat(nb_rtps_participant_t *participant,
     size_t message_len;
 
     init_header(participant, &header);
-    now = ntk_wall_ms();
+    now = zn_wall_ms();
     timestamp.seconds = (int32_t)(now / 1000u);
     timestamp.fraction = (uint32_t)(((now % 1000u) << 32) / 1000u);
     memset(&heartbeat, 0, sizeof(heartbeat));
@@ -458,7 +458,7 @@ void send_user_liveliness_heartbeat(nb_rtps_participant_t *participant,
     size_t message_len;
 
     init_header(participant, &header);
-    now = ntk_wall_ms();
+    now = zn_wall_ms();
     timestamp.seconds = (int32_t)(now / 1000u);
     timestamp.fraction = (uint32_t)(((now % 1000u) << 32) / 1000u);
     memset(&heartbeat, 0, sizeof(heartbeat));
@@ -594,7 +594,7 @@ void send_data_heartbeats(nb_rtps_participant_t *participant)
     size_t i;
     size_t j;
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (i = 0; i < participant->max_local_endpoints; i++) {
         nb_rtps_local_endpoint_t *local = &participant->local_endpoints[i];
         uint64_t first_sn = 0;
@@ -626,7 +626,7 @@ void send_data_heartbeats(nb_rtps_participant_t *participant)
                 participant, local, &remote->info, first_sn, last_sn, &targets);
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 /*
  * Ownership: an EXCLUSIVE subscription takes data from one writer only. Among
@@ -785,10 +785,10 @@ static void emit_queued_status(nb_rtps_participant_t *participant,
     nb_rtps_status_callback_t callback;
     void *user;
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     callback = participant->status_callback;
     user = participant->status_user;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     if (!callback) {
         return;
     }
@@ -845,7 +845,7 @@ static void handle_user_data(nb_rtps_participant_t *participant,
         int has_key_hash = 0;
 
         memset(&sample, 0, sizeof(sample));
-        sample.reception_timestamp_ns = (int64_t)(ntk_wall_ms() * 1000000ull);
+        sample.reception_timestamp_ns = (int64_t)(zn_wall_ms() * 1000000ull);
         (void)nb_rtps_inline_qos_status(data->inline_qos,
                                        data->inline_qos_len,
                                        &disposed,
@@ -879,7 +879,7 @@ static void handle_user_data(nb_rtps_participant_t *participant,
         }
     }
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     callback = participant->data_callback;
     user = participant->data_user;
     remote = find_remote_endpoint(participant, &writer_guid);
@@ -922,7 +922,7 @@ static void handle_user_data(nb_rtps_participant_t *participant,
                 continue;
             }
             if (reader_state) {
-                uint64_t sample_now = ntk_wall_ms();
+                uint64_t sample_now = zn_wall_ms();
 
                 reader_state->last_sample_ms = sample_now;
                 /* A write asserts the writer's liveliness (DDS 2.2.2.4.2.10),
@@ -1059,7 +1059,7 @@ static void handle_user_data(nb_rtps_participant_t *participant,
             reader_count++;
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     for (i = 0; i < queued_count; i++) {
         emit_queued_status(participant, &queued[i]);
@@ -1141,7 +1141,7 @@ void handle_user_gap(nb_rtps_participant_t *participant,
     writer_guid.prefix = *source_prefix;
     writer_guid.entity = gap->writer_id;
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     remote = find_remote_endpoint(participant, &writer_guid);
     if (remote) {
         for (i = 0; i < participant->max_local_endpoints; i++) {
@@ -1179,7 +1179,7 @@ void handle_user_gap(nb_rtps_participant_t *participant,
             }
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     for (i = 0; i < queued_count; i++) {
         emit_queued_status(participant, &queued[i]);
     }
@@ -1236,7 +1236,7 @@ void handle_user_heartbeat(nb_rtps_participant_t *participant,
     }
     copy_str(target_host, sizeof(target_host), source_host);
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     remote = find_remote_endpoint(participant, &writer_guid);
     if (remote) {
         if (endpoint_data_target(participant, remote, target_host,
@@ -1289,7 +1289,7 @@ void handle_user_heartbeat(nb_rtps_participant_t *participant,
             /* A heartbeat with the L flag asserts the writer's liveliness, the
              * manual-by-topic equivalent of a ParticipantMessageData sample. */
             if (heartbeat->liveliness) {
-                state->last_liveliness_ms = ntk_wall_ms();
+                state->last_liveliness_ms = zn_wall_ms();
             }
             if (first_sn > state->state.next_expected) {
                 nb_rtps_reader_state_reset(&state->state, first_sn);
@@ -1302,7 +1302,7 @@ void handle_user_heartbeat(nb_rtps_participant_t *participant,
             }
             state->heartbeat_seen = 1;
             state->last_heartbeat_count = heartbeat->count;
-            now = ntk_wall_ms();
+            now = zn_wall_ms();
             if (state->last_acknack_ms != 0 && now >= state->last_acknack_ms &&
                 now - state->last_acknack_ms < NB_RTPS_MIN_ACKNACK_INTERVAL_MS) {
                 continue;
@@ -1331,7 +1331,7 @@ void handle_user_heartbeat(nb_rtps_participant_t *participant,
             }
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 /*
  * LIFESPAN: a sample older than the writer's lifespan must not be delivered
@@ -1398,9 +1398,9 @@ void handle_user_acknack(nb_rtps_participant_t *participant,
                                 &nb_rtps_eid_participant_message_writer)) {
         uint64_t last;
 
-        ntk_mutex_lock(participant->lock);
+        zb_mutex_lock(participant->lock);
         last = participant->pmd_sn;
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         if (last < ack_base) {
             last = ack_base;
         }
@@ -1413,11 +1413,11 @@ void handle_user_acknack(nb_rtps_participant_t *participant,
                             source_port);
         return;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     local = find_local_endpoint(participant, &writer_guid);
     remote = find_remote_endpoint(participant, &reader_guid);
     if (!local || local->kind != NB_RTPS_ENDPOINT_PUBLICATION || !local->history) {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return;
     }
     if (remote &&
@@ -1429,12 +1429,12 @@ void handle_user_acknack(nb_rtps_participant_t *participant,
     /* Bound the work a single peer can trigger. A reader that repeats an
      * ACKNACK, or one that floods them, gets at most one resend burst per
      * interval; the periodic HEARTBEAT brings the remaining samples back. */
-    now = ntk_wall_ms();
+    now = zn_wall_ms();
     if (local->resend_seen &&
         nb_rtps_guid_equal(&local->last_resend_reader, &reader_guid) &&
         now >= local->last_resend_ms &&
         now - local->last_resend_ms < NB_RTPS_MIN_RESEND_INTERVAL_MS) {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return;
     }
     local->resend_seen = 1;
@@ -1504,7 +1504,7 @@ void handle_user_acknack(nb_rtps_participant_t *participant,
                             target_host,
                             target_port);
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 /*
  * Writer side of fragment repair: a reader that lost a DATA_FRAG names the
@@ -1550,10 +1550,10 @@ void handle_user_nack_frag(nb_rtps_participant_t *participant,
     reader_guid.entity = nack->reader_id;
     copy_str(target_host, sizeof(target_host), source_host);
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     local = find_local_endpoint(participant, &writer_guid);
     if (!local || local->kind != NB_RTPS_ENDPOINT_PUBLICATION || !local->history) {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return;
     }
     remote = find_remote_endpoint(participant, &reader_guid);
@@ -1565,11 +1565,11 @@ void handle_user_nack_frag(nb_rtps_participant_t *participant,
     }
     /* Same budget as ACKNACK: one repair per peer per interval, so a reader
      * that repeats NACK_FRAG cannot turn a repair into a storm. */
-    now = ntk_wall_ms();
+    now = zn_wall_ms();
     if (local->resend_seen && nb_rtps_guid_equal(&local->last_resend_reader, &reader_guid) &&
         now >= local->last_resend_ms &&
         now - local->last_resend_ms < NB_RTPS_MIN_RESEND_INTERVAL_MS) {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return;
     }
     local->resend_seen = 1;
@@ -1585,7 +1585,7 @@ void handle_user_nack_frag(nb_rtps_participant_t *participant,
                                       &has_handle,
                                       &status) != NB_OK ||
         !payload || payload_len == 0) {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return;
     }
     (void)nb_rtps_reliable_source_ns(
@@ -1598,7 +1598,7 @@ void handle_user_nack_frag(nb_rtps_participant_t *participant,
                             writer_sn,
                             target_host,
                             target_port);
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return;
     }
     fragment_count = nb_rtps_fragment_count(payload_len);
@@ -1637,7 +1637,7 @@ void handle_user_nack_frag(nb_rtps_participant_t *participant,
                                    fragment_count,
                                    target_host,
                                    target_port);
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 /*
  * Route one complete sample. DATA and a reassembled DATA_FRAG sequence carry
@@ -1858,8 +1858,8 @@ void handle_data_frag(nb_rtps_participant_t *participant,
     writer.prefix = *prefix;
     writer.entity = fragment->writer_id;
 
-    now = ntk_wall_ms();
-    ntk_mutex_lock(participant->lock);
+    now = zn_wall_ms();
+    zb_mutex_lock(participant->lock);
     assembly = frag_assembly_get(participant,
                                  &writer,
                                  writer_sn,
@@ -1916,7 +1916,7 @@ void handle_data_frag(nb_rtps_participant_t *participant,
             }
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     if (complete) {
         nb_rtps_data_view_t view;
@@ -1940,11 +1940,11 @@ void handle_data_frag(nb_rtps_participant_t *participant,
                            source_host,
                            source_port);
 
-        ntk_mutex_lock(participant->lock);
+        zb_mutex_lock(participant->lock);
         if (assembly->used && assembly->complete) {
             frag_assembly_release(participant, assembly);
         }
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
     }
 }
 /*
@@ -2047,11 +2047,11 @@ void handle_user_heartbeat_frag(nb_rtps_participant_t *participant,
     writer.prefix = *source_prefix;
     writer.entity = heartbeat->writer_id;
 
-    now = ntk_wall_ms();
-    ntk_mutex_lock(participant->lock);
+    now = zn_wall_ms();
+    zb_mutex_lock(participant->lock);
     assembly = frag_assembly_find(participant, &writer, writer_sn);
     if (assembly && !assembly->complete && assembly->nack_count < NB_RTPS_FRAG_MAX_NACKS) {
         (void)send_frag_nack(participant, assembly, now);
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }

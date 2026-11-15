@@ -56,10 +56,10 @@ static void nb_announce_task_fn(void *user)
 static void nb_svc_link_task(void *user)
 {
     nb_svc_task_t *t = (nb_svc_task_t *)user;
-    ntk_mutex_lock(t->node->services_lock);
+    zb_mutex_lock(t->node->services_lock);
     t->svc->next = t->node->services;
     t->node->services = t->svc;
-    ntk_mutex_unlock(t->node->services_lock);
+    zb_mutex_unlock(t->node->services_lock);
     if (t->node->registry_backend && t->node->registry_backend->ops->announce) {
         t->node->registry_backend->ops->announce(t->node, 0);
     }
@@ -70,10 +70,10 @@ static void nb_svc_method_task(void *user)
 {
     nb_svc_task_t *t = (nb_svc_task_t *)user;
     size_t i;
-    ntk_mutex_lock(t->node->services_lock);
+    zb_mutex_lock(t->node->services_lock);
     t->method->next = t->svc->methods;
     t->svc->methods = t->method;
-    ntk_mutex_unlock(t->node->services_lock);
+    zb_mutex_unlock(t->node->services_lock);
     for (i = 0; i < t->node->transport_count; i++) {
         (void)nb_transport_subscribe(t->node->transports[i], t->svc->name, t->method->name);
     }
@@ -123,7 +123,7 @@ int nb_service_create(nb_node_t *node, const char *service_name, nb_service_t **
     }
     t->node = node;
     t->svc = svc;
-    if (ntk_poller_async(node->poller, nb_svc_link_task, t, 1) != NTK_OK) {
+    if (zn_poller_async(node->poller, nb_svc_link_task, t, 1) != ZN_OK) {
         free(t);
         free(svc);
         return NB_ERR_IO;
@@ -142,9 +142,9 @@ void nb_service_destroy(nb_service_t *svc)
     if (!svc || !svc->node || !svc->node->services_lock) {
         return;
     }
-    ntk_mutex_lock(svc->node->services_lock);
+    zb_mutex_lock(svc->node->services_lock);
     svc->removed = 1;
-    ntk_mutex_unlock(svc->node->services_lock);
+    zb_mutex_unlock(svc->node->services_lock);
     if (svc->node->poller && svc->node->registry_backend &&
         svc->node->registry_backend->ops->announce) {
         nb_announce_task_t *t = (nb_announce_task_t *)calloc(1, sizeof(*t));
@@ -163,12 +163,12 @@ int nb_service_set_interceptor(nb_service_t *svc, nb_service_interceptor_fn fn, 
         return NB_ERR_INVALID;
     }
     if (svc->node && svc->node->services_lock) {
-        ntk_mutex_lock(svc->node->services_lock);
+        zb_mutex_lock(svc->node->services_lock);
     }
     svc->interceptor = fn;
     svc->interceptor_user = user;
     if (svc->node && svc->node->services_lock) {
-        ntk_mutex_unlock(svc->node->services_lock);
+        zb_mutex_unlock(svc->node->services_lock);
     }
     return NB_OK;
 }
@@ -249,7 +249,7 @@ static int nb_service_method_register(nb_service_t *svc,
     t->node = svc->node;
     t->svc = svc;
     t->method = m;
-    if (ntk_poller_async(svc->node->poller, nb_svc_method_task, t, 1) != NTK_OK) {
+    if (zn_poller_async(svc->node->poller, nb_svc_method_task, t, 1) != ZN_OK) {
         free(t);
         free(m);
         return NB_ERR_IO;

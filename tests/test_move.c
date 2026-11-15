@@ -1,20 +1,20 @@
 #include <nb/rpc/proxy.h>
 #include <nb/rpc/service.h>
 #include <nb/rpc/node.h>
-#include <platform.h>
+#include <zn/platform.h>
 
 #define NB_LOG_TAG "test"
 #include <nb/base/log.h>
 
 #include <nb/base/buf.h>
 
-#include <thread/sem.h>
+#include <zb/os/sem.h>
 
 #include <stdio.h>
 #include <string.h>
 
-static ntk_sem *g_resp_sem;
-static ntk_sem *g_event_sem;
+static zb_sem *g_resp_sem;
+static zb_sem *g_event_sem;
 static int g_response_ok;
 
 static void on_worker_request(nb_call_t *call, const nb_request_t *req, void *user)
@@ -44,7 +44,7 @@ static void on_event(nb_call_t *call, const nb_request_t *req, void *user)
     (void)req;
     (void)user;
     if (g_event_sem) {
-        ntk_sem_post(g_event_sem, 1);
+        zb_sem_post(g_event_sem, 1);
     }
 }
 
@@ -54,7 +54,7 @@ static void on_response(int status, const nb_response_t *resp, void *user)
     g_response_ok = status == NB_OK && resp && resp->payload.len == 10 &&
         memcmp(resp->payload.data, "move-reply", 10) == 0;
     if (g_resp_sem) {
-        ntk_sem_post(g_resp_sem, 1);
+        zb_sem_post(g_resp_sem, 1);
     }
 }
 
@@ -115,8 +115,8 @@ int main(void)
         goto done;
     }
 
-    g_resp_sem = ntk_sem_create(0);
-    g_event_sem = ntk_sem_create(0);
+    g_resp_sem = zb_sem_create(0);
+    g_event_sem = zb_sem_create(0);
     if (!g_resp_sem || !g_event_sem) {
         failed = 1;
         goto done;
@@ -141,7 +141,7 @@ int main(void)
         failed = 1;
         goto done;
     }
-    if (ntk_sem_timedwait(g_resp_sem, 2000) != NTK_OK) {
+    if (zb_sem_timedwait(g_resp_sem, 2000) != ZN_OK) {
         nb_log_error("move unary timed out");
         failed = 1;
     } else if (!g_response_ok) {
@@ -162,7 +162,7 @@ int main(void)
         failed = 1;
         goto done;
     }
-    if (ntk_sem_timedwait(g_event_sem, 2000) != NTK_OK) {
+    if (zb_sem_timedwait(g_event_sem, 2000) != ZN_OK) {
         nb_log_error("move event not delivered");
         failed = 1;
     }
@@ -173,11 +173,11 @@ done:
     nb_node_destroy(client);
     nb_node_destroy(server);
     if (g_resp_sem) {
-        ntk_sem_destroy(g_resp_sem);
+        zb_sem_destroy(g_resp_sem);
         g_resp_sem = NULL;
     }
     if (g_event_sem) {
-        ntk_sem_destroy(g_event_sem);
+        zb_sem_destroy(g_event_sem);
         g_event_sem = NULL;
     }
     if (failed) {

@@ -5,6 +5,7 @@
  * 保证同一流的处理顺序。
  */
 #include "node_internal.h"
+#include "node_access.h"
 #include "service_internal.h"
 
 #include "atomic.h"
@@ -64,7 +65,7 @@ static nb_recv_stream_t *nb_alloc_recv_stream(nb_node_t *node,
             stream->bytes = 0;
             call->node = node;
             call->transport = transport;
-            call->poller = ntk_poller_current();
+            call->poller = nb_node_current_poller(node);
             call->token = msg->reply_token;
             nb_copy_str(call->peer_host, sizeof(call->peer_host), msg->peer_host, "0.0.0.0");
             call->peer_port = msg->peer_port;
@@ -153,7 +154,7 @@ static int nb_stream_submit(nb_recv_stream_t *state, nb_stream_task_t *task)
         return NB_OK;
     }
     if (node && node->handler_pool) {
-        if (ntk_thread_pool_async(node->handler_pool, nb_stream_task_run, task, 1) != NTK_OK) {
+        if (zn_thread_pool_async(node->handler_pool, nb_stream_task_run, task, 1) != ZN_OK) {
             nb_stream_task_free(task);
             return NB_ERR_IO;
         }
@@ -225,7 +226,7 @@ static void nb_stream_task_run(void *user)
         task->fn(call, &req, &chunk, task->user);
     }
     task->rejected = rejected;
-    if (ntk_poller_async(call->poller, nb_stream_task_complete, task, 1) != NTK_OK) {
+    if (zn_poller_async(call->poller, nb_stream_task_complete, task, 1) != ZN_OK) {
         nb_stream_task_free(task);
     }
 }
@@ -307,7 +308,7 @@ void nb_service_handle_stream_chunk(nb_node_t *node,
             return;
         }
         *dot = '\0';
-        ntk_mutex_lock(node->services_lock);
+        zb_mutex_lock(node->services_lock);
         for (svc = node->services; svc; svc = svc->next) {
             if (svc->removed || strcmp(svc->name, tmp) != 0) {
                 continue;
@@ -323,7 +324,7 @@ void nb_service_handle_stream_chunk(nb_node_t *node,
             }
             break;
         }
-        ntk_mutex_unlock(node->services_lock);
+        zb_mutex_unlock(node->services_lock);
         if (!method) {
             return;
         }

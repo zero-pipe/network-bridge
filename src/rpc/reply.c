@@ -291,7 +291,7 @@ static int nb_reply_marshal(nb_call_t *call,
         t->stream_id = stream->stream_id;
         t->stream_offset = stream->offset;
     }
-    if (ntk_poller_async(call->poller, nb_reply_task_fn, t, 1) != NTK_OK) {
+    if (zn_poller_async(call->poller, nb_reply_task_fn, t, 1) != ZN_OK) {
         nb_reply_task_destroy(t);
         if (free_call) {
             nb_call_release(call);
@@ -378,7 +378,7 @@ static int nb_reply_ex_impl(nb_call_t *call,
         }
         return NB_ERR_TOOBIG;
     }
-    if (call->poller && !ntk_poller_is_current_thread(call->poller)) {
+    if (call->poller && !zn_poller_is_current_thread(call->poller)) {
         return nb_reply_marshal(
             call, status, payload, buf_owner, NULL, 1, metadata, message, message_len);
     }
@@ -490,7 +490,7 @@ int nb_reply_stream(nb_call_t *call, int status, const nb_chunk_t *chunk)
     stream.offset = chunk ? chunk->offset : 0;
     stream.total_size = 0;
 
-    if (call->poller && !ntk_poller_is_current_thread(call->poller)) {
+    if (call->poller && !zn_poller_is_current_thread(call->poller)) {
         int last = chunk && (chunk->flags & NB_STREAM_FLAG_LAST);
         if (last) {
             call->replied = 1;

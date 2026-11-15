@@ -2,13 +2,13 @@
 
 /*
  * Tests for the public rtps_* interface. This file includes only <rtps/rtps.h>
- * (plus ntk for sleeping), which is the point of the API layer: no engine
+ * (plus znet for sleeping), which is the point of the API layer: no engine
  * header and no nb_* type is needed.
  */
 
 #include <rtps/rtps.h>
 
-#include <ntk.h>
+#include <zn/zn.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,7 +25,7 @@ static int g_fail;
     } while (0)
 
 typedef struct rx_state {
-    ntk_mutex *lock;
+    zb_mutex *lock;
     int count;
     uint8_t last[64];
     size_t last_len;
@@ -44,7 +44,7 @@ static void on_data(void *user, rtps_reader_t *reader, const rtps_sample_t *samp
     if (!rx) {
         return;
     }
-    ntk_mutex_lock(rx->lock);
+    zb_mutex_lock(rx->lock);
     for (i = 0; i < count; i++) {
         size_t copy = samples[i].size;
 
@@ -64,23 +64,23 @@ static void on_data(void *user, rtps_reader_t *reader, const rtps_sample_t *samp
         }
         rx->count++;
     }
-    ntk_mutex_unlock(rx->lock);
+    zb_mutex_unlock(rx->lock);
 }
 
 static int rx_count(rx_state_t *rx)
 {
     int count;
 
-    ntk_mutex_lock(rx->lock);
+    zb_mutex_lock(rx->lock);
     count = rx->count;
-    ntk_mutex_unlock(rx->lock);
+    zb_mutex_unlock(rx->lock);
     return count;
 }
 
 static void rx_snapshot(rx_state_t *rx, rtps_sample_info_t *info, uint8_t *data,
                         size_t *len, uint8_t *handle, int *has_handle)
 {
-    ntk_mutex_lock(rx->lock);
+    zb_mutex_lock(rx->lock);
     *info = rx->last_info;
     *len = rx->last_len;
     if (data && *len <= sizeof(rx->last)) {
@@ -92,21 +92,21 @@ static void rx_snapshot(rx_state_t *rx, rtps_sample_info_t *info, uint8_t *data,
     if (has_handle) {
         *has_handle = rx->last_has_handle;
     }
-    ntk_mutex_unlock(rx->lock);
+    zb_mutex_unlock(rx->lock);
 }
 
 static int wait_for(int (*predicate)(void *), void *arg, int timeout_ms)
 {
-    uint64_t start = ntk_wall_ms();
+    uint64_t start = zn_wall_ms();
 
     for (;;) {
         if (predicate(arg)) {
             return 1;
         }
-        if (ntk_wall_ms() - start >= (uint64_t)timeout_ms) {
+        if (zn_wall_ms() - start >= (uint64_t)timeout_ms) {
             return 0;
         }
-        ntk_sleep_ms(20);
+        zn_sleep_ms(20);
     }
 }
 
@@ -195,7 +195,7 @@ int main(void)
     int i;
 
     memset(&rx, 0, sizeof(rx));
-    rx.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    rx.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(rx.lock != NULL);
     if (!rx.lock) {
         return 1;
@@ -255,7 +255,7 @@ int main(void)
     /* Data callback and sample info. */
     for (i = 0; i < 100 && rx_count(&rx) == 0; i++) {
         CHECK(rtps_writer_write(writer, "hello", 5) == RTPS_OK);
-        ntk_sleep_ms(50);
+        zn_sleep_ms(50);
     }
     CHECK(wait_for(pred_rx1, &rx, 2000));
     {
@@ -351,7 +351,7 @@ int main(void)
                 info.instance_state == RTPS_INSTANCE_NOT_ALIVE_DISPOSED) {
                 break;
             }
-            ntk_sleep_ms(50);
+            zn_sleep_ms(50);
         }
         CHECK(!info.valid_data);
         CHECK(info.instance_state == RTPS_INSTANCE_NOT_ALIVE_DISPOSED);
@@ -497,7 +497,7 @@ out:
     if (subscriber) {
         rtps_participant_destroy(subscriber);
     }
-    ntk_mutex_destroy(rx.lock);
+    zb_mutex_destroy(rx.lock);
     if (g_fail) {
         fprintf(stderr, "rtps api test failed\n");
         return 1;

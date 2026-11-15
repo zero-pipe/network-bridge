@@ -16,7 +16,7 @@
  *
  * 线程约定：与 nb_buf 一致——append_copy 走当前线程的本地分档池
  * （nb_buf_alloc_local），池化块应在所属线程内创建/释放；跨线程释放由本地池
- * 直接 free 兜底。本模块不依赖任何框架（ntk 等），可独立使用。
+ * 直接 free 兜底。本模块不依赖任何框架（znet 等），可独立使用。
  */
 
 #include <nb/base/buf.h>

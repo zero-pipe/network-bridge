@@ -21,9 +21,14 @@ enable_testing()
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# 基础依赖：network-tool-kit
-set(NTK_ENABLE_OPENSSL OFF CACHE BOOL "" FORCE)
-add_subdirectory(3rdparty/ntk)
+# 基础依赖：znet（网络/线程/定时器）+ zbase（OS 抽象与容器）。
+# 关闭 OpenSSL：本仓库不需要 TLS，省掉外部依赖。
+if(WIN32)
+    # 防止 windows.h 拉入旧 winsock.h，与 znet 的 winsock2.h 定义冲突。
+    add_compile_definitions(WIN32_LEAN_AND_MEAN)
+endif()
+set(ZN_ENABLE_OPENSSL OFF CACHE BOOL "" FORCE)
+add_subdirectory(3rdparty/znet)
 add_subdirectory(3rdparty/elog)
 
 # Micro-CDR: vendored CDR (de)serialization used by the RTPS codec.
@@ -37,7 +42,6 @@ option(NB_BUILD_TOOLS "Build benchmark tools" ON)
 option(NB_BUILD_EXAMPLES "Build examples" ON)
 option(NB_BUILD_GTESTS "Build GoogleTest module tests" OFF)
 option(NB_BUILD_BENCHMARKS "Build Google Benchmark microbenchmarks" OFF)
-option(NB_ENABLE_DDS "Enable the Cyclone DDS transport provider" ON)
 
 if(DEFINED BUILD_TESTS)
     message(WARNING "BUILD_TESTS is deprecated; use NB_BUILD_TESTS")
@@ -72,20 +76,6 @@ if(DEFINED ZERO_RPC_SANITIZE AND NOT NB_SANITIZE)
     unset(ZERO_RPC_SANITIZE CACHE)
 endif()
 
-if(NB_ENABLE_DDS)
-    # Cyclone DDS 用 3rdparty/cyclonedds 的源码编译，静态链接 ddsc。
-    add_subdirectory(3rdparty/cyclonedds)
-
-    add_library(nb_cyclonedds INTERFACE)
-    target_link_libraries(nb_cyclonedds INTERFACE ddsc)
-    if(WIN32)
-        # Cyclone's Windows rusage implementation calls GetProcessMemoryInfo.
-        # Link psapi after ddsc so the static archive scan resolves it.
-        target_link_libraries(nb_cyclonedds INTERFACE psapi)
-    endif()
-    target_compile_definitions(nb_cyclonedds INTERFACE NB_ENABLE_DDS=1)
-endif()
-
 if(NB_SANITIZE)
     if(CMAKE_C_COMPILER_ID STREQUAL "MSVC")
         message(FATAL_ERROR
@@ -96,7 +86,7 @@ if(NB_SANITIZE)
     add_link_options(-fsanitize=${NB_SANITIZE})
 endif()
 
-# Cyclone DDS 静态链接，没有运行库要拷贝；保留该钩子供测试/示例调用。
+# 纯静态依赖，没有运行库要拷贝；保留该钩子供测试/示例调用。
 function(nb_copy_runtime_deps target)
 endfunction()
 

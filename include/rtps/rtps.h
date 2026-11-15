@@ -10,7 +10,7 @@
  *     rtps_* API and entities            this interface
  *   engine
  *     SPDP/SEDP, reliability, fragments, QoS enforcement, TCP
- *   ntk
+ *   znet
  *     threads, sockets, locks, time, atomics
  *
  * The API layer and the protocol engine are separate: nothing under src/rtps

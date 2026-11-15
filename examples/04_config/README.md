@@ -55,8 +55,8 @@
 }
 ```
 
-- `domain` / `partition` / `prefix` / `qos` 是 DDS 的核心；`backend` 选
-  `rtps` 或 `cyclone`。
+- `domain` / `partition` / `prefix` / `qos` 是 DDS 的核心；`backend` 只能写
+  `rtps`（内建 RTPS 是唯一后端），其它取值报配置错误。
 - DDS 面不读 `threads`：后端有自己的线程与发现机制；`rpc` 块在这里被静默忽略。
 
 完整字段、取值范围和错误路径见 [`docs/api/config.md`](../../docs/api/config.md)，

@@ -11,7 +11,7 @@
 #include <string.h>
 
 static int g_fail;
-static ntk_sem *g_sem;
+static zb_sem *g_sem;
 static int g_task_ok;
 static void *g_remote_obj;
 
@@ -27,7 +27,7 @@ static void pending_probe(void *user)
             nb_pending_add(node, (uint64_t)i + 1, NULL, NULL, 60000, nb_node_poller(node), NULL);
         if (!pending[i]) {
             g_task_ok = 0;
-            ntk_sem_post(g_sem, 1);
+            zb_sem_post(g_sem, 1);
             return;
         }
     }
@@ -35,7 +35,7 @@ static void pending_probe(void *user)
         nb_pending_release(pending[i]);
     }
     g_task_ok = 1;
-    ntk_sem_post(g_sem, 1);
+    zb_sem_post(g_sem, 1);
 }
 
 #define CHECK(cond)                                                     \
@@ -50,7 +50,7 @@ static void pending_probe(void *user)
 static void pool_probe(void *user)
 {
     nb_node_t *node = (nb_node_t *)user;
-    ntk_poller *cur = ntk_poller_current();
+    zn_poller *cur = nb_node_current_poller(node);
 
     g_task_ok = 0;
     if (cur != nb_node_poller(node)) {
@@ -79,7 +79,7 @@ static void pool_probe(void *user)
     }
     g_task_ok = 1;
 done:
-    ntk_sem_post(g_sem, 1);
+    zb_sem_post(g_sem, 1);
 }
 
 int main(void)
@@ -96,32 +96,32 @@ int main(void)
     cfg.rpc.mode = NB_NODE_MODE_STATIC;
     cfg.runtime.io_threads = 2;
 
-    /* 主线程未绑定 poller。 */
-    CHECK(ntk_poller_current() == NULL);
-
     if (nb_node_create(&cfg, &node) != NB_OK) {
         nb_log_error("node create failed");
         return 1;
     }
 
-    n = ntk_poller_pool_size(nb_node_pool(node));
+    n = zn_poller_pool_size(nb_node_pool(node));
     CHECK(n >= 1);
+    /* 主线程自己不驱动任何 poller：poller 已建好，但当前线程都不拥有。 */
+    CHECK(nb_node_current_poller(node) == NULL);
     for (i = 0; i < n; i++) {
-        ntk_poller *p = ntk_poller_pool_at(nb_node_pool(node), i);
+        zn_poller *p = zn_poller_pool_at(nb_node_pool(node), i);
         CHECK(p != NULL);
+        CHECK(!zn_poller_is_current_thread(p));
     }
 
     /* 在 owner poller 线程内验证 current + 复用。 */
-    g_sem = ntk_sem_create(0);
+    g_sem = zb_sem_create(0);
     CHECK(g_sem != NULL);
     if (g_sem) {
-        CHECK(ntk_poller_async(nb_node_poller(node), pool_probe, node, 0) == NTK_OK);
-        CHECK(ntk_sem_timedwait(g_sem, 2000) == NTK_OK);
+        CHECK(zn_poller_async(nb_node_poller(node), pool_probe, node, 0) == ZN_OK);
+        CHECK(zb_sem_timedwait(g_sem, 2000) == ZN_OK);
         CHECK(g_task_ok == 1);
-        CHECK(ntk_poller_async(nb_node_poller(node), pending_probe, node, 0) == NTK_OK);
-        CHECK(ntk_sem_timedwait(g_sem, 2000) == NTK_OK);
+        CHECK(zn_poller_async(nb_node_poller(node), pending_probe, node, 0) == ZN_OK);
+        CHECK(zb_sem_timedwait(g_sem, 2000) == ZN_OK);
         CHECK(g_task_ok == 1);
-        ntk_sem_destroy(g_sem);
+        zb_sem_destroy(g_sem);
         g_sem = NULL;
     }
 

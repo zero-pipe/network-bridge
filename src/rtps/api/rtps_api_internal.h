@@ -23,7 +23,7 @@
 #include <nb/base/error.h>
 #include <nb/base/sample_info.h>
 
-#include <ntk.h>
+#include <zn/zn.h>
 
 #include "rtps_participant.h"
 #include "rtps_types.h"
@@ -44,7 +44,7 @@ typedef struct rtps_ws_link {
 } rtps_ws_link_t;
 
 typedef struct rtps_reader_history {
-    ntk_mutex *lock;
+    zb_mutex *lock;
     rtps_hist_sample_t *head;
     rtps_hist_sample_t *tail;
     size_t count;
@@ -55,7 +55,7 @@ typedef struct rtps_reader_history {
 
 struct rtps_participant {
     nb_rtps_participant_t *engine;
-    ntk_mutex *lock;
+    zb_mutex *lock;
     struct rtps_topic *topics;
     struct rtps_publisher *publishers;
     struct rtps_subscriber *subscribers;
@@ -125,7 +125,7 @@ struct rtps_reader {
 struct rtps_waitset {
     struct rtps_waitset *next;
     struct rtps_participant *participant;
-    ntk_sem *sem;
+    zb_sem *sem;
     rtps_ws_link_t *links; /* guarded by participant->lock */
 };
 

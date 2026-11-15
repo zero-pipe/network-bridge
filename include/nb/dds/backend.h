@@ -8,7 +8,7 @@
  * reader histories and wait sets. A backend only maps topic/writer/reader
  * entities onto one DDS implementation and delivers samples through the
  * callback below. History and wait-set semantics therefore stay identical
- * across the rtps and cyclone backends.
+ * across backends.
  */
 
 #include <nb/dds/participant.h>
@@ -75,14 +75,14 @@ typedef struct nb_dds_backend_ops {
     void (*metrics_read)(const void *participant, nb_dds_metrics_t *out);
 } nb_dds_backend_ops_t;
 
-/* Returns NULL when the backend is not compiled in (e.g. cyclone with
- * NB_ENABLE_DDS=OFF). */
+/* Returns the backend descriptor for a built-in backend, or NULL when the id
+ * is unknown and no custom backend registered it. */
 const nb_dds_backend_ops_t *nb_dds_backend_find(nb_dds_backend_t backend);
 
 /*
  * Register a custom backend. Backends are matched by id; registering an id
  * that is already present returns NB_ERR_ALREADY. The descriptor must have
- * static lifetime. Optional; the two built-in backends are always present.
+ * static lifetime. Optional; the built-in RTPS backend is always present.
  */
 int nb_dds_backend_register(const nb_dds_backend_ops_t *ops);
 

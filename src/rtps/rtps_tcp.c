@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <ntk.h>
+#include <zn/zn.h>
 
 #define NB_RTPS_TCP_BACKLOG 8
 #define NB_RTPS_TCP_RECV_CHUNK 4096u
@@ -15,7 +15,7 @@ typedef struct nb_rtps_tcp_conn {
     int established;
     int initiated;
     int failed;
-    ntk_socket *sock;
+    zn_socket *sock;
     int fd;
     char key[NB_RTPS_TCP_KEY_MAX];
     char host[NB_RTPS_TCP_HOST_MAX];
@@ -36,11 +36,11 @@ typedef struct nb_rtps_tcp_conn {
 } nb_rtps_tcp_conn_t;
 
 struct nb_rtps_tcp {
-    ntk_socket *listen_sock;
+    zn_socket *listen_sock;
     int listen_fd;
     uint16_t port;
-    ntk_poller *poller;
-    ntk_mutex *lock;
+    zn_poller *poller;
+    zb_mutex *lock;
     nb_rtps_tcp_message_fn on_message;
     nb_rtps_tcp_link_fn on_link;
     nb_rtps_tcp_link_fn on_unlink;
@@ -107,14 +107,14 @@ static void conn_free_buffers(nb_rtps_tcp_conn_t *conn)
 static void poller_del(nb_rtps_tcp_t *tcp, int fd)
 {
     if (tcp->poller && fd >= 0) {
-        (void)ntk_poller_del(tcp->poller, fd);
+        (void)zn_poller_del(tcp->poller, fd);
     }
 }
 
 static void poller_add(nb_rtps_tcp_t *tcp, int fd)
 {
     if (tcp->poller && fd >= 0) {
-        (void)ntk_poller_add(tcp->poller, fd, NTK_POLL_IN, NULL, NULL);
+        (void)zn_poller_add(tcp->poller, fd, ZN_POLL_IN, NULL, NULL);
     }
 }
 
@@ -126,7 +126,7 @@ static int conn_release(nb_rtps_tcp_t *tcp, int index)
     nb_rtps_tcp_conn_t *conn = &tcp->conns[index];
     int was_used = conn->used;
     int fd = conn->fd;
-    ntk_socket *sock = conn->sock;
+    zn_socket *sock = conn->sock;
 
     if (!was_used) {
         return 0;
@@ -144,13 +144,13 @@ static int conn_release(nb_rtps_tcp_t *tcp, int index)
     conn->tx_len = 0;
     poller_del(tcp, fd);
     if (sock) {
-        ntk_socket_destroy(sock);
+        zn_socket_destroy(sock);
     }
     return 1;
 }
 
 static int conn_alloc(nb_rtps_tcp_t *tcp,
-                      ntk_socket *sock,
+                      zn_socket *sock,
                       int initiated,
                       const char *host,
                       uint16_t port)
@@ -167,7 +167,7 @@ static int conn_alloc(nb_rtps_tcp_t *tcp,
         conn->used = 1;
         conn->initiated = initiated;
         conn->sock = sock;
-        conn->fd = ntk_socket_fd(sock);
+        conn->fd = zn_socket_fd(sock);
         conn->port = port;
         (void)snprintf(conn->key, sizeof(conn->key), "%s%d", NB_RTPS_TCP_KEY_PREFIX, i);
         if (host) {
@@ -182,7 +182,7 @@ static int conn_alloc(nb_rtps_tcp_t *tcp,
 static int flush_locked(nb_rtps_tcp_t *tcp, nb_rtps_tcp_conn_t *conn)
 {
     while (conn->tx_len > 0) {
-        ntk_ssize_t n = ntk_socket_send(conn->sock, conn->tx, conn->tx_len);
+        zn_ssize_t n = zn_socket_send(conn->sock, conn->tx, conn->tx_len);
 
         if (n > 0) {
             size_t sent = (size_t)n;
@@ -194,7 +194,7 @@ static int flush_locked(nb_rtps_tcp_t *tcp, nb_rtps_tcp_conn_t *conn)
             tcp->stats.bytes_sent += (uint64_t)sent;
             continue;
         }
-        if (n == NTK_ERR_AGAIN) {
+        if (n == ZN_ERR_AGAIN) {
             return 0;
         }
         conn->failed = 1;
@@ -298,14 +298,14 @@ static void conn_read(nb_rtps_tcp_t *tcp, nb_rtps_tcp_conn_t *conn, int index)
     uint8_t chunk[NB_RTPS_TCP_RECV_CHUNK];
 
     for (;;) {
-        ntk_ssize_t n = ntk_socket_recv(conn->sock, chunk, sizeof(chunk));
+        zn_ssize_t n = zn_socket_recv(conn->sock, chunk, sizeof(chunk));
 
         if (n == 0) {
             conn->failed = 1;
             return;
         }
         if (n < 0) {
-            if (n != NTK_ERR_AGAIN) {
+            if (n != ZN_ERR_AGAIN) {
                 conn->failed = 1;
             }
             return;
@@ -340,24 +340,24 @@ static int accept_pending(nb_rtps_tcp_t *tcp)
         return 0;
     }
     for (;;) {
-        ntk_socket *client = NULL;
-        ntk_err_t rc = ntk_socket_accept(tcp->listen_sock, &client);
+        zn_socket *client = NULL;
+        zn_err_t rc = zn_socket_accept(tcp->listen_sock, &client);
         int index;
 
-        if (rc == NTK_ERR_AGAIN) {
+        if (rc == ZN_ERR_AGAIN) {
             break;
         }
-        if (rc != NTK_OK || !client) {
+        if (rc != ZN_OK || !client) {
             break;
         }
-        ntk_mutex_lock(tcp->lock);
+        zb_mutex_lock(tcp->lock);
         index = conn_alloc(tcp, client, 0, NULL, 0);
         if (index >= 0) {
             tcp->conns[index].established = 1;
         }
-        ntk_mutex_unlock(tcp->lock);
+        zb_mutex_unlock(tcp->lock);
         if (index < 0) {
-            ntk_socket_destroy(client);
+            zn_socket_destroy(client);
             tcp->stats.rejected++;
             continue;
         }
@@ -371,7 +371,7 @@ static int accept_pending(nb_rtps_tcp_t *tcp)
 
 nb_rtps_tcp_t *nb_rtps_tcp_create(const char *bind_host,
                                   uint16_t port,
-                                  ntk_poller *poller,
+                                  zn_poller *poller,
                                   nb_rtps_tcp_message_fn on_message,
                                   nb_rtps_tcp_link_fn on_link,
                                   nb_rtps_tcp_link_fn on_unlink,
@@ -392,7 +392,7 @@ nb_rtps_tcp_t *nb_rtps_tcp_create(const char *bind_host,
     tcp->on_link = on_link;
     tcp->on_unlink = on_unlink;
     tcp->user = user;
-    tcp->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    tcp->lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     if (!tcp->lock) {
         free(tcp);
         return NULL;
@@ -400,24 +400,24 @@ nb_rtps_tcp_t *nb_rtps_tcp_create(const char *bind_host,
     for (i = 0; i < (int)NB_RTPS_TCP_MAX_CONNECTIONS; i++) {
         tcp->conns[i].fd = -1;
     }
-    tcp->listen_sock = ntk_socket_create();
+    tcp->listen_sock = zn_socket_create();
     if (!tcp->listen_sock ||
-        ntk_socket_listen(tcp->listen_sock,
+        zn_socket_listen(tcp->listen_sock,
                           (bind_host && bind_host[0]) ? bind_host : NULL,
                           port,
-                          NB_RTPS_TCP_BACKLOG) != NTK_OK ||
-        ntk_socket_get_local(tcp->listen_sock, local, sizeof(local), &bound_port) !=
-            NTK_OK) {
+                          NB_RTPS_TCP_BACKLOG) != ZN_OK ||
+        zn_socket_get_local(tcp->listen_sock, local, sizeof(local), &bound_port) !=
+            ZN_OK) {
         nb_rtps_tcp_destroy(tcp);
         return NULL;
     }
     tcp->port = bound_port;
-    tcp->listen_fd = ntk_socket_fd(tcp->listen_sock);
+    tcp->listen_fd = zn_socket_fd(tcp->listen_sock);
     poller_add(tcp, tcp->listen_fd);
     return tcp;
 }
 
-int nb_rtps_tcp_set_poller(nb_rtps_tcp_t *tcp, ntk_poller *poller)
+int nb_rtps_tcp_set_poller(nb_rtps_tcp_t *tcp, zn_poller *poller)
 {
     int i;
 
@@ -446,17 +446,17 @@ void nb_rtps_tcp_destroy(nb_rtps_tcp_t *tcp)
 
         if (conn->sock) {
             poller_del(tcp, conn->fd);
-            ntk_socket_destroy(conn->sock);
+            zn_socket_destroy(conn->sock);
             conn->sock = NULL;
         }
         conn_free_buffers(conn);
     }
     if (tcp->listen_sock) {
         poller_del(tcp, tcp->listen_fd);
-        ntk_socket_destroy(tcp->listen_sock);
+        zn_socket_destroy(tcp->listen_sock);
     }
     if (tcp->lock) {
-        ntk_mutex_destroy(tcp->lock);
+        zb_mutex_destroy(tcp->lock);
     }
     free(tcp);
 }
@@ -508,7 +508,7 @@ int nb_rtps_tcp_find_link(const nb_rtps_tcp_t *tcp, const char *host, uint16_t p
 
 int nb_rtps_tcp_connect(nb_rtps_tcp_t *tcp, const char *host, uint16_t port)
 {
-    ntk_socket *sock;
+    zn_socket *sock;
     int in_progress = 0;
     int index;
 
@@ -518,22 +518,22 @@ int nb_rtps_tcp_connect(nb_rtps_tcp_t *tcp, const char *host, uint16_t port)
     if (nb_rtps_tcp_has_link(tcp, host, port)) {
         return -1;
     }
-    sock = ntk_socket_create();
+    sock = zn_socket_create();
     if (!sock) {
         return -1;
     }
-    if (ntk_socket_connect(sock, host, port, &in_progress) != NTK_OK) {
-        ntk_socket_destroy(sock);
+    if (zn_socket_connect(sock, host, port, &in_progress) != ZN_OK) {
+        zn_socket_destroy(sock);
         return -1;
     }
-    ntk_mutex_lock(tcp->lock);
+    zb_mutex_lock(tcp->lock);
     index = conn_alloc(tcp, sock, 1, host, port);
     if (index >= 0 && !in_progress) {
         tcp->conns[index].established = 1;
     }
-    ntk_mutex_unlock(tcp->lock);
+    zb_mutex_unlock(tcp->lock);
     if (index < 0) {
-        ntk_socket_destroy(sock);
+        zn_socket_destroy(sock);
         return -1;
     }
     if (!in_progress && tcp->on_link) {
@@ -590,16 +590,16 @@ int nb_rtps_tcp_send(nb_rtps_tcp_t *tcp, int index, const void *data, size_t len
         index >= (int)NB_RTPS_TCP_MAX_CONNECTIONS) {
         return -1;
     }
-    ntk_mutex_lock(tcp->lock);
+    zb_mutex_lock(tcp->lock);
     conn = &tcp->conns[index];
     if (!conn->used || conn->failed) {
-        ntk_mutex_unlock(tcp->lock);
+        zb_mutex_unlock(tcp->lock);
         return -1;
     }
     if (conn->tx_len + len > NB_RTPS_TCP_TX_MAX ||
         conn_reserve(conn, &conn->tx_cap, &conn->tx, conn->tx_len + len) != 0) {
         tcp->stats.rejected++;
-        ntk_mutex_unlock(tcp->lock);
+        zb_mutex_unlock(tcp->lock);
         return -1;
     }
     memcpy(conn->tx + conn->tx_len, data, len);
@@ -612,7 +612,7 @@ int nb_rtps_tcp_send(nb_rtps_tcp_t *tcp, int index, const void *data, size_t len
     } else {
         rc = 0;
     }
-    ntk_mutex_unlock(tcp->lock);
+    zb_mutex_unlock(tcp->lock);
     return rc;
 }
 
@@ -631,12 +631,12 @@ void nb_rtps_tcp_service(nb_rtps_tcp_t *tcp)
             continue;
         }
         if (!conn->established && conn->initiated && !conn->failed) {
-            ntk_err_t rc = ntk_socket_check_connect(conn->sock);
+            zn_err_t rc = zn_socket_check_connect(conn->sock);
 
-            if (rc == NTK_ERR_AGAIN) {
+            if (rc == ZN_ERR_AGAIN) {
                 continue;
             }
-            if (rc != NTK_OK) {
+            if (rc != ZN_OK) {
                 conn->failed = 1;
             } else {
                 conn->established = 1;
@@ -652,11 +652,11 @@ void nb_rtps_tcp_service(nb_rtps_tcp_t *tcp)
             conn_read(tcp, conn, i);
         }
         if (conn->used && !conn->failed) {
-            ntk_mutex_lock(tcp->lock);
+            zb_mutex_lock(tcp->lock);
             if (conn->established && conn->tx_len > 0) {
                 (void)flush_locked(tcp, conn);
             }
-            ntk_mutex_unlock(tcp->lock);
+            zb_mutex_unlock(tcp->lock);
         }
         if (conn->used && conn->failed) {
             if ((conn->established || !conn->initiated) && tcp->on_unlink) {
@@ -665,9 +665,9 @@ void nb_rtps_tcp_service(nb_rtps_tcp_t *tcp)
                 (void)fd;
                 tcp->on_unlink(tcp->user, i);
             }
-            ntk_mutex_lock(tcp->lock);
+            zb_mutex_lock(tcp->lock);
             (void)conn_release(tcp, i);
-            ntk_mutex_unlock(tcp->lock);
+            zb_mutex_unlock(tcp->lock);
         }
     }
 }

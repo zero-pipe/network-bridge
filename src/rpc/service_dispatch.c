@@ -4,6 +4,7 @@
  * 方法注册与生命周期见 service.c；服务端流见 service_stream.c。
  */
 #include "node_internal.h"
+#include "node_access.h"
 #include "service_internal.h"
 
 #include "atomic.h"
@@ -34,7 +35,7 @@ typedef struct nb_handler_task {
     nb_node_t *node;
     nb_transport_t *transport;
     nb_reply_token_t token;
-    ntk_poller *poller;
+    zn_poller *poller;
     char peer_host[NB_HOST_MAX];
     uint16_t peer_port;
     uint32_t msg_id;
@@ -209,12 +210,12 @@ static int nb_handler_inflight_acquire(nb_node_t *node)
     if (node->handler_max_concurrency == 0 || !node->handler_limit_mutex) {
         return NB_OK;
     }
-    ntk_mutex_lock(node->handler_limit_mutex);
+    zb_mutex_lock(node->handler_limit_mutex);
     ok = node->handler_inflight < node->handler_max_concurrency;
     if (ok) {
         node->handler_inflight++;
     }
-    ntk_mutex_unlock(node->handler_limit_mutex);
+    zb_mutex_unlock(node->handler_limit_mutex);
     return ok ? NB_OK : NB_ERR_AGAIN;
 }
 
@@ -223,11 +224,11 @@ static void nb_handler_inflight_release(nb_node_t *node)
     if (node->handler_max_concurrency == 0 || !node->handler_limit_mutex) {
         return;
     }
-    ntk_mutex_lock(node->handler_limit_mutex);
+    zb_mutex_lock(node->handler_limit_mutex);
     if (node->handler_inflight > 0) {
         node->handler_inflight--;
     }
-    ntk_mutex_unlock(node->handler_limit_mutex);
+    zb_mutex_unlock(node->handler_limit_mutex);
 }
 
 static void nb_handler_external_acquire(nb_node_t *node)
@@ -235,9 +236,9 @@ static void nb_handler_external_acquire(nb_node_t *node)
     if (!node->handler_limit_mutex) {
         return;
     }
-    ntk_mutex_lock(node->handler_limit_mutex);
+    zb_mutex_lock(node->handler_limit_mutex);
     node->external_inflight++;
-    ntk_mutex_unlock(node->handler_limit_mutex);
+    zb_mutex_unlock(node->handler_limit_mutex);
 }
 
 static void nb_handler_external_release(nb_node_t *node)
@@ -245,11 +246,11 @@ static void nb_handler_external_release(nb_node_t *node)
     if (!node->handler_limit_mutex) {
         return;
     }
-    ntk_mutex_lock(node->handler_limit_mutex);
+    zb_mutex_lock(node->handler_limit_mutex);
     if (node->external_inflight > 0) {
         node->external_inflight--;
     }
-    ntk_mutex_unlock(node->handler_limit_mutex);
+    zb_mutex_unlock(node->handler_limit_mutex);
 }
 
 /*
@@ -304,7 +305,7 @@ static int nb_handler_task_create(nb_node_t *node,
     t->node = node;
     t->transport = transport;
     t->token = msg->reply_token;
-    t->poller = ntk_poller_current();
+    t->poller = nb_node_current_poller(node);
     nb_copy_str(t->peer_host, sizeof(t->peer_host), msg->peer_host, "0.0.0.0");
     t->peer_port = msg->peer_port;
     t->msg_id = msg->request_id;
@@ -374,7 +375,7 @@ static int nb_service_dispatch_worker(nb_node_t *node,
         nb_handler_inflight_release(node);
         return rc;
     }
-    if (ntk_thread_pool_async(node->handler_pool, nb_handler_task_run, t, 1) != NTK_OK) {
+    if (zn_thread_pool_async(node->handler_pool, nb_handler_task_run, t, 1) != ZN_OK) {
         nb_handler_inflight_release(node);
         nb_handler_task_destroy(t);
         return NB_ERR_IO;
@@ -446,7 +447,7 @@ void nb_service_handle_request(nb_node_t *node, nb_transport_t *transport, nb_me
         return;
     }
     *dot = '\0';
-    ntk_mutex_lock(node->services_lock);
+    zb_mutex_lock(node->services_lock);
     for (svc = node->services; svc; svc = svc->next) {
         if (svc->removed || strcmp(svc->name, tmp) != 0) {
             continue;
@@ -464,7 +465,7 @@ void nb_service_handle_request(nb_node_t *node, nb_transport_t *transport, nb_me
         }
         break;
     }
-    ntk_mutex_unlock(node->services_lock);
+    zb_mutex_unlock(node->services_lock);
     if (!fn) {
         nb_service_send_status(transport, msg, NB_ERR_NOTFOUND);
         return;
@@ -563,7 +564,7 @@ void nb_service_handle_request(nb_node_t *node, nb_transport_t *transport, nb_me
         memset(call, 0, sizeof(*call));
         call->node = node;
         call->transport = transport;
-        call->poller = ntk_poller_current();
+        call->poller = nb_node_current_poller(node);
         call->token = msg->reply_token;
         nb_copy_str(call->peer_host, sizeof(call->peer_host), msg->peer_host, "0.0.0.0");
         call->peer_port = msg->peer_port;

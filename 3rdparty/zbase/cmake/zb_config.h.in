@@ -1,0 +1,7 @@
+#ifndef ZB_CONFIG_H
+#define ZB_CONFIG_H
+
+/* zbase 平台探测结果（CMake configure_file 生成） */
+#cmakedefine ZB_HAVE_POSIX_SEM 1
+
+#endif /* ZB_CONFIG_H */

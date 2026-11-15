@@ -8,8 +8,8 @@
 #include <nb/rpc/service.h>
 #include <nb/rpc/node.h>
 #include <nb/rpc/shm.h>
-#include <platform.h>
-#include <thread/thread_pool.h>
+#include <zn/platform.h>
+#include <zn/thread/thread_pool.h>
 
 #define NB_LOG_TAG "bench"
 #include <nb/base/log.h>
@@ -35,11 +35,11 @@ static void on_signal(int signo)
 
 static const char k_pattern[] = "rpc-bench-payload-pattern";
 
-/* 自定义 executor：用一个独立的 ntk_thread_pool 承载阻塞方法。 */
+/* 自定义 executor：用一个独立的 zn_thread_pool 承载阻塞方法。 */
 static int executor_submit(void *ctx, void (*fn)(void *), void *user)
 {
-    ntk_thread_pool *pool = (ntk_thread_pool *)ctx;
-    return ntk_thread_pool_async(pool, fn, user, 0) == NTK_OK ? NB_OK : NB_ERR_IO;
+    zn_thread_pool *pool = (zn_thread_pool *)ctx;
+    return zn_thread_pool_async(pool, fn, user, 0) == ZN_OK ? NB_OK : NB_ERR_IO;
 }
 
 static void order_get(nb_call_t *call, const nb_request_t *req, void *user)
@@ -49,7 +49,7 @@ static void order_get(nb_call_t *call, const nb_request_t *req, void *user)
 
     /* Fault-injection hook for timeout tests: stall the handler before replying. */
     if (options && options->delay_ms) {
-        ntk_sleep_ms((unsigned)options->delay_ms);
+        zn_sleep_ms((unsigned)options->delay_ms);
     }
     if (options && options->echo_request) {
         nb_reply(call, 0, &req->payload);
@@ -117,9 +117,9 @@ int main(int argc, char **argv)
     size_t block_delay_ms = 0;
     unsigned block_executor_threads = 0;
     nb_node_mode_t mode = NB_NODE_MODE_MESH;
-    ntk_thread_pool *main_executor_pool = NULL;
+    zn_thread_pool *main_executor_pool = NULL;
     nb_service_executor_t main_executor;
-    ntk_thread_pool *block_executor_pool = NULL;
+    zn_thread_pool *block_executor_pool = NULL;
     nb_service_executor_t block_executor;
 
     memset(&fast_options, 0, sizeof(fast_options));
@@ -130,7 +130,7 @@ int main(int argc, char **argv)
     nb_node_config_default(&node_cfg);
     node_cfg.name = "bench_server";
     node_cfg.rpc.bind_host = "127.0.0.1";
-    node_cfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    node_cfg.rpc.discovery.multicast_group = "127.0.0.1";
     node_cfg.rpc.discovery.port = NB_DISCOVERY_PORT;
     node_cfg.runtime.io_threads = 0; /* 0 = auto (hardware_concurrency); O1: was 2 */
 
@@ -245,13 +245,13 @@ int main(int argc, char **argv)
     rc = nb_service_create(node, service_name, &service);
     if (rc == NB_OK) {
         if (main_executor_threads > 0) {
-            ntk_thread_pool_opts_t eopts;
+            zn_thread_pool_opts_t eopts;
             nb_service_method_options_t mopts = NB_SERVICE_METHOD_OPTIONS_INIT;
             memset(&eopts, 0, sizeof(eopts));
             eopts.thread_count = main_executor_threads;
-            eopts.priority = NTK_THREAD_PRIO_NORMAL;
+            eopts.priority = ZB_THREAD_PRIO_NORMAL;
             eopts.auto_start = 1;
-            main_executor_pool = ntk_thread_pool_create(&eopts);
+            main_executor_pool = zn_thread_pool_create(&eopts);
             if (!main_executor_pool) {
                 rc = NB_ERR_NOMEM;
             } else {
@@ -270,13 +270,13 @@ int main(int argc, char **argv)
     if (rc == NB_OK && block_method_name && block_delay_ms > 0) {
         block_options.delay_ms = block_delay_ms;
         if (block_executor_threads > 0) {
-            ntk_thread_pool_opts_t eopts;
+            zn_thread_pool_opts_t eopts;
             nb_service_method_options_t mopts = NB_SERVICE_METHOD_OPTIONS_INIT;
             memset(&eopts, 0, sizeof(eopts));
             eopts.thread_count = block_executor_threads;
-            eopts.priority = NTK_THREAD_PRIO_NORMAL;
+            eopts.priority = ZB_THREAD_PRIO_NORMAL;
             eopts.auto_start = 1;
-            block_executor_pool = ntk_thread_pool_create(&eopts);
+            block_executor_pool = zn_thread_pool_create(&eopts);
             if (!block_executor_pool) {
                 rc = NB_ERR_NOMEM;
             } else {
@@ -316,16 +316,16 @@ int main(int argc, char **argv)
                  (unsigned)block_delay_ms);
 
     while (!g_stop) {
-        ntk_sleep_ms(100);
+        zn_sleep_ms(100);
     }
 
 done:
     if (main_executor_pool) {
-        ntk_thread_pool_destroy(main_executor_pool);
+        zn_thread_pool_destroy(main_executor_pool);
         main_executor_pool = NULL;
     }
     if (block_executor_pool) {
-        ntk_thread_pool_destroy(block_executor_pool);
+        zn_thread_pool_destroy(block_executor_pool);
         block_executor_pool = NULL;
     }
     nb_node_destroy(node);

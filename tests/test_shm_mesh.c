@@ -9,8 +9,8 @@
 #include <nb/rpc/node.h>
 #include <nb/rpc/service.h>
 #include <nb/rpc/shm.h>
-#include <platform.h>
-#include <thread/sem.h>
+#include <zn/platform.h>
+#include <zb/os/sem.h>
 
 #define NB_LOG_TAG "test"
 #include <nb/base/log.h>
@@ -20,7 +20,7 @@
 #include <unistd.h>
 
 typedef struct call_state {
-    ntk_sem *sem;
+    zb_sem *sem;
     int status;
     char buf[256];
     size_t len;
@@ -41,7 +41,7 @@ static void on_response(int status, const nb_response_t *resp, void *user)
         memcpy(st->buf, resp->payload.data, resp->payload.len);
         st->len = resp->payload.len;
     }
-    ntk_sem_post(st->sem, 1);
+    zb_sem_post(st->sem, 1);
 }
 
 int main(void)
@@ -82,10 +82,10 @@ int main(void)
     cfg1.name = "shm-mesh-a";
     cfg1.rpc.mode = NB_NODE_MODE_MESH;
     cfg1.runtime.io_threads = 1;
-    cfg1.rpc.discovery.broadcast_host = "127.0.0.1";
+    cfg1.rpc.discovery.multicast_group = "127.0.0.1";
     cfg1.rpc.discovery.port = 42621;
-    cfg1.rpc.discovery.hello_interval_ms = 100;
-    cfg1.rpc.discovery.node_ttl_ms = 3000;
+    cfg1.rpc.discovery.heartbeat_interval_ms = 100;
+    cfg1.rpc.discovery.lease_ms = 3000;
     cfg1.bindings = &binding1;
     cfg1.binding_count = 1;
 
@@ -93,10 +93,10 @@ int main(void)
     cfg2.name = "shm-mesh-b";
     cfg2.rpc.mode = NB_NODE_MODE_MESH;
     cfg2.runtime.io_threads = 1;
-    cfg2.rpc.discovery.broadcast_host = "127.0.0.1";
+    cfg2.rpc.discovery.multicast_group = "127.0.0.1";
     cfg2.rpc.discovery.port = 42622;
-    cfg2.rpc.discovery.hello_interval_ms = 100;
-    cfg2.rpc.discovery.node_ttl_ms = 3000;
+    cfg2.rpc.discovery.heartbeat_interval_ms = 100;
+    cfg2.rpc.discovery.lease_ms = 3000;
     cfg2.bindings = &binding2;
     cfg2.binding_count = 1;
 
@@ -128,7 +128,7 @@ int main(void)
     }
 
     memset(&st, 0, sizeof(st));
-    st.sem = ntk_sem_create(0);
+    st.sem = zb_sem_create(0);
     if (!st.sem) {
         failed = 1;
         goto done;
@@ -142,7 +142,7 @@ int main(void)
         opt.timeout_ms = 3000;
         rc = nb_proxy_call_async(proxy, "MeshEcho", "echo", &payload, &opt, on_response, &st);
     }
-    if (rc != NB_OK || ntk_sem_timedwait(st.sem, 4000) != NTK_OK) {
+    if (rc != NB_OK || zb_sem_timedwait(st.sem, 4000) != ZN_OK) {
         nb_log_error("shm mesh call failed: %d", rc);
         failed = 1;
     } else if (st.status != NB_OK || st.len != payload.len ||
@@ -150,7 +150,7 @@ int main(void)
         nb_log_error("shm mesh response mismatch");
         failed = 1;
     }
-    ntk_sem_destroy(st.sem);
+    zb_sem_destroy(st.sem);
 
 done:
     if (proxy) {

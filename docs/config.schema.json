@@ -157,12 +157,12 @@
     },
     "dds": {
       "type": "object",
-      "description": "DDS 主干：participant/topic/writer/reader，后端 rtps 或 cyclone。不依赖 RPC node。",
+      "description": "DDS 主干：participant/topic/writer/reader，后端固定为内建 rtps。不依赖 RPC node。",
       "properties": {
         "backend": {
           "type": "string",
-          "enum": ["rtps", "cyclone"],
-          "description": "DDS 后端。默认 rtps；cyclone 需要 NB_ENABLE_DDS=ON。"
+          "enum": ["rtps"],
+          "description": "DDS 后端。只支持内建 rtps（唯一后端），其它取值报错。"
         },
         "domain": {
           "type": "integer",
@@ -212,13 +212,6 @@
             }
           },
           "additionalProperties": true
-        },
-        "cyclone": {
-          "type": "object",
-          "properties": {
-            "config_xml": { "type": "string", "maxLength": 511 }
-          },
-          "additionalProperties": true
         }
       },
       "additionalProperties": true
@@ -254,7 +247,7 @@
     },
     "qos": {
       "type": "object",
-      "description": "DDS QoS。缺省字段继承 participant 默认值；两个后端使用同一套 DDS 默认（best_effort / volatile / keep_last 1）。",
+      "description": "DDS QoS。缺省字段继承 participant 默认值；使用统一的 DDS 默认（best_effort / volatile / keep_last 1）。",
       "properties": {
         "reliability": { "type": "string", "enum": ["best_effort", "reliable"] },
         "durability": { "type": "string", "enum": ["volatile", "transient_local"] },

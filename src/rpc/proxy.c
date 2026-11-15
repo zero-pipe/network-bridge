@@ -412,8 +412,8 @@ int nb_proxy_cancel(nb_proxy_t *proxy, nb_request_id_t request_id)
     t->proxy = proxy;
     t->id = request_id;
     {
-        ntk_poller *owner = nb_pending_owner(proxy->node, request_id);
-        if (ntk_poller_async(owner ? owner : proxy->node->poller, nb_cancel_task_fn, t, 1) != NTK_OK) {
+        zn_poller *owner = nb_pending_owner(proxy->node, request_id);
+        if (zn_poller_async(owner ? owner : proxy->node->poller, nb_cancel_task_fn, t, 1) != ZN_OK) {
             free(t);
             return NB_ERR_IO;
         }

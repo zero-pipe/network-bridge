@@ -4,7 +4,7 @@
 /* pending：客户端未完成调用的关联表（request_id -> 回调/超时）。 */
 
 #include <nb/rpc/types.h>
-#include <ntk.h>
+#include <zn/zn.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -16,7 +16,7 @@
 typedef struct nb_pending {
     int used;
     nb_node_t *node;
-    ntk_poller *poller;               /* 归属 poller：发送/超时/重传/回调都在此线程 */
+    zn_poller *poller;               /* 归属 poller：发送/超时/重传/回调都在此线程 */
     struct nb_pending *lane_prev;     /* 归属 poller 的 pending lane */
     struct nb_pending *lane_next;
     uint32_t gen;                     /* 槽位复用代际，tick 迭代时用于识别被复用的槽位 */
@@ -62,14 +62,14 @@ nb_pending_t *nb_pending_add(nb_node_t *node,
                                nb_response_fn cb,
                                void *user,
                                uint64_t timeout_ms,
-                               ntk_poller *poller,
+                               zn_poller *poller,
                                int *out_rc);
 nb_pending_t *nb_pending_find(nb_node_t *node, nb_request_id_t id);
 /* 返回该 request_id 的归属 poller；未找到返回 NULL。 */
-ntk_poller *nb_pending_owner(nb_node_t *node, nb_request_id_t id);
+zn_poller *nb_pending_owner(nb_node_t *node, nb_request_id_t id);
 void nb_pending_invoke(nb_pending_t *p, int status, const nb_response_t *resp);
 void nb_pending_release(nb_pending_t *p);
-void nb_pending_tick(nb_node_t *node, uint64_t now_ms, ntk_poller *poller);
+void nb_pending_tick(nb_node_t *node, uint64_t now_ms, zn_poller *poller);
 void nb_pending_cleanup(nb_node_t *node);
 
 /* RTO 重传：按保存的请求参数重发（实现于 proxy.c）。 */

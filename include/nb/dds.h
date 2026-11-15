@@ -9,7 +9,7 @@
  *   <nb/dds/writer.h>       publications
  *   <nb/dds/reader.h>       subscriptions, history, wait sets
  *   <nb/dds/qos.h>          DDS policy set
- *   <nb/dds/backend.h>      backend SPI (rtps / cyclone)
+ *   <nb/dds/backend.h>      backend SPI (built-in rtps)
  *
  * The spine is independent of the RPC node: it owns its DDS domain and lets
  * the backend run discovery (SPDP/SEDP). RPC links (tcp/udp/shm) never appear

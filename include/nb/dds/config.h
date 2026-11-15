@@ -57,8 +57,6 @@ typedef struct nb_dds_config {
     nb_dds_qos_t qos;
     bool has_rtps;
     nb_dds_rtps_config_t rtps;
-    bool has_cyclone;
-    char cyclone_config_xml[512];
 } nb_dds_config_t;
 
 typedef struct nb_dds_config_doc nb_dds_config_doc_t;

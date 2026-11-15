@@ -5,7 +5,7 @@
 
 #include <rtps/rtps.h>
 
-#include <ntk.h>
+#include <zn/zn.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,7 +15,7 @@
 
 typedef struct nb_dds_rtps_participant {
     rtps_participant_t *participant;
-    ntk_mutex *lock;
+    zb_mutex *lock;
     nb_dds_status_callback_t status_cb;
     void *status_user;
 } nb_dds_rtps_participant_t;
@@ -190,10 +190,10 @@ static void nb_dds_rtps_on_status(void *user, const rtps_status_event_t *event)
     if (!participant || !event) {
         return;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     callback = participant->status_cb;
     cb_user = participant->status_user;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     if (!callback) {
         return;
     }
@@ -233,7 +233,7 @@ static int nb_dds_rtps_participant_create(const nb_dds_participant_options_t *op
     if (!wrapper) {
         return NB_ERR_NOMEM;
     }
-    wrapper->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    wrapper->lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     if (!wrapper->lock) {
         free(wrapper);
         return NB_ERR_NOMEM;
@@ -260,7 +260,7 @@ static int nb_dds_rtps_participant_create(const nb_dds_participant_options_t *op
     }
     rc = rtps_participant_create(&config, &wrapper->participant);
     if (rc != RTPS_OK) {
-        ntk_mutex_destroy(wrapper->lock);
+        zb_mutex_destroy(wrapper->lock);
         free(wrapper);
         return NB_ERR_IO;
     }
@@ -309,7 +309,7 @@ static void nb_dds_rtps_participant_destroy(void *participant)
     if (wrapper->participant) {
         rtps_participant_destroy(wrapper->participant);
     }
-    ntk_mutex_destroy(wrapper->lock);
+    zb_mutex_destroy(wrapper->lock);
     free(wrapper);
 }
 
@@ -475,10 +475,10 @@ static int nb_dds_rtps_set_status_callback(void *participant,
     if (!wrapper) {
         return NB_ERR_INVALID;
     }
-    ntk_mutex_lock(wrapper->lock);
+    zb_mutex_lock(wrapper->lock);
     wrapper->status_cb = callback;
     wrapper->status_user = user;
-    ntk_mutex_unlock(wrapper->lock);
+    zb_mutex_unlock(wrapper->lock);
     return NB_OK;
 }
 

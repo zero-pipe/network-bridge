@@ -56,15 +56,15 @@ int nb_dds_topic_create(nb_dds_participant_t *participant,
         free(topic);
         return rc;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (existing = participant->topics; existing; existing = existing->next) {
         if (strcmp(existing->wire_name, topic->wire_name) == 0) {
-            ntk_mutex_unlock(participant->lock);
+            zb_mutex_unlock(participant->lock);
             free(topic);
             return NB_ERR_ALREADY;
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     (void)snprintf(topic->type_name, sizeof(topic->type_name), "%s",
                    (type_name && type_name[0]) ? type_name : "dds::Message");
     if (qos) {
@@ -84,10 +84,10 @@ int nb_dds_topic_create(nb_dds_participant_t *participant,
         free(topic);
         return rc;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     topic->next = participant->topics;
     participant->topics = topic;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     *out = topic;
     return NB_OK;
 }
@@ -101,9 +101,9 @@ void nb_dds_topic_destroy(nb_dds_topic_t *topic)
         return;
     }
     participant = topic->participant;
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     if (topic->writer_count > 0 || topic->reader_count > 0) {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         nb_log_warn("dds topic '%s' still has endpoints; destroy them first", topic->name);
         return;
     }
@@ -113,7 +113,7 @@ void nb_dds_topic_destroy(nb_dds_topic_t *topic)
             break;
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     participant->ops->topic_destroy(participant->backend, topic->backend);
     free(topic);
 }

@@ -27,10 +27,10 @@ int rtps_publisher_create(rtps_participant_t *participant,
     if (qos) {
         publisher->qos = *qos;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     publisher->next = participant->publishers;
     participant->publishers = publisher;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     *out = publisher;
     return RTPS_OK;
 }
@@ -50,14 +50,14 @@ int rtps_publisher_destroy(rtps_publisher_t *publisher)
             break;
         }
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (link = &participant->publishers; *link; link = &(*link)->next) {
         if (*link == publisher) {
             *link = publisher->next;
             break;
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     free(publisher);
     return RTPS_OK;
 }
@@ -94,10 +94,10 @@ int rtps_subscriber_create(rtps_participant_t *participant,
     if (qos) {
         subscriber->qos = *qos;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     subscriber->next = participant->subscribers;
     participant->subscribers = subscriber;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     *out = subscriber;
     return RTPS_OK;
 }
@@ -116,14 +116,14 @@ int rtps_subscriber_destroy(rtps_subscriber_t *subscriber)
             break;
         }
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (link = &participant->subscribers; *link; link = &(*link)->next) {
         if (*link == subscriber) {
             *link = subscriber->next;
             break;
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     free(subscriber);
     return RTPS_OK;
 }

@@ -47,13 +47,22 @@ typedef struct nb_node_runtime_config {
     unsigned send_lanes;
 } nb_node_runtime_config_t;
 
-/* Service discovery. */
+/*
+ * Service discovery (nb_mesh): 组播定长心跳 + 编队隔离 + 摘要比对 + 按需内省。
+ */
 typedef struct nb_node_discovery_config {
     bool disable;
-    const char *broadcast_host;
+    /* 组播组；NULL = 由 formation_id 推导。"127.0.0.1" 之类的主机名/IP 也
+     * 可以，便于本机多节点测试。 */
+    const char *multicast_group;
     uint16_t port;
-    uint32_t hello_interval_ms;
-    uint32_t node_ttl_ms;
+    /* 编队/任务组 ID：不同编队互不可见（隔离）。 */
+    uint32_t formation_id;
+    /* 心跳周期与对端租约。 */
+    uint32_t heartbeat_interval_ms;
+    uint32_t lease_ms;
+    /* 核心服务能力掩码，随心跳携带，供上层快速过滤。 */
+    uint32_t service_mask;
 } nb_node_discovery_config_t;
 
 /* Metrics switches (process-global). */

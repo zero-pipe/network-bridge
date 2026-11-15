@@ -6,8 +6,8 @@
 #include <string.h>
 
 typedef struct nb_sync_ctx {
-    ntk_sem *sem;
-    ntk_mutex *lock;
+    zb_sem *sem;
+    zb_mutex *lock;
     int refs;       /* 2：等待方 + 回调方，最后一个释放 */
     int done;
     int status;     /* 传输状态 */
@@ -22,9 +22,9 @@ typedef struct nb_sync_ctx {
 static void nb_sync_ctx_put(nb_sync_ctx_t *c)
 {
     int last;
-    ntk_mutex_lock(c->lock);
+    zb_mutex_lock(c->lock);
     last = (--c->refs == 0);
-    ntk_mutex_unlock(c->lock);
+    zb_mutex_unlock(c->lock);
     if (last) {
         if (c->data) {
             free(c->data);
@@ -35,8 +35,8 @@ static void nb_sync_ctx_put(nb_sync_ctx_t *c)
         if (c->message) {
             free(c->message);
         }
-        ntk_mutex_destroy(c->lock);
-        ntk_sem_destroy(c->sem);
+        zb_mutex_destroy(c->lock);
+        zb_sem_destroy(c->sem);
         free(c);
     }
 }
@@ -44,9 +44,9 @@ static void nb_sync_ctx_put(nb_sync_ctx_t *c)
 static void nb_sync_response_cb(int status, const nb_response_t *resp, void *user)
 {
     nb_sync_ctx_t *c = (nb_sync_ctx_t *)user;
-    ntk_mutex_lock(c->lock);
+    zb_mutex_lock(c->lock);
     if (c->done) {
-        ntk_mutex_unlock(c->lock);
+        zb_mutex_unlock(c->lock);
         nb_sync_ctx_put(c);
         return;
     }
@@ -93,8 +93,8 @@ static void nb_sync_response_cb(int status, const nb_response_t *resp, void *use
         }
     }
     c->done = 1;
-    ntk_mutex_unlock(c->lock);
-    ntk_sem_post(c->sem, 1);
+    zb_mutex_unlock(c->lock);
+    zb_sem_post(c->sem, 1);
     nb_sync_ctx_put(c);
 }
 
@@ -120,14 +120,14 @@ int nb_proxy_call_sync(nb_proxy_t *proxy,
     if (!c) {
         return NB_ERR_NOMEM;
     }
-    c->sem = ntk_sem_create(0);
-    c->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    c->sem = zb_sem_create(0);
+    c->lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     if (!c->sem || !c->lock) {
         if (c->sem) {
-            ntk_sem_destroy(c->sem);
+            zb_sem_destroy(c->sem);
         }
         if (c->lock) {
-            ntk_mutex_destroy(c->lock);
+            zb_mutex_destroy(c->lock);
         }
         free(c);
         return NB_ERR_NOMEM;
@@ -149,9 +149,9 @@ int nb_proxy_call_sync(nb_proxy_t *proxy,
     if (options && options->out_request_id) {
         *options->out_request_id = id;
     }
-    if (ntk_sem_timedwait(c->sem,
+    if (zb_sem_timedwait(c->sem,
                           (unsigned)(local.timeout_ms ? local.timeout_ms : NB_DEFAULT_TIMEOUT_MS)) !=
-        NTK_OK) {
+        ZN_OK) {
         /* 取消未完成调用；回调（若仍会到达）会释放它的引用。 */
         (void)nb_proxy_cancel(proxy, id);
         nb_sync_ctx_put(c);

@@ -262,29 +262,39 @@ static int cfg_parse_peers(rpc_doc_t *doc, const cJSON *discovery, nb_config_err
 
 static int cfg_parse_discovery(rpc_doc_t *doc, const cJSON *rpc, nb_config_error_t *err)
 {
-    static const char *const known[] = {"broadcast", "peers", "hello_interval", "node_ttl"};
+    static const char *const known[] = {"group", "formation", "peers", "heartbeat_interval",
+                                        "lease", "service_mask", "port"};
     const cJSON *obj = NULL;
-    const char *broadcast = NULL;
+    const char *group = NULL;
     int rc = nb_json_object(rpc, "discovery", &obj, err, "rpc");
 
     if (rc != NB_OK || !obj) {
         return rc;
     }
     nb_json_warn_unknown(obj, CFG_KEYS(known), "rpc.discovery");
-    rc = nb_json_string_field(obj, "broadcast", &broadcast, err, "rpc.discovery");
-    if (rc == NB_OK && broadcast) {
-        if (nb_json_host_port(broadcast, doc->discovery_host, sizeof(doc->discovery_host),
+    /* group 缺省时由 formation 推导组播组；给了 "host:port" 也接受。 */
+    rc = nb_json_string_field(obj, "group", &group, err, "rpc.discovery");
+    if (rc == NB_OK && group) {
+        if (nb_json_host_port(group, doc->discovery_host, sizeof(doc->discovery_host),
                               &doc->node.rpc.discovery.port) != NB_OK) {
-            return nb_json_fail(err, "rpc.discovery.broadcast", "must be host:port");
+            return nb_json_fail(err, "rpc.discovery.group", "must be host:port");
         }
     }
     if (rc == NB_OK) {
-        rc = nb_json_duration_field(obj, "hello_interval",
-                                    &doc->node.rpc.discovery.hello_interval_ms, err,
+        rc = nb_json_u32_field(obj, "formation", &doc->node.rpc.discovery.formation_id, err,
+                               "rpc.discovery");
+    }
+    if (rc == NB_OK) {
+        rc = nb_json_u32_field(obj, "service_mask", &doc->node.rpc.discovery.service_mask, err,
+                               "rpc.discovery");
+    }
+    if (rc == NB_OK) {
+        rc = nb_json_duration_field(obj, "heartbeat_interval",
+                                    &doc->node.rpc.discovery.heartbeat_interval_ms, err,
                                     "rpc.discovery");
     }
     if (rc == NB_OK) {
-        rc = nb_json_duration_field(obj, "node_ttl", &doc->node.rpc.discovery.node_ttl_ms, err,
+        rc = nb_json_duration_field(obj, "lease", &doc->node.rpc.discovery.lease_ms, err,
                                     "rpc.discovery");
     }
     if (rc == NB_OK) {
@@ -449,7 +459,9 @@ static void cfg_doc_rebind(rpc_doc_t *doc)
 {
     doc->node.name = doc->name;
     doc->node.rpc.bind_host = doc->bind_host;
-    doc->node.rpc.discovery.broadcast_host = doc->discovery_host;
+    /* 没配 group 时保持 NULL：由 formation_id 推导组播组。 */
+    doc->node.rpc.discovery.multicast_group =
+        doc->discovery_host[0] ? doc->discovery_host : NULL;
     doc->node.bindings = doc->binding_count ? doc->bindings : NULL;
     doc->node.binding_count = doc->binding_count;
     doc->node.rpc.routes = doc->route_count ? doc->routes : NULL;

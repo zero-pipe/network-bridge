@@ -8,7 +8,7 @@
 | 门禁 | CTest 标签 | 覆盖范围 | 命令 |
 | --- | --- | --- | --- |
 | unit | `unit` | 纯模块、codec、配置、组帧、指标、registry | `python3 tools/gate.py unit` |
-| e2e | `e2e` | 进程内 loopback/stream/api/worker/semantics、独立 server/client echo，以及 DDS participant/topic/writer/reader（rtps，DDS 开启时 cyclone） | `python3 tools/gate.py e2e` |
+| e2e | `e2e` | 进程内 loopback/stream/api/worker/semantics、独立 server/client echo，以及 DDS participant/topic/writer/reader（内建 rtps 后端） | `python3 tools/gate.py e2e` |
 | perf | 无 | tcp/udp/shm 吞吐与延迟冒烟，可选基线回归 | `python3 tools/gate.py perf` |
 | stability | 无 | 长跑 server、多轮不同载荷大小、失败与资源增长检查 | `python3 tools/gate.py stability` |
 
@@ -77,7 +77,6 @@ python3 tools/gate.py stability --transports tcp,udp,dds --stability-duration 30
 - 每种传输至少完成 `--e2e-requests` 个请求（默认 200）。
 - `status=ok`、`failed=0`，响应字节数等于成功请求数乘以预期响应大小。
 - 场景结束前 server 不能退出。
-- `NB_ENABLE_DDS=OFF` 时自动跳过 DDS，不算失败。
 
 ### perf
 

@@ -25,7 +25,7 @@ cmake --build build --config Release
 ```
 
 示例可执行文件生成在构建树的 `examples/` 下。`04_config` 使用的 JSON
-文件会自动复制到可执行文件旁边。`03_dds_pubsub` 默认使用内建 RTPS 后端；`cyclone` 后端需要 `NB_ENABLE_DDS=ON`（默认开启）。
+文件会自动复制到可执行文件旁边。`03_dds_pubsub` 使用内建 RTPS 后端（唯一后端）。
 
 ## 阅读顺序
 

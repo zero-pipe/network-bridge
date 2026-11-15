@@ -3,7 +3,7 @@
 
 #include "util.h"
 
-#include <ntk.h>
+#include <zn/zn.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -15,7 +15,7 @@ void nb_route_init(nb_route_table_t *table)
     }
     table->routes = NULL;
     if (!table->lock) {
-        table->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+        table->lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     }
 }
 
@@ -27,7 +27,7 @@ void nb_route_cleanup(nb_route_table_t *table)
         return;
     }
     if (table->lock) {
-        ntk_mutex_lock((ntk_mutex *)table->lock);
+        zb_mutex_lock((zb_mutex *)table->lock);
     }
     HASH_ITER(hh, table->routes, r, tmp)
     {
@@ -36,8 +36,8 @@ void nb_route_cleanup(nb_route_table_t *table)
     }
     table->routes = NULL;
     if (table->lock) {
-        ntk_mutex_unlock((ntk_mutex *)table->lock);
-        ntk_mutex_destroy((ntk_mutex *)table->lock);
+        zb_mutex_unlock((zb_mutex *)table->lock);
+        zb_mutex_destroy((zb_mutex *)table->lock);
         table->lock = NULL;
     }
 }
@@ -79,12 +79,12 @@ int nb_route_set(nb_route_table_t *table,
         return NB_ERR_NOT_SUPPORTED;
     }
     if (table->lock) {
-        ntk_mutex_lock((ntk_mutex *)table->lock);
+        zb_mutex_lock((zb_mutex *)table->lock);
     }
     r = nb_route_upsert(table, service);
     if (!r) {
         if (table->lock) {
-            ntk_mutex_unlock((ntk_mutex *)table->lock);
+            zb_mutex_unlock((zb_mutex *)table->lock);
         }
         return NB_ERR_NOMEM;
     }
@@ -96,13 +96,13 @@ int nb_route_set(nb_route_table_t *table,
                                port,
                                transport) != NB_OK) {
         if (table->lock) {
-            ntk_mutex_unlock((ntk_mutex *)table->lock);
+            zb_mutex_unlock((zb_mutex *)table->lock);
         }
         return NB_ERR_INVALID;
     }
     r->is_static = 1;
     if (table->lock) {
-        ntk_mutex_unlock((ntk_mutex *)table->lock);
+        zb_mutex_unlock((zb_mutex *)table->lock);
     }
     return NB_OK;
 }
@@ -126,12 +126,12 @@ int nb_route_add_endpoint(nb_route_table_t *table,
         return NB_ERR_TOOBIG;
     }
     if (table->lock) {
-        ntk_mutex_lock((ntk_mutex *)table->lock);
+        zb_mutex_lock((zb_mutex *)table->lock);
     }
     r = nb_route_upsert(table, service);
     if (!r) {
         if (table->lock) {
-            ntk_mutex_unlock((ntk_mutex *)table->lock);
+            zb_mutex_unlock((zb_mutex *)table->lock);
         }
         return NB_ERR_NOMEM;
     }
@@ -144,21 +144,21 @@ int nb_route_add_endpoint(nb_route_table_t *table,
         if (nb_endpoint_equal(existing, &endpoint)) {
             r->is_static = is_static || r->is_static;
             if (table->lock) {
-                ntk_mutex_unlock((ntk_mutex *)table->lock);
+                zb_mutex_unlock((zb_mutex *)table->lock);
             }
             return NB_OK;
         }
     }
     if (r->endpoint_count == NB_MAX_ENDPOINTS) {
         if (table->lock) {
-            ntk_mutex_unlock((ntk_mutex *)table->lock);
+            zb_mutex_unlock((zb_mutex *)table->lock);
         }
         return NB_ERR_NOMEM;
     }
     r->endpoints[r->endpoint_count++] = endpoint;
     r->is_static = is_static || r->is_static;
     if (table->lock) {
-        ntk_mutex_unlock((ntk_mutex *)table->lock);
+        zb_mutex_unlock((zb_mutex *)table->lock);
     }
     return NB_OK;
 }
@@ -219,7 +219,7 @@ int nb_route_select(nb_route_table_t *table,
         return NB_ERR_INVALID;
     }
     if (table->lock) {
-        ntk_mutex_lock((ntk_mutex *)table->lock);
+        zb_mutex_lock((zb_mutex *)table->lock);
     }
     HASH_FIND_STR(table->routes, service, r);
     if (r && r->endpoint_count) {
@@ -242,7 +242,7 @@ int nb_route_select(nb_route_table_t *table,
         found = 1;
     }
     if (table->lock) {
-        ntk_mutex_unlock((ntk_mutex *)table->lock);
+        zb_mutex_unlock((zb_mutex *)table->lock);
     }
     return found ? NB_OK : NB_ERR_NOTFOUND;
 }

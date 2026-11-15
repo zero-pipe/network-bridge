@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <ntk.h>
+#include <zn/zn.h>
 
 typedef struct nb_rtps_reliable_sample {
     uint64_t sn;
@@ -22,7 +22,7 @@ typedef struct nb_rtps_reliable_sample {
 } nb_rtps_reliable_sample_t;
 
 struct nb_rtps_reliable_writer {
-    ntk_mutex *lock;
+    zb_mutex *lock;
     nb_rtps_reliable_sample_t *samples;
     size_t capacity;
     size_t count;
@@ -74,10 +74,10 @@ nb_rtps_reliable_writer_t *nb_rtps_reliable_writer_create(size_t capacity)
     }
     writer->samples =
         (nb_rtps_reliable_sample_t *)calloc(capacity, sizeof(*writer->samples));
-    writer->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    writer->lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     if (!writer->samples || !writer->lock) {
         if (writer->lock) {
-            ntk_mutex_destroy(writer->lock);
+            zb_mutex_destroy(writer->lock);
         }
         free(writer->samples);
         free(writer);
@@ -92,9 +92,9 @@ void nb_rtps_reliable_seed(nb_rtps_reliable_writer_t *writer, uint64_t next_sn)
     if (!writer) {
         return;
     }
-    ntk_mutex_lock(writer->lock);
+    zb_mutex_lock(writer->lock);
     writer->next_sn = next_sn;
-    ntk_mutex_unlock(writer->lock);
+    zb_mutex_unlock(writer->lock);
 }
 
 void nb_rtps_reliable_writer_destroy(nb_rtps_reliable_writer_t *writer)
@@ -108,7 +108,7 @@ void nb_rtps_reliable_writer_destroy(nb_rtps_reliable_writer_t *writer)
         free(writer->samples[i].payload);
     }
     if (writer->lock) {
-        ntk_mutex_destroy(writer->lock);
+        zb_mutex_destroy(writer->lock);
     }
     free(writer->samples);
     free(writer);
@@ -158,7 +158,7 @@ int nb_rtps_reliable_add_instance(nb_rtps_reliable_writer_t *writer,
         memcpy(copy, payload, len);
     }
 
-    ntk_mutex_lock(writer->lock);
+    zb_mutex_lock(writer->lock);
     while (writer->count > 0 &&
            (writer->count >= writer->capacity ||
             writer->bytes + len > NB_RTPS_RELIABLE_MAX_BYTES)) {
@@ -177,12 +177,12 @@ int nb_rtps_reliable_add_instance(nb_rtps_reliable_writer_t *writer,
     if (handle) {
         memcpy(sample->handle, handle, NB_INSTANCE_HANDLE_SIZE);
     }
-    sample->written_ms = ntk_wall_ms();
+    sample->written_ms = zn_wall_ms();
     sample->source_ns = source_ns ? source_ns : sample->written_ms * 1000000ull;
     if (out_sn) {
         *out_sn = sample->sn;
     }
-    ntk_mutex_unlock(writer->lock);
+    zb_mutex_unlock(writer->lock);
     return NB_OK;
 }
 
@@ -210,10 +210,10 @@ int nb_rtps_reliable_get_instance(const nb_rtps_reliable_writer_t *writer,
     if (!writer) {
         return NB_ERR_INVALID;
     }
-    ntk_mutex_lock(writer->lock);
+    zb_mutex_lock(writer->lock);
     sample = find_sample((nb_rtps_reliable_writer_t *)writer, sn);
     if (!sample) {
-        ntk_mutex_unlock(writer->lock);
+        zb_mutex_unlock(writer->lock);
         return NB_ERR_NOTFOUND;
     }
     if (payload) {
@@ -234,7 +234,7 @@ int nb_rtps_reliable_get_instance(const nb_rtps_reliable_writer_t *writer,
     if (status) {
         *status = sample->status;
     }
-    ntk_mutex_unlock(writer->lock);
+    zb_mutex_unlock(writer->lock);
     return NB_OK;
 }
 
@@ -247,14 +247,14 @@ int nb_rtps_reliable_sample_ms(const nb_rtps_reliable_writer_t *writer,
     if (!writer || !out_ms) {
         return NB_ERR_INVALID;
     }
-    ntk_mutex_lock(writer->lock);
+    zb_mutex_lock(writer->lock);
     sample = find_sample((nb_rtps_reliable_writer_t *)writer, sn);
     if (!sample) {
-        ntk_mutex_unlock(writer->lock);
+        zb_mutex_unlock(writer->lock);
         return NB_ERR_NOTFOUND;
     }
     *out_ms = sample->written_ms;
-    ntk_mutex_unlock(writer->lock);
+    zb_mutex_unlock(writer->lock);
     return NB_OK;
 }
 
@@ -267,14 +267,14 @@ int nb_rtps_reliable_source_ns(const nb_rtps_reliable_writer_t *writer,
     if (!writer || !out_ns) {
         return NB_ERR_INVALID;
     }
-    ntk_mutex_lock(writer->lock);
+    zb_mutex_lock(writer->lock);
     sample = find_sample((nb_rtps_reliable_writer_t *)writer, sn);
     if (!sample) {
-        ntk_mutex_unlock(writer->lock);
+        zb_mutex_unlock(writer->lock);
         return NB_ERR_NOTFOUND;
     }
     *out_ns = sample->source_ns;
-    ntk_mutex_unlock(writer->lock);
+    zb_mutex_unlock(writer->lock);
     return NB_OK;
 }
 
@@ -290,7 +290,7 @@ void nb_rtps_reliable_state(const nb_rtps_reliable_writer_t *writer,
     if (!writer) {
         return;
     }
-    ntk_mutex_lock(writer->lock);
+    zb_mutex_lock(writer->lock);
     count = writer->count;
     if (count == 0) {
         first = writer->next_sn + 1u;
@@ -299,7 +299,7 @@ void nb_rtps_reliable_state(const nb_rtps_reliable_writer_t *writer,
         first = writer->samples[writer->head].sn;
         last = writer->samples[(writer->head + count - 1) % writer->capacity].sn;
     }
-    ntk_mutex_unlock(writer->lock);
+    zb_mutex_unlock(writer->lock);
 
     if (first_sn) {
         *first_sn = first;
@@ -330,7 +330,7 @@ int nb_rtps_reliable_process_acknack(nb_rtps_reliable_writer_t *writer,
     }
     uint64_t base = nb_rtps_sn_to_u64(&acknack->base);
 
-    ntk_mutex_lock(writer->lock);
+    zb_mutex_lock(writer->lock);
     for (i = 0; i < acknack->num_bits; i++) {
         nb_rtps_reliable_sample_t *sample;
         uint64_t sn;
@@ -349,7 +349,7 @@ int nb_rtps_reliable_process_acknack(nb_rtps_reliable_writer_t *writer,
         }
         sent++;
     }
-    ntk_mutex_unlock(writer->lock);
+    zb_mutex_unlock(writer->lock);
     if (resent) {
         *resent = sent;
     }

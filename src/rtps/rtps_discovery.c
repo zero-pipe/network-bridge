@@ -120,7 +120,7 @@ static int send_sedp_data(nb_rtps_participant_t *participant,
         return NB_ERR_INVALID;
     }
     init_header(participant, &header);
-    now = ntk_wall_ms();
+    now = zn_wall_ms();
     timestamp.seconds = (int32_t)(now / 1000u);
     timestamp.fraction = (uint32_t)(((now % 1000u) << 32) / 1000u);
     memset(&data, 0, sizeof(data));
@@ -195,7 +195,7 @@ void broadcast_sedp_sample(nb_rtps_participant_t *participant,
     uint16_t port;
     uint32_t i;
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (i = 0; i < participant->max_remotes; i++) {
         nb_rtps_remote_participant_t *remote = &participant->remotes[i];
         if (!remote->used || remote_target(remote, host, sizeof(host), &port) != NB_OK) {
@@ -211,7 +211,7 @@ void broadcast_sedp_sample(nb_rtps_participant_t *participant,
                              host,
                              port);
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 void send_local_endpoint_to_remotes(nb_rtps_participant_t *participant,
                                            const nb_rtps_local_endpoint_t *local)
@@ -231,14 +231,14 @@ static void send_all_local_endpoints_to_remote(nb_rtps_participant_t *participan
 {
     size_t i;
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (i = 0; i < participant->max_local_endpoints; i++) {
         if (participant->local_endpoints[i].used) {
             send_local_endpoint_to_remote(
                 participant, &participant->local_endpoints[i], dst, host, port);
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 static void send_sedp_heartbeat(nb_rtps_participant_t *participant,
                                 nb_rtps_endpoint_kind_t kind,
@@ -270,7 +270,7 @@ static void send_sedp_heartbeat(nb_rtps_participant_t *participant,
     }
 
     init_header(participant, &header);
-    now = ntk_wall_ms();
+    now = zn_wall_ms();
     timestamp.seconds = (int32_t)(now / 1000u);
     timestamp.fraction = (uint32_t)(((now % 1000u) << 32) / 1000u);
     heartbeat.reader_id = kind == NB_RTPS_ENDPOINT_PUBLICATION
@@ -298,7 +298,7 @@ void send_sedp_heartbeats(nb_rtps_participant_t *participant)
 {
     uint32_t i;
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (i = 0; i < participant->max_remotes; i++) {
         if (participant->remotes[i].used) {
             send_sedp_heartbeat(
@@ -307,7 +307,7 @@ void send_sedp_heartbeats(nb_rtps_participant_t *participant)
                 participant, NB_RTPS_ENDPOINT_SUBSCRIPTION, &participant->remotes[i]);
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 static void send_sedp_acknack(nb_rtps_participant_t *participant,
                               nb_rtps_endpoint_kind_t kind,
@@ -327,7 +327,7 @@ static void send_sedp_acknack(nb_rtps_participant_t *participant,
     size_t message_len;
 
     init_header(participant, &header);
-    now = ntk_wall_ms();
+    now = zn_wall_ms();
     timestamp.seconds = (int32_t)(now / 1000u);
     timestamp.fraction = (uint32_t)(((now % 1000u) << 32) / 1000u);
     memset(&acknack, 0, sizeof(acknack));
@@ -382,13 +382,13 @@ int send_spdp(nb_rtps_participant_t *participant)
     header.vendor_id[1] = NB_RTPS_VENDOR_ID_1;
     header.guid_prefix = participant->local_guid.prefix;
 
-    now = ntk_wall_ms();
+    now = zn_wall_ms();
     timestamp.seconds = (int32_t)(now / 1000u);
     timestamp.fraction = (uint32_t)(((now % 1000u) << 32) / 1000u);
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     sn = ++participant->spdp_sn;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     memset(&data, 0, sizeof(data));
     data.reader_id = nb_rtps_eid_unknown;
@@ -437,17 +437,17 @@ static void update_remote_endpoint(nb_rtps_participant_t *participant,
     nb_rtps_remote_endpoint_t *slot = NULL;
     nb_rtps_remote_endpoint_t copy;
     nb_rtps_endpoint_event_t event = NB_RTPS_ENDPOINT_UPDATED;
-    uint64_t now = ntk_wall_ms();
+    uint64_t now = zn_wall_ms();
     size_t slot_index = 0;
     int was_used = 0;
     size_t i;
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     slot = find_remote_endpoint(participant, &info->endpoint_guid);
     if (slot) {
         if (memcmp(&slot->info, info, sizeof(*info)) == 0 && slot->kind == kind) {
             slot->last_seen_ms = now;
-            ntk_mutex_unlock(participant->lock);
+            zb_mutex_unlock(participant->lock);
             return;
         }
     } else {
@@ -483,7 +483,7 @@ static void update_remote_endpoint(nb_rtps_participant_t *participant,
         arm_reader_deadlines(participant, slot);
     }
     copy = *slot;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     notify_endpoint(participant, event, copy.kind, &copy.info);
     if (event == NB_RTPS_ENDPOINT_ADDED && kind == NB_RTPS_ENDPOINT_SUBSCRIPTION) {
@@ -504,7 +504,7 @@ static int remove_remote_endpoint(nb_rtps_participant_t *participant,
     int found = 0;
 
     memset(&removed_info, 0, sizeof(removed_info));
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     slot = find_remote_endpoint(participant, guid);
     if (slot) {
         removed_kind = slot->kind;
@@ -524,7 +524,7 @@ static int remove_remote_endpoint(nb_rtps_participant_t *participant,
         }
         found = 1;
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     if (found) {
         notify_matches(participant, &removed_info, removed_kind, 0);
     }
@@ -538,7 +538,7 @@ void remove_remote_endpoints_for_prefix(nb_rtps_participant_t *participant,
         size_t i;
         int found = 0;
 
-        ntk_mutex_lock(participant->lock);
+        zb_mutex_lock(participant->lock);
         for (i = 0; i < participant->max_remote_endpoints; i++) {
             nb_rtps_remote_endpoint_t *endpoint = &participant->remote_endpoints[i];
             if (endpoint->used &&
@@ -564,7 +564,7 @@ void remove_remote_endpoints_for_prefix(nb_rtps_participant_t *participant,
                 break;
             }
         }
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         if (!found) {
             break;
         }
@@ -580,7 +580,7 @@ void update_remote(nb_rtps_participant_t *participant,
     nb_rtps_remote_participant_t *slot = NULL;
     nb_rtps_participant_info_t copy;
     nb_rtps_participant_event_t event = NB_RTPS_PARTICIPANT_UPDATED;
-    uint64_t now = ntk_wall_ms();
+    uint64_t now = zn_wall_ms();
     uint32_t i;
     int notify_event = 0;
     int send_endpoints = 0;
@@ -588,7 +588,7 @@ void update_remote(nb_rtps_participant_t *participant,
     nb_rtps_guid_prefix_t evicted_prefix;
     int evicted = 0;
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     slot = find_remote(participant, &info->guid.prefix);
     if (slot) {
         notify_event = memcmp(&slot->info, info, sizeof(*info)) != 0;
@@ -637,7 +637,7 @@ void update_remote(nb_rtps_participant_t *participant,
     copy_str(slot->source_host, sizeof(slot->source_host), source_host);
     slot->source_port = source_port;
     copy = slot->info;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     if (notify_event) {
         notify(participant, event, &copy);
@@ -660,7 +660,7 @@ void update_remote(nb_rtps_participant_t *participant,
          * would otherwise start counting from discovery. Assert right away. */
         if (participant->pmd_interval_ms != 0) {
             send_pmd(participant, NB_RTPS_PMD_KIND_AUTOMATIC);
-            participant->next_pmd_ms = ntk_wall_ms() + participant->pmd_interval_ms;
+            participant->next_pmd_ms = zn_wall_ms() + participant->pmd_interval_ms;
         }
     }
     /* A fresh participant is the moment to bring the stream up, not the next
@@ -682,12 +682,12 @@ void handle_sedp_gap(nb_rtps_participant_t *participant,
 {
     nb_rtps_remote_participant_t *remote;
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     remote = find_remote(participant, source_prefix);
     if (remote) {
         nb_rtps_reader_on_gap(sedp_reader_state(remote, kind), gap);
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 void handle_sedp_data(nb_rtps_participant_t *participant,
                              nb_rtps_endpoint_kind_t kind,
@@ -708,13 +708,13 @@ void handle_sedp_data(nb_rtps_participant_t *participant,
      * sample this implementation cannot parse (an oversized optional field, a
      * vendor extension) must still leave the reader window, otherwise the peer
      * keeps retransmitting it forever in answer to our NACK. */
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     remote = find_remote(participant, source_prefix);
     if (remote) {
         state = sedp_reader_state(remote, kind);
         (void)nb_rtps_reader_on_sample(state, sample_sn);
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     if (!remote) {
         return;
     }
@@ -732,7 +732,7 @@ void handle_sedp_data(nb_rtps_participant_t *participant,
                      * the next SampleInfo for them reports NO_WRITERS. */
                     size_t j;
 
-                    ntk_mutex_lock(participant->lock);
+                    zb_mutex_lock(participant->lock);
                     for (j = 0; j < participant->max_local_endpoints; j++) {
                         if (participant->local_endpoints[j].used) {
                             mark_instances_no_writers(
@@ -740,7 +740,7 @@ void handle_sedp_data(nb_rtps_participant_t *participant,
                                 &info.endpoint_guid);
                         }
                     }
-                    ntk_mutex_unlock(participant->lock);
+                    zb_mutex_unlock(participant->lock);
                 }
                 notify_endpoint(
                     participant, NB_RTPS_ENDPOINT_REMOVED, removed_kind, &info);
@@ -783,10 +783,10 @@ void handle_sedp_heartbeat(nb_rtps_participant_t *participant,
     }
     memset(bitmap, 0, sizeof(bitmap));
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     remote = find_remote(participant, source_prefix);
     if (!remote) {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return;
     }
     if (remote_target(remote, target_host, sizeof(target_host), &target_port) != NB_OK) {
@@ -813,7 +813,7 @@ void handle_sedp_heartbeat(nb_rtps_participant_t *participant,
         }
     }
     count = ++state->ack_count;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     send_sedp_acknack(participant,
                       kind,
@@ -867,14 +867,14 @@ void handle_sedp_acknack(nb_rtps_participant_t *participant,
     sedp_resend_context_t context;
 
     copy_str(target_host, sizeof(target_host), source_host);
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     remote = find_remote(participant, source_prefix);
     if (remote &&
         remote_target(remote, target_host, sizeof(target_host), &target_port) != NB_OK) {
         copy_str(target_host, sizeof(target_host), source_host);
         target_port = source_port;
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     context.participant = participant;
     context.kind = kind;

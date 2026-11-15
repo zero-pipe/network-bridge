@@ -10,8 +10,8 @@
 #include <nb/rpc/service.h>
 #include <nb/rpc/proxy.h>
 #include <nb/rpc/shm.h>
-#include <platform.h>
-#include <thread/sem.h>
+#include <zn/platform.h>
+#include <zb/os/sem.h>
 
 #define NB_LOG_TAG "test"
 #include <nb/base/log.h>
@@ -23,7 +23,7 @@
 #define CLIENT_COUNT 3
 
 typedef struct shm_client_state {
-    ntk_sem *sem;
+    zb_sem *sem;
     int status;
     uint8_t buf[8192];
     size_t len;
@@ -31,7 +31,7 @@ typedef struct shm_client_state {
 
 /* 订阅回调状态：EVENT 到达时记录 payload 并唤醒主线程。 */
 typedef struct shm_sub_state {
-    ntk_sem *sem;
+    zb_sem *sem;
     volatile int count;
     uint8_t buf[256];
     size_t len;
@@ -51,7 +51,7 @@ static void on_event(nb_call_t *call, const nb_request_t *req, void *user)
     memcpy(st->buf, req->payload.data, st->len);
     st->count++;
     if (st->sem) {
-        ntk_sem_post(st->sem, 1);
+        zb_sem_post(st->sem, 1);
     }
 }
 
@@ -64,7 +64,7 @@ static void on_response(int status, const nb_response_t *resp, void *user)
         memcpy(st->buf, resp->payload.data, resp->payload.len);
         st->len = resp->payload.len;
     }
-    ntk_sem_post(st->sem, 1);
+    zb_sem_post(st->sem, 1);
 }
 
 static int run_call(nb_proxy_t *proxy, shm_client_state_t *st,
@@ -88,14 +88,14 @@ static int run_call(nb_proxy_t *proxy, shm_client_state_t *st,
         if (rc != NB_OK) {
             return rc;
         }
-        if (ntk_sem_timedwait(st->sem, 2500) == NTK_OK) {
+        if (zb_sem_timedwait(st->sem, 2500) == ZN_OK) {
             if (st->status == NB_ERR_AGAIN) {
-                ntk_sleep_ms(10);
+                zn_sleep_ms(10);
                 continue;
             }
             return st->status;
         }
-        ntk_sleep_ms(10);
+        zn_sleep_ms(10);
     }
     return NB_ERR_TIMEOUT;
 }
@@ -202,12 +202,12 @@ int main(void)
     }
 
     memset(&st, 0, sizeof(st));
-    st.sem = ntk_sem_create(0);
+    st.sem = zb_sem_create(0);
     if (!st.sem) {
         failed = 1;
         goto done;
     }
-    sub_st.sem = ntk_sem_create(0);
+    sub_st.sem = zb_sem_create(0);
     if (!sub_st.sem) {
         failed = 1;
     }
@@ -251,13 +251,13 @@ int main(void)
         ev.len = strlen((const char *)ev.data) + 1;
         ev.encoding = 0;
         /* 等 client[0] 的 IO 线程执行方法注册（其中包含 subscribe）。 */
-        ntk_sleep_ms(100);
+        zn_sleep_ms(100);
         for (attempt = 0; attempt < 50 && sub_st.count == 0; attempt++) {
             if (nb_proxy_call_event(proxy[1], "TopicService", "chat", &ev, NULL) != NB_OK) {
                 failed = 1;
                 break;
             }
-            (void)ntk_sem_timedwait(sub_st.sem, 200);
+            (void)zb_sem_timedwait(sub_st.sem, 200);
         }
         if (!failed && (sub_st.count == 0 || sub_st.len != ev.len ||
                         memcmp(sub_st.buf, ev.data, ev.len) != 0)) {
@@ -286,7 +286,7 @@ int main(void)
                                         &data,
                                         &cap);
             if (lrc == NB_ERR_AGAIN) {
-                ntk_sleep_ms(10);
+                zn_sleep_ms(10);
                 continue;
             }
             if (lrc != NB_OK) {
@@ -305,7 +305,7 @@ int main(void)
                 failed = 1;
                 break;
             }
-            (void)ntk_sem_timedwait(sub_st.sem, 200);
+            (void)zb_sem_timedwait(sub_st.sem, 200);
         }
         if (!failed && (sub_st.count == 0 || sub_st.len != sizeof(expect) ||
                         memcmp(sub_st.buf, expect, sizeof(expect)) != 0)) {
@@ -337,9 +337,9 @@ int main(void)
     }
 
     if (sub_st.sem) {
-        ntk_sem_destroy(sub_st.sem);
+        zb_sem_destroy(sub_st.sem);
     }
-    ntk_sem_destroy(st.sem);
+    zb_sem_destroy(st.sem);
 
 done:
     if (subscriber) {

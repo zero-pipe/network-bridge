@@ -124,7 +124,7 @@ void nb_dedup_init(nb_dedup_t *d)
     }
     memset(d, 0, sizeof(*d));
     for (i = 0; i < NB_DEDUP_SHARDS; i++) {
-        d->shards[i].lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+        d->shards[i].lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     }
 }
 
@@ -138,7 +138,7 @@ void nb_dedup_cleanup(nb_dedup_t *d)
     for (i = 0; i < NB_DEDUP_SHARDS; i++) {
         nb_dedup_shard_t *sh = &d->shards[i];
         if (sh->lock) {
-            ntk_mutex_lock(sh->lock);
+            zb_mutex_lock(sh->lock);
         }
         for (j = 0; j < NB_DEDUP_SLOTS_PER_SHARD; j++) {
             if (sh->slots[j].used) {
@@ -146,8 +146,8 @@ void nb_dedup_cleanup(nb_dedup_t *d)
             }
         }
         if (sh->lock) {
-            ntk_mutex_unlock(sh->lock);
-            ntk_mutex_destroy(sh->lock);
+            zb_mutex_unlock(sh->lock);
+            zb_mutex_destroy(sh->lock);
             sh->lock = NULL;
         }
     }
@@ -169,7 +169,7 @@ nb_dedup_action_t nb_dedup_begin(nb_dedup_t *d,
     if (!sh->lock) {
         return NB_DEDUP_PROCESS;
     }
-    ntk_mutex_lock(sh->lock);
+    zb_mutex_lock(sh->lock);
     for (i = 0; i < NB_DEDUP_SLOTS_PER_SHARD; i++) {
         nb_dedup_slot_t *s = &sh->slots[i];
         bool completed;
@@ -183,7 +183,7 @@ nb_dedup_action_t nb_dedup_begin(nb_dedup_t *d,
         if (completed) {
             nb_dedup_replay_locked(transport, req, s);
         }
-        ntk_mutex_unlock(sh->lock);
+        zb_mutex_unlock(sh->lock);
         return completed ? NB_DEDUP_REPLAYED : NB_DEDUP_IN_FLIGHT;
     }
     for (i = 0; i < NB_DEDUP_SLOTS_PER_SHARD; i++) {
@@ -204,7 +204,7 @@ nb_dedup_action_t nb_dedup_begin(nb_dedup_t *d,
         victim->expires_ms = now + NB_DEDUP_TTL_MS;
         victim->last_ms = now;
     }
-    ntk_mutex_unlock(sh->lock);
+    zb_mutex_unlock(sh->lock);
     return NB_DEDUP_PROCESS;
 }
 
@@ -235,10 +235,10 @@ bool nb_dedup_complete(nb_dedup_t *d,
     if (need > NB_DEDUP_MAX_BYTES) {
         return false; /* 单条响应过大，不缓存 */
     }
-    ntk_mutex_lock(sh->lock);
+    zb_mutex_lock(sh->lock);
     s = nb_slot_find(sh, req);
     if (!s || s->completed) {
-        ntk_mutex_unlock(sh->lock);
+        zb_mutex_unlock(sh->lock);
         return false;
     }
     nb_shard_make_room(sh, s, need);
@@ -277,13 +277,13 @@ bool nb_dedup_complete(nb_dedup_t *d,
     s->completed = true;
     s->last_ms = now;
     s->expires_ms = now + NB_DEDUP_TTL_MS;
-    ntk_mutex_unlock(sh->lock);
+    zb_mutex_unlock(sh->lock);
     return payload_owner != NULL;
 
 fail:
     nb_slot_detach_owner(sh, s);
     nb_slot_free(sh, s);
-    ntk_mutex_unlock(sh->lock);
+    zb_mutex_unlock(sh->lock);
     return false;
 }
 
@@ -298,12 +298,12 @@ void nb_dedup_abort(nb_dedup_t *d, const nb_message_t *req)
     if (!sh->lock) {
         return;
     }
-    ntk_mutex_lock(sh->lock);
+    zb_mutex_lock(sh->lock);
     s = nb_slot_find(sh, req);
     if (s) {
         nb_slot_free(sh, s);
     }
-    ntk_mutex_unlock(sh->lock);
+    zb_mutex_unlock(sh->lock);
 }
 
 void nb_dedup_expire(nb_dedup_t *d, uint64_t now_ms)
@@ -318,12 +318,12 @@ void nb_dedup_expire(nb_dedup_t *d, uint64_t now_ms)
         if (!sh->lock) {
             continue;
         }
-        ntk_mutex_lock(sh->lock);
+        zb_mutex_lock(sh->lock);
         for (j = 0; j < NB_DEDUP_SLOTS_PER_SHARD; j++) {
             if (sh->slots[j].used && sh->slots[j].expires_ms <= now_ms) {
                 nb_slot_free(sh, &sh->slots[j]);
             }
         }
-        ntk_mutex_unlock(sh->lock);
+        zb_mutex_unlock(sh->lock);
     }
 }

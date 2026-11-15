@@ -27,15 +27,16 @@ static void test_rpc_full(void)
                        "\"max_message_bytes\":4194304,"
                        "\"backpressure_bytes\":8192,"
                        "\"udp\":{\"fragment_bytes\":1024,\"rtcp_interval\":\"2s\",\"rtcp\":false},"
-                       "\"discovery\":{\"broadcast\":\"127.0.0.1:41953\","
-                       "\"hello_interval\":\"500ms\",\"node_ttl\":\"9s\","
+                       "\"discovery\":{\"group\":\"127.0.0.1:41953\",\"formation\":7,"
+                       "\"service_mask\":3,"
+                       "\"heartbeat_interval\":\"500ms\",\"lease\":\"9s\","
                        "\"peers\":[\"10.0.0.1:41953\"]},"
                        "\"routes\":[{\"service\":\"echo\",\"endpoint\":\"tcp://10.0.0.2:9001\"}]"
                        "},"
                        "\"metrics\":{\"enabled\":false,\"latency_histogram\":false,"
                        "\"sample_every\":5},"
                        "\"log\":{\"enabled\":false,\"level\":\"debug\"},"
-                       "\"dds\":{\"backend\":\"cyclone\",\"domain\":3}"
+                       "\"dds\":{\"backend\":\"rtps\",\"domain\":3}"
                        "}";
     nb_rpc_config_doc_t *cfg = NULL;
     const nb_node_config_t *n;
@@ -57,10 +58,12 @@ static void test_rpc_full(void)
     CHECK(n->runtime.peer_rate_limit_pps == 10);
     CHECK(n->rpc.mode == NB_NODE_MODE_STATIC);
     CHECK(n->rpc.discovery.disable == 1);
-    CHECK(strcmp(n->rpc.discovery.broadcast_host, "127.0.0.1") == 0);
+    CHECK(strcmp(n->rpc.discovery.multicast_group, "127.0.0.1") == 0);
     CHECK(n->rpc.discovery.port == 41953);
-    CHECK(n->rpc.discovery.hello_interval_ms == 500);
-    CHECK(n->rpc.discovery.node_ttl_ms == 9000);
+    CHECK(n->rpc.discovery.heartbeat_interval_ms == 500);
+    CHECK(n->rpc.discovery.lease_ms == 9000);
+    CHECK(n->rpc.discovery.formation_id == 7);
+    CHECK(n->rpc.discovery.service_mask == 3);
     CHECK(n->rpc.peer_count == 1);
     CHECK(strcmp(n->rpc.peers[0].host, "10.0.0.1") == 0);
     CHECK(n->rpc.peers[0].port == 41953);
@@ -102,7 +105,8 @@ static void test_rpc_defaults(void)
     CHECK(n->rpc.mode == NB_NODE_MODE_MESH);
     CHECK(n->rpc.discovery.disable == 0);
     CHECK(strcmp(n->rpc.bind_host, "0.0.0.0") == 0);
-    CHECK(strcmp(n->rpc.discovery.broadcast_host, "255.255.255.255") == 0);
+    CHECK(n->rpc.discovery.multicast_group == NULL);
+    CHECK(n->rpc.discovery.formation_id == 0);
     CHECK(n->rpc.discovery.port != 0);
     CHECK(n->rpc.frag_bytes == 1440);
     CHECK(n->binding_count == 0);
@@ -138,7 +142,7 @@ static void test_rpc_strict(void)
         "{\"rpc\":{\"udp\":{\"rtcp_interval\":\"nope\"}}}",
         "{\"rpc\":{\"udp\":{\"rtcp\":\"no\"}}}",
         "{\"rpc\":{\"discovery\":[]}}",
-        "{\"rpc\":{\"discovery\":{\"broadcast\":\"bad\"}}}",
+        "{\"rpc\":{\"discovery\":{\"group\":\"bad\"}}}",
         "{\"rpc\":{\"discovery\":{\"peers\":[\"bad\"]}}}",
         "{\"rpc\":{\"routes\":[{\"service\":\"x\"}]}}",
         "{\"rpc\":{\"routes\":[{\"service\":\"x\",\"endpoint\":\"bad\"}]}}",
@@ -268,6 +272,19 @@ static void test_dds(void)
     CHECK(nb_dds_config_parse("{\"dds\":{\"backend\":\"nope\"}}", &cfg, NULL) ==
           NB_ERR_INVALID);
     CHECK(cfg == NULL);
+
+    /* 只有内建 RTPS 后端：已移除的 cyclone 必须明确报错而不是静默忽略。 */
+    {
+        nb_config_error_t cerr;
+
+        memset(&cerr, 0, sizeof(cerr));
+        cfg = (nb_dds_config_doc_t *)1;
+        CHECK(nb_dds_config_parse("{\"dds\":{\"backend\":\"cyclone\"}}", &cfg, &cerr) ==
+              NB_ERR_INVALID);
+        CHECK(cfg == NULL);
+        CHECK(strcmp(cerr.path, "dds.backend") == 0);
+        CHECK(strstr(cerr.reason, "rtps") != NULL);
+    }
 
     cfg = (nb_dds_config_doc_t *)1;
     CHECK(nb_dds_config_parse("{\"dds\":{\"qos\":{\"reliability\":\"sometimes\"}}}", &cfg,

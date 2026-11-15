@@ -28,7 +28,7 @@ void nb_node_cancel_record(nb_node_t *node,
         return;
     }
     now = nb_now_ms();
-    ntk_mutex_lock(node->handler_limit_mutex);
+    zb_mutex_lock(node->handler_limit_mutex);
     for (i = 0; i < CANCEL_SLOTS; i++) {
         nb_cancel_slot_t *s = &node->cancels[i];
         if (s->used && s->expires_ms <= now) {
@@ -47,7 +47,7 @@ void nb_node_cancel_record(nb_node_t *node,
         if (s->request_id == request_id && s->peer_port == peer_port &&
             strcmp(s->peer_host, peer_host ? peer_host : "") == 0) {
             s->expires_ms = now + CANCEL_TTL_MS;
-            ntk_mutex_unlock(node->handler_limit_mutex);
+            zb_mutex_unlock(node->handler_limit_mutex);
             return;
         }
     }
@@ -60,7 +60,7 @@ void nb_node_cancel_record(nb_node_t *node,
         s->expires_ms = now + CANCEL_TTL_MS;
         nb_atomic_add_u32(&node->cancel_count, 1u);
     }
-    ntk_mutex_unlock(node->handler_limit_mutex);
+    zb_mutex_unlock(node->handler_limit_mutex);
 }
 
 int nb_node_is_canceled(const nb_node_t *node,
@@ -76,7 +76,7 @@ int nb_node_is_canceled(const nb_node_t *node,
         return 0;
     }
     now = nb_now_ms();
-    ntk_mutex_lock(node->handler_limit_mutex);
+    zb_mutex_lock(node->handler_limit_mutex);
     for (i = 0; i < CANCEL_SLOTS; i++) {
         const nb_cancel_slot_t *s = &node->cancels[i];
         if (s->used && s->expires_ms > now && s->request_id == request_id &&
@@ -85,7 +85,7 @@ int nb_node_is_canceled(const nb_node_t *node,
             break;
         }
     }
-    ntk_mutex_unlock(node->handler_limit_mutex);
+    zb_mutex_unlock(node->handler_limit_mutex);
     return found;
 }
 
@@ -95,7 +95,7 @@ void nb_node_expire_cancels(nb_node_t *node, uint64_t now_ms)
     if (!node || !node->handler_limit_mutex) {
         return;
     }
-    ntk_mutex_lock(node->handler_limit_mutex);
+    zb_mutex_lock(node->handler_limit_mutex);
     for (i = 0; i < CANCEL_SLOTS; i++) {
         nb_cancel_slot_t *s = &node->cancels[i];
         if (s->used && s->expires_ms <= now_ms) {
@@ -105,7 +105,7 @@ void nb_node_expire_cancels(nb_node_t *node, uint64_t now_ms)
             }
         }
     }
-    ntk_mutex_unlock(node->handler_limit_mutex);
+    zb_mutex_unlock(node->handler_limit_mutex);
 }
 
 

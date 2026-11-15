@@ -39,3 +39,6 @@ __pycache__/
 /3rdparty/Fast-DDS-master/
 /3rdparty/Fast-DDS-master.zip
 
+
+# Claude Code 工作区（不入库）
+/.claude/

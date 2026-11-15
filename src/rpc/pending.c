@@ -13,7 +13,7 @@
 
 #include <stdlib.h>
 
-static int nb_lane_index(nb_node_t *node, ntk_poller *poller)
+static int nb_lane_index(nb_node_t *node, zn_poller *poller)
 {
     unsigned i;
     if (!node) {
@@ -59,11 +59,11 @@ static void nb_lane_remove(nb_node_t *node, nb_pending_t *p)
 static void nb_pending_detach(nb_node_t *node, nb_pending_t *p)
 {
     if (node->pending_lock) {
-        ntk_mutex_lock(node->pending_lock);
+        zb_mutex_lock(node->pending_lock);
     }
     HASH_DEL(node->pending_hash, p);
     if (node->pending_lock) {
-        ntk_mutex_unlock(node->pending_lock);
+        zb_mutex_unlock(node->pending_lock);
     }
     nb_lane_remove(node, p);
     p->used = 0;
@@ -113,12 +113,12 @@ static void nb_pending_recycle(nb_node_t *node, nb_pending_t *p)
     p->has_req = 0;
     p->replay_ready = 0;
     if (node->pending_lock) {
-        ntk_mutex_lock(node->pending_lock);
+        zb_mutex_lock(node->pending_lock);
     }
     p->free_next = node->pending_free;
     node->pending_free = p;
     if (node->pending_lock) {
-        ntk_mutex_unlock(node->pending_lock);
+        zb_mutex_unlock(node->pending_lock);
     }
 }
 
@@ -206,7 +206,7 @@ nb_pending_t *nb_pending_add(nb_node_t *node,
                                nb_response_fn cb,
                                void *user,
                                uint64_t timeout_ms,
-                               ntk_poller *poller,
+                               zn_poller *poller,
                                int *out_rc)
 {
     nb_pending_t *p;
@@ -227,7 +227,7 @@ nb_pending_t *nb_pending_add(nb_node_t *node,
         return NULL;
     }
     if (node->pending_lock) {
-        ntk_mutex_lock(node->pending_lock);
+        zb_mutex_lock(node->pending_lock);
     }
     if (node->pending_free) {
         p = node->pending_free;
@@ -237,7 +237,7 @@ nb_pending_t *nb_pending_add(nb_node_t *node,
         p = (nb_pending_t *)calloc(1, sizeof(*p));
         if (!p) {
             if (node->pending_lock) {
-                ntk_mutex_unlock(node->pending_lock);
+                zb_mutex_unlock(node->pending_lock);
             }
             if (out_rc) {
                 *out_rc = NB_ERR_NOMEM;
@@ -279,7 +279,7 @@ nb_pending_t *nb_pending_add(nb_node_t *node,
     HASH_ADD(hh, node->pending_hash, request_id, sizeof(p->request_id), p);
     nb_atomic_add_u32((uint32_t *)&node->pending_count, 1u);
     if (node->pending_lock) {
-        ntk_mutex_unlock(node->pending_lock);
+        zb_mutex_unlock(node->pending_lock);
     }
     nb_lane_insert(node, p);
     return p;
@@ -292,34 +292,34 @@ nb_pending_t *nb_pending_find(nb_node_t *node, nb_request_id_t id)
         return NULL;
     }
     if (node->pending_lock) {
-        ntk_mutex_lock(node->pending_lock);
+        zb_mutex_lock(node->pending_lock);
     }
     HASH_FIND(hh, node->pending_hash, &id, sizeof(id), p);
     if (p && !p->used) {
         p = NULL;
     }
     if (node->pending_lock) {
-        ntk_mutex_unlock(node->pending_lock);
+        zb_mutex_unlock(node->pending_lock);
     }
     return p;
 }
 
-ntk_poller *nb_pending_owner(nb_node_t *node, nb_request_id_t id)
+zn_poller *nb_pending_owner(nb_node_t *node, nb_request_id_t id)
 {
     nb_pending_t *p = NULL;
-    ntk_poller *owner = NULL;
+    zn_poller *owner = NULL;
     if (!node) {
         return NULL;
     }
     if (node->pending_lock) {
-        ntk_mutex_lock(node->pending_lock);
+        zb_mutex_lock(node->pending_lock);
     }
     HASH_FIND(hh, node->pending_hash, &id, sizeof(id), p);
     if (p && p->used) {
         owner = p->poller;
     }
     if (node->pending_lock) {
-        ntk_mutex_unlock(node->pending_lock);
+        zb_mutex_unlock(node->pending_lock);
     }
     return owner;
 }
@@ -328,7 +328,7 @@ ntk_poller *nb_pending_owner(nb_node_t *node, nb_request_id_t id)
  * 先把本 poller lane 上超时/待重传的槽位摘到临时链表，再逐个处理；
  * 这样可以避免回调里取消/新增 pending 破坏正在遍历的 lane。
  */
-void nb_pending_tick(nb_node_t *node, uint64_t now_ms, ntk_poller *poller)
+void nb_pending_tick(nb_node_t *node, uint64_t now_ms, zn_poller *poller)
 {
     int idx;
     nb_pending_t *expired = NULL;

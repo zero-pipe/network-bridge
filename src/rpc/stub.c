@@ -1,5 +1,6 @@
 /* Stub：node 之上、传输无关的调用原语（请求/事件 + 关联 + 重传）。 */
 #include "node_internal.h"
+#include "node_access.h"
 #include "proxy_internal.h"
 
 #include "envelope.h"
@@ -153,7 +154,7 @@ static void nb_stub_call_now(nb_stub_t *stub,
     int prc = NB_OK;
 
     p = nb_pending_add(
-        node, id, streaming ? NULL : cb, user, timeout_ms, ntk_poller_current(), &prc);
+        node, id, streaming ? NULL : cb, user, timeout_ms, nb_node_current_poller(node), &prc);
     if (!p) {
         int err = prc == NB_OK ? NB_ERR_NOMEM : prc;
         if (buf_owner) {
@@ -241,10 +242,10 @@ static void nb_stub_call_now(nb_stub_t *stub,
         buf_owner = NULL;
         nb_stub_resend_task_t *retry = (nb_stub_resend_task_t *)calloc(1, sizeof(*retry));
         if (retry) {
-            ntk_poller *poller = ntk_poller_current();
+            zn_poller *poller = nb_node_current_poller(node);
             retry->node = node;
             retry->id = id;
-            if (ntk_poller_do_delay(poller ? poller : node->poller, 1, nb_stub_resend_task_fn, retry) !=
+            if (zn_poller_do_delay(poller ? poller : node->poller, 1, nb_stub_resend_task_fn, retry) !=
                 NULL) {
                 return;
             }
@@ -338,9 +339,9 @@ static void nb_stub_call_task_fn(void *user)
 static nb_request_id_t nb_stub_next_id(nb_node_t *node)
 {
     nb_request_id_t id;
-    ntk_mutex_lock(node->id_lock);
+    zb_mutex_lock(node->id_lock);
     id = (nb_request_id_t)(node->next_request_id++);
-    ntk_mutex_unlock(node->id_lock);
+    zb_mutex_unlock(node->id_lock);
     return id ? id : 1;
 }
 
@@ -416,8 +417,8 @@ static nb_stub_task_t *nb_stub_task_create(nb_stub_t *stub,
 /* 跨线程投递；失败时释放任务并返回错误码。 */
 static int nb_stub_task_submit(nb_stub_t *stub, nb_stub_task_t *task)
 {
-    ntk_poller *poller = nb_node_pick_poller(stub->node, task->id);
-    if (ntk_poller_async(poller, nb_stub_call_task_fn, task, 1) != NTK_OK) {
+    zn_poller *poller = nb_node_pick_poller(stub->node, task->id);
+    if (zn_poller_async(poller, nb_stub_call_task_fn, task, 1) != ZN_OK) {
         nb_stub_task_free(task);
         return NB_ERR_IO;
     }
@@ -563,7 +564,7 @@ static int nb_stub_call_event_impl(nb_stub_t *stub,
     }
     id = nb_stub_next_id(stub->node);
     if (nb_node_is_send_thread(stub->node) ||
-        ntk_poller_is_current_thread(nb_node_pick_poller(stub->node, id))) {
+        zn_poller_is_current_thread(nb_node_pick_poller(stub->node, id))) {
         nb_stub_event_now(
             stub, id, service, method, data, len, encoding, metadata_buf, metadata_len, owner);
         if (out_request_id) {
@@ -659,7 +660,7 @@ static int nb_stub_call_impl(nb_stub_t *stub,
     }
     id = nb_stub_next_id(stub->node);
 
-    if (ntk_poller_is_current_thread(nb_node_pick_poller(stub->node, id))) {
+    if (zn_poller_is_current_thread(nb_node_pick_poller(stub->node, id))) {
         nb_stub_call_now(stub,
                       NULL,
                       owner,
@@ -772,7 +773,7 @@ typedef struct nb_stub_cancel_ctx {
     nb_stub_t *stub;
     nb_node_t *node;
     int status;
-    ntk_sem *sem;
+    zb_sem *sem;
     uint32_t remaining;
 } nb_stub_cancel_ctx_t;
 
@@ -786,7 +787,7 @@ static void nb_stub_cancel_ctx_done(nb_stub_cancel_ctx_t *ctx)
 {
     if (nb_atomic_sub_u32(&ctx->remaining, 1u) == 1u) {
         if (ctx->sem) {
-            ntk_sem_post(ctx->sem, 1);
+            zb_sem_post(ctx->sem, 1);
         }
     }
 }
@@ -812,7 +813,7 @@ static void nb_stub_cancel_lane_fn(void *user)
 {
     nb_stub_cancel_task_t *t = (nb_stub_cancel_task_t *)user;
     nb_stub_cancel_ctx_t *ctx = t->ctx;
-    int idx = nb_node_poller_index(ctx->node, ntk_poller_current());
+    int idx = nb_node_poller_index(ctx->node, nb_node_current_poller(ctx->node));
     nb_stub_cancel_lane_now(ctx, idx);
     free(t);
 }
@@ -821,7 +822,7 @@ int nb_stub_cancel_all(nb_stub_t *stub, int status)
 {
     nb_node_t *node;
     nb_stub_cancel_ctx_t *ctx;
-    ntk_sem *sem;
+    zb_sem *sem;
     unsigned i;
     int cur_idx;
     if (!stub || !(node = stub->node)) {
@@ -833,13 +834,13 @@ int nb_stub_cancel_all(nb_stub_t *stub, int status)
     if (node->io_count == 0) {
         return NB_OK;
     }
-    sem = ntk_sem_create(0);
+    sem = zb_sem_create(0);
     if (!sem) {
         return NB_ERR_NOMEM;
     }
     ctx = (nb_stub_cancel_ctx_t *)calloc(1, sizeof(*ctx));
     if (!ctx) {
-        ntk_sem_destroy(sem);
+        zb_sem_destroy(sem);
         return NB_ERR_NOMEM;
     }
     ctx->stub = stub;
@@ -849,7 +850,7 @@ int nb_stub_cancel_all(nb_stub_t *stub, int status)
     ctx->remaining = node->io_count;
 
     /* 当前线程若本身是某个 poller，则本 lane 内联处理，避免自等待死锁。 */
-    cur_idx = nb_node_poller_index(node, ntk_poller_current());
+    cur_idx = nb_node_poller_index(node, nb_node_current_poller(node));
     if (cur_idx >= 0) {
         nb_stub_cancel_lane_now(ctx, cur_idx);
     }
@@ -864,18 +865,18 @@ int nb_stub_cancel_all(nb_stub_t *stub, int status)
             continue;
         }
         t->ctx = ctx;
-        if (ntk_poller_async(node->io_pollers[i], nb_stub_cancel_lane_fn, t, 1) != NTK_OK) {
+        if (zn_poller_async(node->io_pollers[i], nb_stub_cancel_lane_fn, t, 1) != ZN_OK) {
             free(t);
             nb_stub_cancel_ctx_done(ctx);
         }
     }
     /* 必须经过 sem：即便 remaining 已经归零，也由最后完成的递减路径 post，
      * 直接回收 ctx/sem 会与 poller 任务形成 data race（UAF）。 */
-    if (ntk_sem_timedwait(sem, 5000) != NTK_OK) {
+    if (zb_sem_timedwait(sem, 5000) != ZN_OK) {
         /* 超时：任务可能仍在执行，sem/ctx 交给最后完成的任务回收，避免 UAF。 */
         return NB_ERR_TIMEOUT;
     }
-    ntk_sem_destroy(sem);
+    zb_sem_destroy(sem);
     free(ctx);
     return NB_OK;
 }

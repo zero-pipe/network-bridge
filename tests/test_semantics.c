@@ -4,8 +4,8 @@
 #include <nb/rpc/proxy.h>
 #include <nb/rpc/node.h>
 #include <nb/rpc/service.h>
-#include <platform.h>
-#include <thread/sem.h>
+#include <zn/platform.h>
+#include <zb/os/sem.h>
 
 #define NB_LOG_TAG "test"
 #include <nb/base/log.h>
@@ -15,7 +15,7 @@
 #include <string.h>
 
 typedef struct client_state {
-    ntk_sem *sem;
+    zb_sem *sem;
     int status;
     int app_status;
     char message[64];
@@ -75,7 +75,7 @@ static void on_response(int status, const nb_response_t *resp, void *user)
             st->len = resp->payload.len;
         }
     }
-    ntk_sem_post(st->sem, 1);
+    zb_sem_post(st->sem, 1);
 }
 
 static int client_before(
@@ -162,24 +162,24 @@ static int test_rpc_semantics(void)
     scfg.name = "sem-srv";
     scfg.rpc.kind = NB_TRANSPORT_KIND_TCP;
     scfg.rpc.bind_host = "127.0.0.1";
-    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.multicast_group = "127.0.0.1";
     scfg.rpc.discovery.port = sport;
     scfg.runtime.io_threads = 1;
-    scfg.rpc.discovery.hello_interval_ms = 200;
-    scfg.rpc.discovery.node_ttl_ms = 3000;
+    scfg.rpc.discovery.heartbeat_interval_ms = 200;
+    scfg.rpc.discovery.lease_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "sem-cli";
     ccfg.rpc.kind = NB_TRANSPORT_KIND_TCP;
     ccfg.rpc.bind_host = "127.0.0.1";
-    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.multicast_group = "127.0.0.1";
     ccfg.rpc.discovery.port = cport;
     ccfg.runtime.io_threads = 1;
-    ccfg.rpc.discovery.hello_interval_ms = 200;
-    ccfg.rpc.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.heartbeat_interval_ms = 200;
+    ccfg.rpc.discovery.lease_ms = 3000;
 
-    ok.sem = ntk_sem_create(0);
-    denied.sem = ntk_sem_create(0);
+    ok.sem = zb_sem_create(0);
+    denied.sem = zb_sem_create(0);
     if (!ok.sem || !denied.sem) {
         failed = 1;
         goto cleanup;
@@ -221,7 +221,7 @@ static int test_rpc_semantics(void)
             goto cleanup;
         }
     }
-    if (ntk_sem_timedwait(ok.sem, 3000) != NTK_OK || ok.status != NB_OK) {
+    if (zb_sem_timedwait(ok.sem, 3000) != ZN_OK || ok.status != NB_OK) {
         nb_log_error("[semantics] echo status=%d", ok.status);
         failed = 1;
     } else if (ok.app_status != 0 || strcmp(ok.message, "done") != 0 ||
@@ -243,7 +243,7 @@ static int test_rpc_semantics(void)
             goto cleanup;
         }
     }
-    if (ntk_sem_timedwait(denied.sem, 3000) != NTK_OK) {
+    if (zb_sem_timedwait(denied.sem, 3000) != ZN_OK) {
         failed = 1;
     } else if (denied.status != NB_OK || denied.app_status != NB_ERR_AGAIN) {
         nb_log_error("[semantics] deny app=%d (want %d)", denied.app_status, NB_ERR_AGAIN);
@@ -270,10 +270,10 @@ cleanup:
         nb_node_destroy(server);
     }
     if (ok.sem) {
-        ntk_sem_destroy(ok.sem);
+        zb_sem_destroy(ok.sem);
     }
     if (denied.sem) {
-        ntk_sem_destroy(denied.sem);
+        zb_sem_destroy(denied.sem);
     }
     return failed;
 }

@@ -1,8 +1,8 @@
 #include <nb/rpc/proxy.h>
 #include <nb/rpc/service.h>
 #include <nb/rpc/node.h>
-#include <platform.h>
-#include <thread/sem.h>
+#include <zn/platform.h>
+#include <zb/os/sem.h>
 
 #define NB_LOG_TAG "test"
 #include <nb/base/log.h>
@@ -18,7 +18,7 @@ static void echo_handler(nb_call_t *call, const nb_request_t *req, void *user)
 }
 
 typedef struct client_state {
-    ntk_sem *sem;
+    zb_sem *sem;
     int status;
     char buf[8192];
     size_t len;
@@ -34,12 +34,12 @@ static void on_response(int status, const nb_response_t *resp, void *user)
         st->buf[resp->payload.len < sizeof(st->buf) ? resp->payload.len : sizeof(st->buf) - 1] =
             '\0';
     }
-    ntk_sem_post(st->sem, 1);
+    zb_sem_post(st->sem, 1);
 }
 
 static int wait_response(client_state_t *st, unsigned timeout_ms)
 {
-    if (ntk_sem_timedwait(st->sem, timeout_ms) != NTK_OK) {
+    if (zb_sem_timedwait(st->sem, timeout_ms) != ZN_OK) {
         return -1;
     }
     return 0;
@@ -66,12 +66,12 @@ static int run_call(nb_proxy_t *proxy, client_state_t *st, const void *data, siz
         }
         if (wait_response(st, 1000) == 0) {
             if (st->status == NB_ERR_NOTFOUND) {
-                ntk_sleep_ms(50);
+                zn_sleep_ms(50);
                 continue;
             }
             return st->status;
         }
-        ntk_sleep_ms(50);
+        zn_sleep_ms(50);
     }
     return -1;
 }
@@ -98,22 +98,22 @@ static int run_case(nb_transport_kind_t kind, const char *label)
     scfg.rpc.kind = kind;
     scfg.rpc.bind_host = "127.0.0.1";
     scfg.rpc.data_port = 0;
-    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.multicast_group = "127.0.0.1";
     scfg.rpc.discovery.port = sport;
     scfg.runtime.io_threads = 1;
-    scfg.rpc.discovery.hello_interval_ms = 200;
-    scfg.rpc.discovery.node_ttl_ms = 3000;
+    scfg.rpc.discovery.heartbeat_interval_ms = 200;
+    scfg.rpc.discovery.lease_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "cli";
     ccfg.rpc.kind = kind;
     ccfg.rpc.bind_host = "127.0.0.1";
     ccfg.rpc.data_port = 0;
-    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.multicast_group = "127.0.0.1";
     ccfg.rpc.discovery.port = cport;
     ccfg.runtime.io_threads = 1;
-    ccfg.rpc.discovery.hello_interval_ms = 200;
-    ccfg.rpc.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.heartbeat_interval_ms = 200;
+    ccfg.rpc.discovery.lease_ms = 3000;
 
     rc = nb_node_create(&scfg, &server);
     if (rc != NB_OK) {
@@ -149,7 +149,7 @@ static int run_case(nb_transport_kind_t kind, const char *label)
     }
 
     memset(&st, 0, sizeof(st));
-    st.sem = ntk_sem_create(0);
+    st.sem = zb_sem_create(0);
     if (!st.sem) {
         failed = 1;
         goto cleanup;
@@ -181,7 +181,7 @@ static int run_case(nb_transport_kind_t kind, const char *label)
         }
     }
 
-    ntk_sem_destroy(st.sem);
+    zb_sem_destroy(st.sem);
 
     {
         nb_metrics_t metrics;
@@ -225,7 +225,7 @@ static int run_case(nb_transport_kind_t kind, const char *label)
                 ok = 1;
                 break;
             }
-            ntk_sleep_ms(200);
+            zn_sleep_ms(200);
             waited += 200;
         }
         if (!ok) {

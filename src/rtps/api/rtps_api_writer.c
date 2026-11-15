@@ -48,7 +48,7 @@ int rtps_writer_create_internal(struct rtps_participant *participant,
     writer->guid = info.endpoint_guid;
     writer->qos = merged;
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     writer->next = participant->writers;
     participant->writers = writer;
     if (publisher) {
@@ -57,7 +57,7 @@ int rtps_writer_create_internal(struct rtps_participant *participant,
         publisher->writer_count++;
     }
     topic->writer_count++;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     *out = writer;
     return RTPS_OK;
 }
@@ -95,7 +95,7 @@ int rtps_writer_destroy(rtps_writer_t *writer)
     participant = writer->participant;
     (void)nb_rtps_participant_remove_endpoint(participant->engine, &writer->guid);
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (link = &participant->writers; *link; link = &(*link)->next) {
         if (*link == writer) {
             *link = writer->next;
@@ -119,7 +119,7 @@ int rtps_writer_destroy(rtps_writer_t *writer)
     if (writer->topic && writer->topic->writer_count > 0) {
         writer->topic->writer_count--;
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     free(writer);
     return RTPS_OK;
 }

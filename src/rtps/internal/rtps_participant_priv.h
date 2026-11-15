@@ -21,7 +21,7 @@
 #include "rtps_tcp.h"
 #include "rtps_types.h"
 
-#include <ntk.h>
+#include <zn/zn.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -285,15 +285,15 @@ struct nb_rtps_participant {
     /* TCP locator, Invalid when the participant is UDP-only. */
     nb_rtps_locator_t metatraffic_tcp;
 
-    ntk_socket *rx_sock;
-    ntk_socket *unicast_sock;
+    zn_socket *rx_sock;
+    zn_socket *unicast_sock;
     /* Standard mapping only: user-data unicast port (d3+PG*pid). NULL means
      * user data shares unicast_sock. */
-    ntk_socket *data_sock;
+    zn_socket *data_sock;
     uint16_t data_port;
-    ntk_poller *poller;
-    ntk_thread *thread;
-    ntk_mutex *lock;
+    zn_poller *poller;
+    zb_thread *thread;
+    zb_mutex *lock;
     nb_rtps_remote_participant_t *remotes;
     nb_rtps_participant_callback_t callback;
     void *callback_user;
@@ -366,10 +366,10 @@ typedef struct nb_rtps_queued_status {
 
 /* ---- 由 rtps_participant.c 提供给数据面的工具 ---- */
 void copy_str(char *dst, size_t cap, const char *src);
-ntk_socket *participant_data_socket(const nb_rtps_participant_t *participant);
-ntk_ssize_t nb_rtps_sendto(
+zn_socket *participant_data_socket(const nb_rtps_participant_t *participant);
+zn_ssize_t nb_rtps_sendto(
     nb_rtps_participant_t *participant,
-    ntk_socket *socket,
+    zn_socket *socket,
     const void *data,
     size_t len,
     const char *host,

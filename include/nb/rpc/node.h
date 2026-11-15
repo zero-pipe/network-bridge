@@ -5,7 +5,7 @@
  * Node: lifecycle, transport selection, threads, and discovery configuration.
  *
  * A node owns:
- *   - one ntk_poller_pool (IO thread pool; it creates no threads of its own);
+ *   - one zn_poller_pool (IO thread pool; it creates no threads of its own);
  *   - one or more bindings; when bindings are not configured explicitly, the
  *     transport config creates a single default binding;
  *   - optional service discovery (MESH) and a route table.

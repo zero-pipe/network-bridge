@@ -1,0 +1,19 @@
+#ifndef ZN_CONFIG_H
+#define ZN_CONFIG_H
+
+#define ZN_VERSION_MAJOR @ZN_VERSION_MAJOR@
+#define ZN_VERSION_MINOR @ZN_VERSION_MINOR@
+#define ZN_VERSION_PATCH @ZN_VERSION_PATCH@
+
+#cmakedefine ZN_PLATFORM_LINUX 1
+#cmakedefine ZN_PLATFORM_WIN32 1
+#cmakedefine ZN_PLATFORM_GENERIC 1
+
+#cmakedefine ZN_HAVE_EPOLL 1
+#cmakedefine ZN_HAVE_WEPOLL 1
+#cmakedefine ZN_HAVE_SELECT 1
+#cmakedefine ZN_HAVE_PIPE2 1
+#cmakedefine ZN_HAVE_POSIX_SEM 1
+#cmakedefine ZN_HAVE_OPENSSL 1
+
+#endif /* ZN_CONFIG_H */

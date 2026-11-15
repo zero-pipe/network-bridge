@@ -40,17 +40,17 @@ static void rtps_api_on_engine_data(void *user,
     if (!participant || !reader_guid || !message) {
         return;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     reader = find_reader_locked(participant, reader_guid);
     if (!reader) {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return;
     }
     reader->refs++;
     callback = reader->callback;
     callback_user = reader->callback_user;
     history = reader->history;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     rtps_api_fill_sample(message, &sample);
     if (history) {
@@ -60,12 +60,12 @@ static void rtps_api_on_engine_data(void *user,
         callback(callback_user, reader, &sample, 1);
     }
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     if (reader->refs > 0) {
         reader->refs--;
     }
     rtps_reader_unref_locked(reader);
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 }
 
 static void rtps_api_on_engine_status(void *user,
@@ -91,10 +91,10 @@ static void rtps_api_on_engine_status(void *user,
     out.not_alive_count = event->not_alive_count;
     rtps_api_copy(out.reason, sizeof(out.reason), event->reason);
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     callback = participant->status_cb;
     callback_user = participant->status_user;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     if (callback) {
         callback(callback_user, &out);
     }
@@ -129,7 +129,7 @@ int rtps_participant_create(const rtps_participant_config_t *config,
     if (!participant) {
         return RTPS_ERR_NOMEM;
     }
-    participant->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    participant->lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     if (!participant->lock) {
         free(participant);
         return RTPS_ERR_NOMEM;
@@ -158,7 +158,7 @@ int rtps_participant_create(const rtps_participant_config_t *config,
     engine_config.dump_frames = config->dump_frames;
     participant->engine = nb_rtps_participant_create(&engine_config);
     if (!participant->engine) {
-        ntk_mutex_destroy(participant->lock);
+        zb_mutex_destroy(participant->lock);
         free(participant);
         return RTPS_ERR_INVALID;
     }
@@ -194,7 +194,7 @@ void rtps_participant_destroy(rtps_participant_t *participant)
         rtps_waitset_destroy(participant->waitsets);
     }
     nb_rtps_participant_destroy(participant->engine);
-    ntk_mutex_destroy(participant->lock);
+    zb_mutex_destroy(participant->lock);
     free(participant);
 }
 
@@ -266,10 +266,10 @@ int rtps_participant_set_status_callback(rtps_participant_t *participant,
     if (!participant) {
         return RTPS_ERR_INVALID;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     participant->status_cb = callback;
     participant->status_user = user;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     return RTPS_OK;
 }
 

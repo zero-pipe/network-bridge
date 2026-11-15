@@ -7,7 +7,7 @@
  */
 #include <nb/dds.h>
 
-#include <ntk.h>
+#include <zn/zn.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -23,7 +23,7 @@ static int g_fail;
     } while (0)
 
 typedef struct rx_state {
-    ntk_mutex *lock;
+    zb_mutex *lock;
     int count;
     char last[64];
 } rx_state_t;
@@ -32,22 +32,22 @@ static void on_sample(void *user, const nb_dds_sample_t *sample)
 {
     rx_state_t *rx = (rx_state_t *)user;
 
-    ntk_mutex_lock(rx->lock);
+    zb_mutex_lock(rx->lock);
     rx->count++;
     if (sample->data.len < sizeof(rx->last)) {
         memcpy(rx->last, sample->data.data, sample->data.len);
         rx->last[sample->data.len] = '\0';
     }
-    ntk_mutex_unlock(rx->lock);
+    zb_mutex_unlock(rx->lock);
 }
 
 static int rx_count(rx_state_t *rx)
 {
     int count;
 
-    ntk_mutex_lock(rx->lock);
+    zb_mutex_lock(rx->lock);
     count = rx->count;
-    ntk_mutex_unlock(rx->lock);
+    zb_mutex_unlock(rx->lock);
     return count;
 }
 
@@ -83,10 +83,10 @@ static int make_participant(uint16_t spdp_port,
     make_rtps_options(&rtps, spdp_port, unicast_port, peers, peer_count);
     memset(&options, 0, sizeof(options));
     options.backend = backend;
-    options.domain = backend == NB_DDS_BACKEND_CYCLONE ? 71u : 0u;
+    options.domain = 0u;
     options.prefix = "app";
     options.name = "dds-api-test";
-    options.rtps = backend == NB_DDS_BACKEND_RTPS ? &rtps : NULL;
+    options.rtps = &rtps;
     return nb_dds_participant_create(&options, out);
 }
 
@@ -97,11 +97,9 @@ static void make_qos(nb_dds_qos_t *qos)
     nb_dds_qos_set_history(qos, NB_DDS_HISTORY_KEEP_LAST, 4);
 }
 
-int main(int argc, char **argv)
+int main(void)
 {
-    const char *mode = argc > 1 ? argv[1] : "rtps";
-    nb_dds_backend_t backend =
-        strcmp(mode, "cyclone") == 0 ? NB_DDS_BACKEND_CYCLONE : NB_DDS_BACKEND_RTPS;
+    const nb_dds_backend_t backend = NB_DDS_BACKEND_RTPS;
     const char *p1_peers[] = {"127.0.0.1:48402"};
     const char *p2_peers[] = {"127.0.0.1:48400"};
     nb_dds_participant_t *p1 = NULL;
@@ -122,7 +120,7 @@ int main(int argc, char **argv)
     int i;
 
     memset(&rx, 0, sizeof(rx));
-    rx.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    rx.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     CHECK(rx.lock != NULL);
     if (!rx.lock) {
         return 1;
@@ -164,7 +162,7 @@ int main(int argc, char **argv)
         if (nb_dds_reader_size(history_reader) > 0 && rx_count(&rx) > 0) {
             break;
         }
-        ntk_sleep_ms(50);
+        zn_sleep_ms(50);
     }
     CHECK(nb_dds_reader_size(history_reader) > 0);
     CHECK(rx_count(&rx) > 0);
@@ -185,22 +183,20 @@ int main(int argc, char **argv)
     }
     CHECK(nb_dds_reader_size(history_reader) == 0);
 
-    /* Prefix applies to the wire name (RTPS backend exposes the built-in topic
-     * snapshot; Cyclone reports none yet). */
-    if (backend == NB_DDS_BACKEND_RTPS) {
-        discovered_count = nb_dds_participant_discovery_read(p2, NB_DDS_BUILTIN_TOPIC_TOPIC,
-                                                             discovered, 8);
-        {
-            int found = 0;
-            size_t j;
+    /* Prefix applies to the wire name; the RTPS backend exposes the built-in
+     * topic snapshot. */
+    discovered_count = nb_dds_participant_discovery_read(p2, NB_DDS_BUILTIN_TOPIC_TOPIC,
+                                                         discovered, 8);
+    {
+        int found = 0;
+        size_t j;
 
-            for (j = 0; j < discovered_count; j++) {
-                if (strcmp(discovered[j].name, "app/chat") == 0) {
-                    found = 1;
-                }
+        for (j = 0; j < discovered_count; j++) {
+            if (strcmp(discovered[j].name, "app/chat") == 0) {
+                found = 1;
             }
-            CHECK(found);
         }
+        CHECK(found);
     }
 
     /* Argument validation. */
@@ -217,6 +213,6 @@ out:
     nb_dds_topic_destroy(pub_topic);
     nb_dds_participant_destroy(p2);
     nb_dds_participant_destroy(p1);
-    ntk_mutex_destroy(rx.lock);
+    zb_mutex_destroy(rx.lock);
     return g_fail ? 1 : 0;
 }

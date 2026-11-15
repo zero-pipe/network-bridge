@@ -23,12 +23,12 @@ CMake 构建**。验证结果见下表。
 本仓库侧（路径按实际构建目录调整）：
 
 ```bash
-cc -O2 -std=gnu99 -Iinclude -I3rdparty/ntk/include \
+cc -O2 -std=gnu99 -Iinclude -I3rdparty/znet/include \
    -I3rdparty/micro-cdr/include -Ibuild/3rdparty/micro-cdr/include \
    tools/fastdds_interop/rtps_interop.c -o build/rtps_interop \
    build/src/librtps.a build/src/librtps_core.a build/src/libnb_base.a \
    build/3rdparty/micro-cdr/libmicrocdr.a build/src/libnb_log.a \
-   build/3rdparty/elog/libelog.a build/3rdparty/ntk/libntk.a \
+   build/3rdparty/elog/libelog.a build/3rdparty/znet/libznet.a \
    -lpthread -lrt -ldl
 ```
 

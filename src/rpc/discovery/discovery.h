@@ -2,22 +2,26 @@
 #define NB_DISCOVERY_H
 
 /*
- * mesh 服务发现（控制面）：UDP 广播 HELLO/BYE + 对端注册表。
+ * mesh 服务发现（RPC 控制面）：nb_mesh 的适配层。
  *
- * 协议、分帧、CRC、序号/epoch、哈希表都在独立的 ntk_discovery 库里；
- * 本模块只是 nb 的适配层：把本地服务映射成 key（服务名），把 binding 映射
- * 成 peer 的 endpoint 列表，并把库的回调写进 registry。
+ * 协议、报文、编队隔离、按需内省都在 nb_mesh 库里；这里只做三件事：
+ *   1. 把本地服务清单交给 mesh（用于 schema_hash 与内省应答）；
+ *   2. 把 mesh 的对端/内省回调翻译成 registry 里的服务 -> 端点映射；
+ *   3. 实现 registry backend 的 start/stop/tick/announce。
+ *
+ * 关键点：契约哈希（schema_hash）一致的节点不做任何握手——本地服务清单即
+ * 远端服务清单，registry 直接按本地清单填充。只有异构节点（哈希不同、
+ * 动态插件）才单播拉取一次 manifest 并缓存。
  */
 
 #include <nb/rpc/types.h>
 #include <nb/rpc/endpoint.h>
+#include <nb/mesh.h>
 
 #include <stddef.h>
 #include <stdint.h>
 
-#include <ntk.h>
-
-#include <ntk_discovery/ntk_discovery.h>
+#include <zn/zn.h>
 
 #include "caps.h"
 
@@ -27,7 +31,7 @@ extern "C" {
 
 typedef struct nb_node nb_node_t;
 
-/* 显式发现目标（单播 HELLO）。 */
+/* 显式发现目标（单播心跳，组播不可用时的兜底）。 */
 typedef struct nb_disc_target {
     int used;
     char ip[NB_HOST_MAX];
@@ -36,9 +40,9 @@ typedef struct nb_disc_target {
 
 /* 发现子系统自有状态：由 node 内嵌，模块内聚访问。 */
 typedef struct nb_discovery_state {
-    ntk_discovery_t *disc;
+    nb_mesh_t *mesh;
     nb_disc_target_t targets[NB_DISCOVERY_MAX_TARGETS];
-    ntk_mutex *targets_lock; /* 保护 targets（运行期可被任意线程添加） */
+    zb_mutex *targets_lock; /* 保护 targets（运行期可被任意线程添加） */
 } nb_discovery_state_t;
 
 int nb_discovery_init(nb_node_t *node);

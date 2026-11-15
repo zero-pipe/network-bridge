@@ -46,16 +46,16 @@ void nb_dds_reader_deliver(nb_dds_reader_t *reader,
         return;
     }
     participant = reader->topic->participant;
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     if (reader->removed) {
-        ntk_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->lock);
         return;
     }
     reader->refs++;
     history = reader->history;
     on_data = reader->on_data;
     user = reader->user;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     if (history) {
         (void)nb_sample_queue_push(history, data, len, (uint8_t)encoding, info);
@@ -71,10 +71,10 @@ void nb_dds_reader_deliver(nb_dds_reader_t *reader,
         on_data(user, &sample);
     }
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     reader->refs--;
     destroy = (reader->removed && reader->refs == 0);
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     if (destroy) {
         if (reader->history) {
@@ -95,12 +95,12 @@ void nb_dds_reader_unref(nb_dds_reader_t *reader)
         return;
     }
     participant = reader->topic->participant;
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     if (reader->refs > 0) {
         reader->refs--;
     }
     destroy = (reader->removed && reader->refs == 0);
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     if (destroy) {
         if (reader->history) {
             nb_sample_queue_destroy(reader->history);
@@ -121,14 +121,14 @@ size_t nb_dds_reader_snapshot(nb_dds_topic_t *topic, nb_dds_reader_t **out, size
         return 0;
     }
     participant = topic->participant;
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (reader = topic->readers; reader && count < max; reader = reader->next) {
         if (!reader->removed) {
             reader->refs++;
             out[count++] = reader;
         }
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     return count;
 }
 
@@ -189,11 +189,11 @@ int nb_dds_reader_create(nb_dds_topic_t *topic,
         free(reader);
         return rc;
     }
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     topic->reader_count++;
     reader->next = topic->readers;
     topic->readers = reader;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     *out = reader;
     return NB_OK;
 }
@@ -207,7 +207,7 @@ void nb_dds_reader_destroy(nb_dds_reader_t *reader)
         return;
     }
     participant = reader->topic->participant;
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     if (!reader->removed) {
         nb_dds_reader_t **link = &reader->topic->readers;
 
@@ -226,7 +226,7 @@ void nb_dds_reader_destroy(nb_dds_reader_t *reader)
     if (reader->refs == 0) {
         destroy = 1;
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     if (destroy) {
         if (reader->history) {

@@ -4,7 +4,7 @@
 /*
  * Global allocator and statistics (alloc).
  *
- * This module does not depend on the rest of the framework or ntk; it is usable on its own. The public
+ * This module does not depend on the rest of the framework or znet; it is usable on its own. The public
  * symbols are nb_malloc/nb_free, named for their semantics rather than the
  * file name. Install an allocator before creating threads; hot paths only read
  * the current configuration at runtime.

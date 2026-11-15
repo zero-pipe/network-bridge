@@ -16,7 +16,7 @@ typedef struct nb_queued_sample {
 } nb_queued_sample_t;
 
 struct nb_sample_queue {
-    ntk_mutex *lock;
+    zb_mutex *lock;
     nb_queued_sample_t *head;
     nb_queued_sample_t *tail;
     size_t count;
@@ -41,7 +41,7 @@ nb_sample_queue_t *nb_sample_queue_create(uint32_t depth)
     if (!queue) {
         return NULL;
     }
-    queue->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    queue->lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     if (!queue->lock) {
         free(queue);
         return NULL;
@@ -63,7 +63,7 @@ void nb_sample_queue_destroy(nb_sample_queue_t *queue)
         nb_queued_sample_free(sample);
         sample = next;
     }
-    ntk_mutex_destroy(queue->lock);
+    zb_mutex_destroy(queue->lock);
     free(queue);
 }
 
@@ -100,7 +100,7 @@ int nb_sample_queue_push(nb_sample_queue_t *queue,
         sample->info = *info;
     }
 
-    ntk_mutex_lock(queue->lock);
+    zb_mutex_lock(queue->lock);
     while (queue->count >= queue->depth && queue->head) {
         nb_queued_sample_t *old = queue->head;
         queue->head = old->next;
@@ -125,7 +125,7 @@ int nb_sample_queue_push(nb_sample_queue_t *queue,
             listener_count++;
         }
     }
-    ntk_mutex_unlock(queue->lock);
+    zb_mutex_unlock(queue->lock);
 
     for (i = 0; i < listener_count; i++) {
         listeners[i](listener_user[i]);
@@ -210,7 +210,7 @@ size_t nb_sample_queue_read(nb_sample_queue_t *queue,
     if (!queue || !out || max == 0) {
         return 0;
     }
-    ntk_mutex_lock(queue->lock);
+    zb_mutex_lock(queue->lock);
     for (sample = queue->head; sample && count < max; sample = sample->next) {
         if (!nb_sample_matches(sample, filter)) {
             continue;
@@ -219,7 +219,7 @@ size_t nb_sample_queue_read(nb_sample_queue_t *queue,
         sample->read = 1;
         count++;
     }
-    ntk_mutex_unlock(queue->lock);
+    zb_mutex_unlock(queue->lock);
     return count;
 }
 
@@ -235,7 +235,7 @@ size_t nb_sample_queue_take(nb_sample_queue_t *queue,
     if (!queue || !out || max == 0) {
         return 0;
     }
-    ntk_mutex_lock(queue->lock);
+    zb_mutex_lock(queue->lock);
     sample = queue->head;
     while (sample && count < max) {
         nb_queued_sample_t *next = sample->next;
@@ -260,7 +260,7 @@ size_t nb_sample_queue_take(nb_sample_queue_t *queue,
         count++;
         sample = next;
     }
-    ntk_mutex_unlock(queue->lock);
+    zb_mutex_unlock(queue->lock);
     return count;
 }
 
@@ -271,9 +271,9 @@ size_t nb_sample_queue_size(nb_sample_queue_t *queue)
     if (!queue) {
         return 0;
     }
-    ntk_mutex_lock(queue->lock);
+    zb_mutex_lock(queue->lock);
     size = queue->count;
-    ntk_mutex_unlock(queue->lock);
+    zb_mutex_unlock(queue->lock);
     return size;
 }
 
@@ -284,9 +284,9 @@ uint64_t nb_sample_queue_dropped(nb_sample_queue_t *queue)
     if (!queue) {
         return 0;
     }
-    ntk_mutex_lock(queue->lock);
+    zb_mutex_lock(queue->lock);
     dropped = queue->dropped;
-    ntk_mutex_unlock(queue->lock);
+    zb_mutex_unlock(queue->lock);
     return dropped;
 }
 
@@ -295,9 +295,9 @@ void nb_sample_queue_set_depth(nb_sample_queue_t *queue, uint32_t depth)
     if (!queue) {
         return;
     }
-    ntk_mutex_lock(queue->lock);
+    zb_mutex_lock(queue->lock);
     queue->depth = depth ? depth : NB_SAMPLE_QUEUE_DEFAULT_DEPTH;
-    ntk_mutex_unlock(queue->lock);
+    zb_mutex_unlock(queue->lock);
 }
 
 size_t nb_sample_queue_match_count(nb_sample_queue_t *queue,
@@ -309,13 +309,13 @@ size_t nb_sample_queue_match_count(nb_sample_queue_t *queue,
     if (!queue) {
         return 0;
     }
-    ntk_mutex_lock(queue->lock);
+    zb_mutex_lock(queue->lock);
     for (sample = queue->head; sample; sample = sample->next) {
         if (nb_sample_matches(sample, filter)) {
             count++;
         }
     }
-    ntk_mutex_unlock(queue->lock);
+    zb_mutex_unlock(queue->lock);
     return count;
 }
 
@@ -327,7 +327,7 @@ int nb_sample_queue_add_listener(nb_sample_queue_t *queue, nb_sample_notify_fn f
     if (!queue || !fn) {
         return NB_ERR_INVALID;
     }
-    ntk_mutex_lock(queue->lock);
+    zb_mutex_lock(queue->lock);
     for (i = 0; i < NB_SAMPLE_QUEUE_MAX_LISTENERS; i++) {
         if (queue->listeners[i] == fn && queue->listener_user[i] == user) {
             rc = NB_OK;
@@ -340,7 +340,7 @@ int nb_sample_queue_add_listener(nb_sample_queue_t *queue, nb_sample_notify_fn f
             break;
         }
     }
-    ntk_mutex_unlock(queue->lock);
+    zb_mutex_unlock(queue->lock);
     return rc;
 }
 
@@ -353,7 +353,7 @@ void nb_sample_queue_remove_listener(nb_sample_queue_t *queue,
     if (!queue || !fn) {
         return;
     }
-    ntk_mutex_lock(queue->lock);
+    zb_mutex_lock(queue->lock);
     for (i = 0; i < NB_SAMPLE_QUEUE_MAX_LISTENERS; i++) {
         if (queue->listeners[i] == fn && queue->listener_user[i] == user) {
             queue->listeners[i] = NULL;
@@ -361,5 +361,5 @@ void nb_sample_queue_remove_listener(nb_sample_queue_t *queue,
             break;
         }
     }
-    ntk_mutex_unlock(queue->lock);
+    zb_mutex_unlock(queue->lock);
 }

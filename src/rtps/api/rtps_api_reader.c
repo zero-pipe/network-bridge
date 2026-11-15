@@ -86,7 +86,7 @@ int rtps_reader_create_internal(struct rtps_participant *participant,
         }
     }
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     reader->next = participant->readers;
     participant->readers = reader;
     if (subscriber) {
@@ -95,7 +95,7 @@ int rtps_reader_create_internal(struct rtps_participant *participant,
         subscriber->reader_count++;
     }
     topic->reader_count++;
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     *out = reader;
     return RTPS_OK;
 }
@@ -131,7 +131,7 @@ static void reader_remove_waitset_links_locked(struct rtps_reader *reader)
     if (!history) {
         return;
     }
-    ntk_mutex_lock(history->lock);
+    zb_mutex_lock(history->lock);
     while (history->listeners) {
         rtps_ws_link_t *link = history->listeners;
         rtps_ws_link_t **slot;
@@ -147,7 +147,7 @@ static void reader_remove_waitset_links_locked(struct rtps_reader *reader)
         }
         free(link);
     }
-    ntk_mutex_unlock(history->lock);
+    zb_mutex_unlock(history->lock);
 }
 
 void rtps_reader_unref_locked(struct rtps_reader *reader)
@@ -178,7 +178,7 @@ int rtps_reader_destroy(rtps_reader_t *reader)
     participant = reader->participant;
     (void)nb_rtps_participant_remove_endpoint(participant->engine, &reader->guid);
 
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     for (link = &participant->readers; *link; link = &(*link)->next) {
         if (*link == reader) {
             *link = reader->next;
@@ -212,7 +212,7 @@ int rtps_reader_destroy(rtps_reader_t *reader)
         reader->history = NULL;
         free_now = 1;
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
 
     if (free_now) {
         if (history) {
@@ -230,10 +230,10 @@ int rtps_reader_set_data_callback(rtps_reader_t *reader,
     if (!reader) {
         return RTPS_ERR_INVALID;
     }
-    ntk_mutex_lock(reader->participant->lock);
+    zb_mutex_lock(reader->participant->lock);
     reader->callback = callback;
     reader->callback_user = user;
-    ntk_mutex_unlock(reader->participant->lock);
+    zb_mutex_unlock(reader->participant->lock);
     return RTPS_OK;
 }
 
@@ -244,7 +244,7 @@ int rtps_reader_enable_history(rtps_reader_t *reader, uint32_t depth)
     if (!reader) {
         return RTPS_ERR_INVALID;
     }
-    ntk_mutex_lock(reader->participant->lock);
+    zb_mutex_lock(reader->participant->lock);
     if (!reader->history) {
         reader->history = rtps_history_create(depth ? depth : 1u);
         if (!reader->history) {
@@ -253,7 +253,7 @@ int rtps_reader_enable_history(rtps_reader_t *reader, uint32_t depth)
     } else if (depth > 0) {
         rtps_history_set_depth(reader->history, depth);
     }
-    ntk_mutex_unlock(reader->participant->lock);
+    zb_mutex_unlock(reader->participant->lock);
     return rc;
 }
 
@@ -267,11 +267,11 @@ size_t rtps_reader_read(rtps_reader_t *reader,
     if (!reader) {
         return 0;
     }
-    ntk_mutex_lock(reader->participant->lock);
+    zb_mutex_lock(reader->participant->lock);
     if (reader->history && out && max > 0) {
         count = rtps_history_read(reader->history, filter, out, max, 0);
     }
-    ntk_mutex_unlock(reader->participant->lock);
+    zb_mutex_unlock(reader->participant->lock);
     return count;
 }
 
@@ -285,11 +285,11 @@ size_t rtps_reader_take(rtps_reader_t *reader,
     if (!reader) {
         return 0;
     }
-    ntk_mutex_lock(reader->participant->lock);
+    zb_mutex_lock(reader->participant->lock);
     if (reader->history && out && max > 0) {
         count = rtps_history_read(reader->history, filter, out, max, 1);
     }
-    ntk_mutex_unlock(reader->participant->lock);
+    zb_mutex_unlock(reader->participant->lock);
     return count;
 }
 
@@ -320,11 +320,11 @@ size_t rtps_reader_match_count(rtps_reader_t *reader,
     if (!reader) {
         return 0;
     }
-    ntk_mutex_lock(reader->participant->lock);
+    zb_mutex_lock(reader->participant->lock);
     if (reader->history) {
         count = rtps_history_match_count(reader->history, filter);
     }
-    ntk_mutex_unlock(reader->participant->lock);
+    zb_mutex_unlock(reader->participant->lock);
     return count;
 }
 
@@ -337,11 +337,11 @@ size_t rtps_reader_size(const rtps_reader_t *reader)
         return 0;
     }
     participant = reader->participant;
-    ntk_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->lock);
     if (reader->history) {
         count = rtps_history_size(reader->history);
     }
-    ntk_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->lock);
     return count;
 }
 

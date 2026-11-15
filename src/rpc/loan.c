@@ -29,9 +29,9 @@ static nb_request_id_t nb_loan_next_id(nb_node_t *node)
 {
     nb_request_id_t id;
 
-    ntk_mutex_lock(node->id_lock);
+    zb_mutex_lock(node->id_lock);
     id = (nb_request_id_t)(node->next_request_id++);
-    ntk_mutex_unlock(node->id_lock);
+    zb_mutex_unlock(node->id_lock);
     return id ? id : 1;
 }
 

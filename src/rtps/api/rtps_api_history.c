@@ -71,7 +71,7 @@ rtps_reader_history_t *rtps_history_create(size_t depth)
     if (!history) {
         return NULL;
     }
-    history->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    history->lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     if (!history->lock) {
         free(history);
         return NULL;
@@ -104,7 +104,7 @@ void rtps_history_destroy(rtps_reader_history_t *history)
         sample = next;
     }
     if (history->lock) {
-        ntk_mutex_destroy(history->lock);
+        zb_mutex_destroy(history->lock);
     }
     free(history);
 }
@@ -133,7 +133,7 @@ void rtps_history_push(rtps_reader_history_t *history, const rtps_sample_t *samp
     node->info = sample->info;
     node->info.sample_state = RTPS_SAMPLE_STATE_NOT_READ;
 
-    ntk_mutex_lock(history->lock);
+    zb_mutex_lock(history->lock);
     if (history->count >= history->depth) {
         rtps_hist_sample_t *old = history->head;
 
@@ -158,10 +158,10 @@ void rtps_history_push(rtps_reader_history_t *history, const rtps_sample_t *samp
      * blocks, so it is safe under the history lock. */
     for (link = history->listeners; link; link = link->hist_next) {
         if (link->waitset && link->waitset->sem) {
-            (void)ntk_sem_post(link->waitset->sem, 1);
+            (void)zb_sem_post(link->waitset->sem, 1);
         }
     }
-    ntk_mutex_unlock(history->lock);
+    zb_mutex_unlock(history->lock);
 }
 
 void rtps_history_set_depth(rtps_reader_history_t *history, size_t depth)
@@ -169,7 +169,7 @@ void rtps_history_set_depth(rtps_reader_history_t *history, size_t depth)
     if (!history || depth == 0) {
         return;
     }
-    ntk_mutex_lock(history->lock);
+    zb_mutex_lock(history->lock);
     history->depth = depth;
     while (history->count > history->depth && history->head) {
         rtps_hist_sample_t *old = history->head;
@@ -182,7 +182,7 @@ void rtps_history_set_depth(rtps_reader_history_t *history, size_t depth)
         history->dropped++;
         history_sample_free(old);
     }
-    ntk_mutex_unlock(history->lock);
+    zb_mutex_unlock(history->lock);
 }
 
 size_t rtps_history_size(rtps_reader_history_t *history)
@@ -192,9 +192,9 @@ size_t rtps_history_size(rtps_reader_history_t *history)
     if (!history) {
         return 0;
     }
-    ntk_mutex_lock(history->lock);
+    zb_mutex_lock(history->lock);
     count = history->count;
-    ntk_mutex_unlock(history->lock);
+    zb_mutex_unlock(history->lock);
     return count;
 }
 
@@ -211,7 +211,7 @@ size_t rtps_history_read(rtps_reader_history_t *history,
     if (!history) {
         return 0;
     }
-    ntk_mutex_lock(history->lock);
+    zb_mutex_lock(history->lock);
     sample = history->head;
     while (sample) {
         rtps_hist_sample_t *next = sample->next;
@@ -254,7 +254,7 @@ size_t rtps_history_read(rtps_reader_history_t *history,
         }
         sample = next;
     }
-    ntk_mutex_unlock(history->lock);
+    zb_mutex_unlock(history->lock);
     return written;
 }
 

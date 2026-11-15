@@ -4,9 +4,9 @@
 /*
  * DDS spine: participant lifecycle and backend selection.
  *
- * A participant owns a DDS domain and one backend (rtps or cyclone). Unlike
+ * A participant owns a DDS domain and one backend (the built-in RTPS engine). Unlike
  * the old pub/sub API it does not need an RPC node, bindings, routes or the
- * ntk_discovery control plane: the backend runs its own DDS discovery
+ * zn_discovery control plane: the backend runs its own DDS discovery
  * (SPDP/SEDP).
  *
  *   nb_dds_participant_t   domain + backend + default QoS/partition/prefix
@@ -35,8 +35,7 @@ typedef struct nb_dds_reader nb_dds_reader_t;
 typedef struct nb_dds_waitset nb_dds_waitset_t;
 
 typedef enum nb_dds_backend {
-    NB_DDS_BACKEND_RTPS = 0, /* in-tree RTPS engine (always available) */
-    NB_DDS_BACKEND_CYCLONE = 1 /* Cyclone DDS (NB_ENABLE_DDS build option) */
+    NB_DDS_BACKEND_RTPS = 0 /* in-tree RTPS engine (the only built-in backend) */
 } nb_dds_backend_t;
 
 /* RTPS backend tuning. All fields are optional; 0/NULL selects the engine
@@ -61,12 +60,6 @@ typedef struct nb_dds_rtps_options {
     size_t peer_count;
 } nb_dds_rtps_options_t;
 
-/* Cyclone backend tuning. */
-typedef struct nb_dds_cyclone_options {
-    uint32_t struct_size;
-    const char *config_xml; /* optional Cyclone DDS configuration */
-} nb_dds_cyclone_options_t;
-
 typedef struct nb_dds_participant_options {
     nb_dds_backend_t backend;
     uint32_t domain;
@@ -76,7 +69,6 @@ typedef struct nb_dds_participant_options {
     const char *name;
     const nb_dds_qos_t *default_qos;
     const nb_dds_rtps_options_t *rtps;
-    const nb_dds_cyclone_options_t *cyclone;
 } nb_dds_participant_options_t;
 
 /* Participant metrics. Zero for backends that do not report a counter. */

@@ -87,9 +87,9 @@ nb_add_test(test_rtps_participant e2e.rtps_participant
     INCLUDES ${NB_SRC_DIR}/rtps/internal
     TIMEOUT 60)
 
-nb_add_test(test_ntk_discovery unit.ntk_discovery
+nb_add_test(test_mesh unit.mesh
     LABELS "unit;discovery"
-    LIBRARIES ntk_discovery)
+    LIBRARIES nb_mesh)
 
 # Contract: the rtps transport provider may only use the public rtps_* API.
 add_test(NAME contract.rtps_provider_api
@@ -154,7 +154,7 @@ add_test(NAME contract.dds_symbols
     COMMAND ${CMAKE_COMMAND}
             -DNM=${CMAKE_NM}
             -DARCHIVE=$<TARGET_FILE:nb_dds>
-            "-DFORBIDDEN=nb_node_;nb_service_;nb_proxy_;ntk_discovery_"
+            "-DFORBIDDEN=nb_node_;nb_service_;nb_proxy_;nb_mesh_"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/check_spine_symbols.cmake)
 set_tests_properties(contract.dds_symbols PROPERTIES
     LABELS "unit;contract;dds"
@@ -169,17 +169,11 @@ nb_add_test(test_dds_api e2e.dds_api_rtps
     LIBRARIES nb_dds
     LABELS "e2e;dds;rtps"
     TIMEOUT 90)
-if(NB_ENABLE_DDS)
-    add_test(NAME e2e.dds_api_cyclone COMMAND test_dds_api cyclone)
-    set_tests_properties(e2e.dds_api_cyclone PROPERTIES
-        LABELS "e2e;dds;dds_cyclone"
-        TIMEOUT 120)
-endif()
 
 nb_add_test(test_buffer unit.buffer LABELS "unit;buffer" LIBRARIES nb_base)
 nb_add_test(test_buf_concurrency unit.buf_concurrency
     LABELS "unit;concurrency"
-    LIBRARIES ntk nb_base
+    LIBRARIES znet nb_base
     TIMEOUT 300)
 nb_add_test(test_slotpool unit.slotpool LABELS "unit;slotpool" LIBRARIES nb_base)
 nb_add_test(test_poolset unit.poolset LABELS "unit;poolset" TIMEOUT 60)
@@ -204,11 +198,4 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         LABELS "unit;shm"
         INCLUDES ${NB_SRC_DIR}/rpc/transport/shm)
     nb_add_test(test_shm_mesh e2e.shm_mesh LABELS "e2e;shm")
-endif()
-
-if(NB_ENABLE_DDS)
-    nb_add_test(test_rtps_cyclone e2e.rtps_cyclone
-        LABELS "e2e;dds;rtps"
-        INCLUDES ${NB_SRC_DIR}/rtps/internal ${NB_SRC_DIR}/dds/cyclone
-        TIMEOUT 180)
 endif()

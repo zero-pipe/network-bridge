@@ -15,7 +15,7 @@
 #include <nb/base/metrics.h>
 #include <nb/rpc/transport_provider.h>
 
-#include <ntk.h>
+#include <zn/zn.h>
 
 #include <stdint.h>
 
@@ -79,8 +79,8 @@ struct nb_transport {
     uint32_t rtcp_interval_ms;
     int disable_rtcp;
     unsigned io_threads;
-    ntk_poller_pool *pool;
-    ntk_poller *poller;
+    zn_poller_pool *pool;
+    zn_poller *poller;
     nb_metrics_t *metrics;
 };
 

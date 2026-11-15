@@ -3,7 +3,7 @@
 
 #include "util.h"
 
-#include <ntk.h>
+#include <zn/zn.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -41,9 +41,9 @@ static void nb_registry_remove_node_locked(nb_registry_t *registry, uint32_t nod
     }
 }
 
-static ntk_mutex *nb_registry_lock(const nb_registry_t *registry)
+static zb_mutex *nb_registry_lock(const nb_registry_t *registry)
 {
-    return registry && registry->lock ? (ntk_mutex *)registry->lock : NULL;
+    return registry && registry->lock ? (zb_mutex *)registry->lock : NULL;
 }
 
 void nb_registry_init(nb_registry_t *registry)
@@ -54,20 +54,20 @@ void nb_registry_init(nb_registry_t *registry)
     registry->instances = NULL;
     registry->generation = 0;
     registry->next_instance = 0;
-    registry->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    registry->lock = zb_mutex_create(ZB_MUTEX_NORMAL);
 }
 
 void nb_registry_cleanup(nb_registry_t *registry)
 {
     nb_registry_instance_t *instance;
     nb_registry_instance_t *next;
-    ntk_mutex *lock;
+    zb_mutex *lock;
     if (!registry) {
         return;
     }
     lock = nb_registry_lock(registry);
     if (lock) {
-        ntk_mutex_lock(lock);
+        zb_mutex_lock(lock);
     }
     instance = registry->instances;
     while (instance) {
@@ -78,8 +78,8 @@ void nb_registry_cleanup(nb_registry_t *registry)
     registry->instances = NULL;
     registry->next_instance = 0;
     if (lock) {
-        ntk_mutex_unlock(lock);
-        ntk_mutex_destroy(lock);
+        zb_mutex_unlock(lock);
+        zb_mutex_destroy(lock);
     }
     registry->lock = NULL;
 }
@@ -107,21 +107,21 @@ int nb_registry_upsert(nb_registry_t *registry,
                         uint64_t last_seen_ms)
 {
     nb_registry_instance_t *instance;
-    ntk_mutex *lock;
+    zb_mutex *lock;
     if (!registry || !service || !service[0] || !instance_id || !instance_id[0] || !endpoints ||
         endpoint_count == 0 || endpoint_count > NB_MAX_BINDINGS) {
         return NB_ERR_INVALID;
     }
     lock = nb_registry_lock(registry);
     if (lock) {
-        ntk_mutex_lock(lock);
+        zb_mutex_lock(lock);
     }
     instance = nb_find_instance(registry, service, instance_id);
     if (!instance) {
         instance = (nb_registry_instance_t *)calloc(1, sizeof(*instance));
         if (!instance) {
             if (lock) {
-                ntk_mutex_unlock(lock);
+                zb_mutex_unlock(lock);
             }
             return NB_ERR_NOMEM;
         }
@@ -138,24 +138,24 @@ int nb_registry_upsert(nb_registry_t *registry,
     instance->last_seen_ms = last_seen_ms;
     registry->generation++;
     if (lock) {
-        ntk_mutex_unlock(lock);
+        zb_mutex_unlock(lock);
     }
     return NB_OK;
 }
 
 void nb_registry_remove_node(nb_registry_t *registry, uint32_t node_id)
 {
-    ntk_mutex *lock;
+    zb_mutex *lock;
     if (!registry) {
         return;
     }
     lock = nb_registry_lock(registry);
     if (lock) {
-        ntk_mutex_lock(lock);
+        zb_mutex_lock(lock);
     }
     nb_registry_remove_node_locked(registry, node_id);
     if (lock) {
-        ntk_mutex_unlock(lock);
+        zb_mutex_unlock(lock);
     }
 }
 
@@ -164,13 +164,13 @@ void nb_registry_expire(nb_registry_t *registry, uint64_t now_ms, uint64_t ttl_m
     nb_registry_instance_t *instance;
     nb_registry_instance_t *previous = NULL;
     nb_registry_instance_t *next;
-    ntk_mutex *lock;
+    zb_mutex *lock;
     if (!registry) {
         return;
     }
     lock = nb_registry_lock(registry);
     if (lock) {
-        ntk_mutex_lock(lock);
+        zb_mutex_lock(lock);
     }
     instance = registry->instances;
     while (instance) {
@@ -189,7 +189,7 @@ void nb_registry_expire(nb_registry_t *registry, uint64_t now_ms, uint64_t ttl_m
         instance = next;
     }
     if (lock) {
-        ntk_mutex_unlock(lock);
+        zb_mutex_unlock(lock);
     }
 }
 
@@ -219,13 +219,13 @@ int nb_registry_select_prefer(nb_registry_t *registry,
     size_t count = 0;
     size_t target;
     size_t current = 0;
-    ntk_mutex *lock;
+    zb_mutex *lock;
     if (!registry || !service || !out) {
         return NB_ERR_INVALID;
     }
     lock = nb_registry_lock(registry);
     if (lock) {
-        ntk_mutex_lock(lock);
+        zb_mutex_lock(lock);
     }
     for (instance = registry->instances; instance; instance = instance->next) {
         if (strcmp(instance->service, service) == 0 && instance->endpoint_count > 0) {
@@ -245,7 +245,7 @@ int nb_registry_select_prefer(nb_registry_t *registry,
     }
     if (count == 0) {
         if (lock) {
-            ntk_mutex_unlock(lock);
+            zb_mutex_unlock(lock);
         }
         return NB_ERR_NOTFOUND;
     }
@@ -269,7 +269,7 @@ int nb_registry_select_prefer(nb_registry_t *registry,
                 *out = selected->endpoints[index];
                 selected->next_endpoint = index + 1;
                 if (lock) {
-                    ntk_mutex_unlock(lock);
+                    zb_mutex_unlock(lock);
                 }
                 return NB_OK;
             }
@@ -277,7 +277,7 @@ int nb_registry_select_prefer(nb_registry_t *registry,
     }
     *out = selected->endpoints[selected->next_endpoint++ % selected->endpoint_count];
     if (lock) {
-        ntk_mutex_unlock(lock);
+        zb_mutex_unlock(lock);
     }
     return NB_OK;
 }
@@ -293,14 +293,14 @@ int nb_registry_replace_node(nb_registry_t *registry,
 {
     size_t i;
     int rc = NB_OK;
-    ntk_mutex *lock;
+    zb_mutex *lock;
     if (!registry || !instance_id || !instance_id[0] || (service_count && !services) ||
         endpoint_count > NB_MAX_BINDINGS || (service_count && endpoint_count == 0)) {
         return NB_ERR_INVALID;
     }
     lock = nb_registry_lock(registry);
     if (lock) {
-        ntk_mutex_lock(lock);
+        zb_mutex_lock(lock);
     }
     nb_registry_remove_node_locked(registry, node_id);
     for (i = 0; i < service_count; i++) {
@@ -324,7 +324,7 @@ int nb_registry_replace_node(nb_registry_t *registry,
         registry->generation++;
     }
     if (lock) {
-        ntk_mutex_unlock(lock);
+        zb_mutex_unlock(lock);
     }
     return rc;
 }

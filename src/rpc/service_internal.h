@@ -35,7 +35,7 @@ struct nb_service {
 struct nb_call {
     nb_node_t *node;
     nb_transport_t *transport;
-    ntk_poller *poller;   /* 请求到达时的 poller；跨线程 nb_reply 回投到这里 */
+    zn_poller *poller;   /* 请求到达时的 poller；跨线程 nb_reply 回投到这里 */
     nb_reply_token_t token;
     char peer_host[NB_HOST_MAX];
     uint16_t peer_port;

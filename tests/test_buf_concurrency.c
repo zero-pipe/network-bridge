@@ -1,8 +1,8 @@
 #include <nb/base/buf.h>
 #include <nb/base/error.h>
 
-#include <thread/sem.h>
-#include <thread/thread.h>
+#include <zb/os/sem.h>
+#include <zb/os/thread.h>
 
 #include <stdint.h>
 #include <stdio.h>
@@ -29,7 +29,7 @@ enum worker_mode {
 
 typedef struct worker_ctx {
     nb_buf_t *buf;
-    ntk_sem *start;
+    zb_sem *start;
     int mode;
     int iters;
     int failed;
@@ -50,7 +50,7 @@ static void worker_main(void *user)
     worker_ctx_t *ctx = (worker_ctx_t *)user;
     int i;
 
-    ntk_sem_wait(ctx->start);
+    zb_sem_wait(ctx->start);
     if (ctx->mode == WORKER_CHURN) {
         for (i = 0; i < ctx->iters; i++) {
             nb_buf_t *ref = nb_buf_ref(ctx->buf);
@@ -71,16 +71,16 @@ static void worker_main(void *user)
  */
 static int run_workers(nb_buf_t *buf, int mode, int iters)
 {
-    ntk_thread *threads[WORKER_COUNT];
+    zb_thread *threads[WORKER_COUNT];
     worker_ctx_t ctx[WORKER_COUNT];
-    ntk_sem *start;
+    zb_sem *start;
     int created = 0;
     int failed = 0;
     int i;
 
     memset(threads, 0, sizeof(threads));
     memset(ctx, 0, sizeof(ctx));
-    start = ntk_sem_create(0);
+    start = zb_sem_create(0);
     if (!start) {
         return 0;
     }
@@ -90,7 +90,7 @@ static int run_workers(nb_buf_t *buf, int mode, int iters)
         ctx[i].start = start;
         ctx[i].mode = mode;
         ctx[i].iters = iters;
-        threads[i] = ntk_thread_create(worker_main, &ctx[i]);
+        threads[i] = zb_thread_create(worker_main, &ctx[i]);
         if (!threads[i]) {
             failed = 1;
             break;
@@ -99,13 +99,13 @@ static int run_workers(nb_buf_t *buf, int mode, int iters)
     }
 
     if (created > 0) {
-        ntk_sem_post(start, (unsigned int)created);
+        zb_sem_post(start, (unsigned int)created);
     }
     for (i = 0; i < created; i++) {
-        ntk_thread_join(threads[i]);
-        ntk_thread_destroy(threads[i]);
+        zb_thread_join(threads[i]);
+        zb_thread_destroy(threads[i]);
     }
-    ntk_sem_destroy(start);
+    zb_sem_destroy(start);
 
     if (created != WORKER_COUNT) {
         failed = 1;

@@ -429,15 +429,15 @@ provider SPI 只使用三个公共对象：
 DDS 面不再经过 RPC provider。`nb_dds_participant_create` 用枚举选择后端：
 
 ```c
-nb_dds_participant_options_t popt = { .backend = NB_DDS_BACKEND_CYCLONE, .domain = 0 };
+nb_dds_participant_options_t popt = { .backend = NB_DDS_BACKEND_RTPS, .domain = 0 };
 nb_dds_participant_create(&popt, &part);
 ```
 
-- `NB_DDS_BACKEND_RTPS`：内建 RTPS 引擎，总是可用。
-- `NB_DDS_BACKEND_CYCLONE`：Cyclone DDS，需要 `NB_ENABLE_DDS=ON`；未编译时返回
-  `NB_ERR_NOT_SUPPORTED`。
+- `NB_DDS_BACKEND_RTPS`：内建 RTPS 引擎，也是唯一的内建后端。
+- 后端 SPI 仍保留（`nb_dds_backend_register`），自定义后端可以按 id 注册。
 
-两个后端使用同一套 DDS 默认 QoS 和线上类型 `dds::Message`，因此可以互通。
+内建 RTPS 后端使用统一的 DDS 默认 QoS 和线上类型 `dds::Message`，因此与
+Cyclone DDS / Fast DDS 在线缆上可以互通。
 具体接口见 `<nb/dds.h>`。
 ## 发现视图
 

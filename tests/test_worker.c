@@ -14,10 +14,10 @@
 #include <nb/rpc/proxy.h>
 #include <nb/rpc/node.h>
 #include <nb/rpc/service.h>
-#include <platform.h>
-#include <thread/sem.h>
-#include <thread/sync.h>
-#include <thread/thread.h>
+#include <zn/platform.h>
+#include <zb/os/sem.h>
+#include <zb/os/sync.h>
+#include <zb/os/thread.h>
 
 #define NB_LOG_TAG "test"
 #include <nb/base/log.h>
@@ -30,7 +30,7 @@
 static void slow_handler(nb_call_t *call, const nb_request_t *req, void *user)
 {
     (void)user;
-    ntk_sleep_ms(400);
+    zn_sleep_ms(400);
     nb_reply_bytes(call, 0, req->payload.data, req->payload.len);
 }
 
@@ -62,15 +62,15 @@ static int sync_echo_handler(const nb_request_t *req, nb_message_view_t *resp, v
 
 /* 阻塞 worker handler：占住 worker，直到测试放行，用来制造过载。 */
 typedef struct block_state {
-    ntk_sem *started;
-    ntk_sem *release;
+    zb_sem *started;
+    zb_sem *release;
 } block_state_t;
 
 static void blocking_handler(nb_call_t *call, const nb_request_t *req, void *user)
 {
     block_state_t *st = (block_state_t *)user;
-    ntk_sem_post(st->started, 1);
-    ntk_sem_wait(st->release);
+    zb_sem_post(st->started, 1);
+    zb_sem_wait(st->release);
     nb_reply_bytes(call, 0, req->payload.data, req->payload.len);
 }
 
@@ -103,9 +103,9 @@ static int reject_executor_submit(void *ctx, void (*fn)(void *), void *user)
  * nb_reply() 仍能回投原 poller。一次只接收一个任务，够测试用。
  */
 typedef struct thread_executor {
-    ntk_mutex *lock;
-    ntk_sem *sem;
-    ntk_thread *thread;
+    zb_mutex *lock;
+    zb_sem *sem;
+    zb_thread *thread;
     void (*fn)(void *);
     void *user;
     int stop;
@@ -118,17 +118,17 @@ static void thread_executor_loop(void *arg)
     for (;;) {
         void (*fn)(void *);
         void *user;
-        ntk_sem_wait(e->sem);
-        ntk_mutex_lock(e->lock);
+        zb_sem_wait(e->sem);
+        zb_mutex_lock(e->lock);
         if (e->stop) {
-            ntk_mutex_unlock(e->lock);
+            zb_mutex_unlock(e->lock);
             break;
         }
         fn = e->fn;
         user = e->user;
         e->fn = NULL;
         e->user = NULL;
-        ntk_mutex_unlock(e->lock);
+        zb_mutex_unlock(e->lock);
         if (fn) {
             fn(user);
         }
@@ -139,7 +139,7 @@ static int thread_executor_submit(void *ctx, void (*fn)(void *), void *user)
 {
     thread_executor_t *e = (thread_executor_t *)ctx;
     int rc = NB_OK;
-    ntk_mutex_lock(e->lock);
+    zb_mutex_lock(e->lock);
     if (e->fn) {
         rc = NB_ERR_AGAIN;
     } else {
@@ -147,9 +147,9 @@ static int thread_executor_submit(void *ctx, void (*fn)(void *), void *user)
         e->user = user;
         e->submitted++;
     }
-    ntk_mutex_unlock(e->lock);
+    zb_mutex_unlock(e->lock);
     if (rc == NB_OK) {
-        ntk_sem_post(e->sem, 1);
+        zb_sem_post(e->sem, 1);
     }
     return rc;
 }
@@ -157,36 +157,36 @@ static int thread_executor_submit(void *ctx, void (*fn)(void *), void *user)
 static int thread_executor_start(thread_executor_t *e)
 {
     memset(e, 0, sizeof(*e));
-    e->lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
-    e->sem = ntk_sem_create(0);
+    e->lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    e->sem = zb_sem_create(0);
     if (!e->lock || !e->sem) {
         return 1;
     }
-    e->thread = ntk_thread_create(thread_executor_loop, e);
+    e->thread = zb_thread_create(thread_executor_loop, e);
     return e->thread ? 0 : 1;
 }
 
 static void thread_executor_stop(thread_executor_t *e)
 {
     if (e->lock) {
-        ntk_mutex_lock(e->lock);
+        zb_mutex_lock(e->lock);
         e->stop = 1;
-        ntk_mutex_unlock(e->lock);
+        zb_mutex_unlock(e->lock);
     }
     if (e->sem) {
-        ntk_sem_post(e->sem, 1);
+        zb_sem_post(e->sem, 1);
     }
     if (e->thread) {
-        ntk_thread_join(e->thread);
-        ntk_thread_destroy(e->thread);
+        zb_thread_join(e->thread);
+        zb_thread_destroy(e->thread);
         e->thread = NULL;
     }
     if (e->sem) {
-        ntk_sem_destroy(e->sem);
+        zb_sem_destroy(e->sem);
         e->sem = NULL;
     }
     if (e->lock) {
-        ntk_mutex_destroy(e->lock);
+        zb_mutex_destroy(e->lock);
         e->lock = NULL;
     }
 }
@@ -201,7 +201,7 @@ static nb_service_method_options_t method_opts(nb_service_exec_mode_t exec,
 }
 
 typedef struct client_state {
-    ntk_sem *sem;
+    zb_sem *sem;
     int status;     /* 传输层状态：收到响应即 NB_OK */
     int app_status; /* 服务端应用状态（nb_response_t.status） */
     char buf[512];
@@ -218,7 +218,7 @@ static void on_response(int status, const nb_response_t *resp, void *user)
         memcpy(st->buf, resp->payload.data, resp->payload.len);
         st->len = resp->payload.len;
     }
-    ntk_sem_post(st->sem, 1);
+    zb_sem_post(st->sem, 1);
 }
 
 static int run_case(nb_transport_kind_t kind, const char *label)
@@ -246,22 +246,22 @@ static int run_case(nb_transport_kind_t kind, const char *label)
     scfg.name = "worker-srv";
     scfg.rpc.kind = kind;
     scfg.rpc.bind_host = "127.0.0.1";
-    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.multicast_group = "127.0.0.1";
     scfg.rpc.discovery.port = sport;
     scfg.runtime.io_threads = 1;
     scfg.runtime.handler_threads = 2;
-    scfg.rpc.discovery.hello_interval_ms = 200;
-    scfg.rpc.discovery.node_ttl_ms = 3000;
+    scfg.rpc.discovery.heartbeat_interval_ms = 200;
+    scfg.rpc.discovery.lease_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "worker-cli";
     ccfg.rpc.kind = kind;
     ccfg.rpc.bind_host = "127.0.0.1";
-    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.multicast_group = "127.0.0.1";
     ccfg.rpc.discovery.port = cport;
     ccfg.runtime.io_threads = 1;
-    ccfg.rpc.discovery.hello_interval_ms = 200;
-    ccfg.rpc.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.heartbeat_interval_ms = 200;
+    ccfg.rpc.discovery.lease_ms = 3000;
 
     if (nb_node_create(&scfg, &server) != NB_OK || nb_node_create(&ccfg, &client) != NB_OK) {
         nb_log_error("[%s] node create failed", label);
@@ -298,8 +298,8 @@ static int run_case(nb_transport_kind_t kind, const char *label)
         goto cleanup;
     }
 
-    slow.sem = ntk_sem_create(0);
-    fast.sem = ntk_sem_create(0);
+    slow.sem = zb_sem_create(0);
+    fast.sem = zb_sem_create(0);
     if (!slow.sem || !fast.sem) {
         failed = 1;
         goto cleanup;
@@ -340,7 +340,7 @@ static int run_case(nb_transport_kind_t kind, const char *label)
         free(dyn);
     }
 
-    if (ntk_sem_timedwait(fast.sem, 300) != NTK_OK) {
+    if (zb_sem_timedwait(fast.sem, 300) != ZN_OK) {
         nb_log_error("[%s] fast call stalled behind slow handler", label);
         failed = 1;
     } else if (fast.status != NB_OK || fast.len != pl.len ||
@@ -349,7 +349,7 @@ static int run_case(nb_transport_kind_t kind, const char *label)
         failed = 1;
     }
 
-    if (ntk_sem_timedwait(slow.sem, 3000) != NTK_OK) {
+    if (zb_sem_timedwait(slow.sem, 3000) != ZN_OK) {
         nb_log_error("[%s] slow call timeout", label);
         failed = 1;
     } else if (slow.status != NB_OK || slow.len != (size_t)strlen("slow-payload") + 1 ||
@@ -360,10 +360,10 @@ static int run_case(nb_transport_kind_t kind, const char *label)
 
 cleanup:
     if (slow.sem) {
-        ntk_sem_destroy(slow.sem);
+        zb_sem_destroy(slow.sem);
     }
     if (fast.sem) {
-        ntk_sem_destroy(fast.sem);
+        zb_sem_destroy(fast.sem);
     }
     if (proxy) {
         nb_proxy_destroy(proxy);
@@ -403,22 +403,22 @@ static int run_fallback_case(nb_transport_kind_t kind, const char *label)
     scfg.name = "fallback-srv";
     scfg.rpc.kind = kind;
     scfg.rpc.bind_host = "127.0.0.1";
-    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.multicast_group = "127.0.0.1";
     scfg.rpc.discovery.port = sport;
     scfg.runtime.io_threads = 1;
     scfg.runtime.handler_threads = 0;
-    scfg.rpc.discovery.hello_interval_ms = 200;
-    scfg.rpc.discovery.node_ttl_ms = 3000;
+    scfg.rpc.discovery.heartbeat_interval_ms = 200;
+    scfg.rpc.discovery.lease_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "fallback-cli";
     ccfg.rpc.kind = kind;
     ccfg.rpc.bind_host = "127.0.0.1";
-    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.multicast_group = "127.0.0.1";
     ccfg.rpc.discovery.port = cport;
     ccfg.runtime.io_threads = 1;
-    ccfg.rpc.discovery.hello_interval_ms = 200;
-    ccfg.rpc.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.heartbeat_interval_ms = 200;
+    ccfg.rpc.discovery.lease_ms = 3000;
 
     if (nb_node_create(&scfg, &server) != NB_OK || nb_node_create(&ccfg, &client) != NB_OK) {
         nb_log_error("[%s] node create failed", label);
@@ -441,7 +441,7 @@ static int run_fallback_case(nb_transport_kind_t kind, const char *label)
         goto cleanup;
     }
 
-    state.sem = ntk_sem_create(0);
+    state.sem = zb_sem_create(0);
     if (!state.sem) {
         failed = 1;
         goto cleanup;
@@ -459,7 +459,7 @@ static int run_fallback_case(nb_transport_kind_t kind, const char *label)
             goto cleanup;
         }
     }
-    if (ntk_sem_timedwait(state.sem, 3000) != NTK_OK) {
+    if (zb_sem_timedwait(state.sem, 3000) != ZN_OK) {
         nb_log_error("[%s] fallback call timeout", label);
         failed = 1;
     } else if (state.status != NB_OK || state.len != pl.len ||
@@ -471,7 +471,7 @@ static int run_fallback_case(nb_transport_kind_t kind, const char *label)
 
 cleanup:
     if (state.sem) {
-        ntk_sem_destroy(state.sem);
+        zb_sem_destroy(state.sem);
     }
     if (proxy) {
         nb_proxy_destroy(proxy);
@@ -619,23 +619,23 @@ static int run_overload_case(nb_transport_kind_t kind, const char *label)
     scfg.name = "overload-srv";
     scfg.rpc.kind = kind;
     scfg.rpc.bind_host = "127.0.0.1";
-    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.multicast_group = "127.0.0.1";
     scfg.rpc.discovery.port = sport;
     scfg.runtime.io_threads = 1;
     scfg.runtime.handler_threads = 1;
     scfg.runtime.handler_max_concurrency = 1;
-    scfg.rpc.discovery.hello_interval_ms = 200;
-    scfg.rpc.discovery.node_ttl_ms = 3000;
+    scfg.rpc.discovery.heartbeat_interval_ms = 200;
+    scfg.rpc.discovery.lease_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "overload-cli";
     ccfg.rpc.kind = kind;
     ccfg.rpc.bind_host = "127.0.0.1";
-    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.multicast_group = "127.0.0.1";
     ccfg.rpc.discovery.port = cport;
     ccfg.runtime.io_threads = 1;
-    ccfg.rpc.discovery.hello_interval_ms = 200;
-    ccfg.rpc.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.heartbeat_interval_ms = 200;
+    ccfg.rpc.discovery.lease_ms = 3000;
 
     if (nb_node_create(&scfg, &server) != NB_OK || nb_node_create(&ccfg, &client) != NB_OK) {
         nb_log_error("[%s] node create failed", label);
@@ -645,10 +645,10 @@ static int run_overload_case(nb_transport_kind_t kind, const char *label)
     (void)nb_node_add_discovery_peer(server, "127.0.0.1", cport);
     (void)nb_node_add_discovery_peer(client, "127.0.0.1", sport);
 
-    block.started = ntk_sem_create(0);
-    block.release = ntk_sem_create(0);
-    first.sem = ntk_sem_create(0);
-    second.sem = ntk_sem_create(0);
+    block.started = zb_sem_create(0);
+    block.release = zb_sem_create(0);
+    first.sem = zb_sem_create(0);
+    second.sem = zb_sem_create(0);
     if (!block.started || !block.release || !first.sem || !second.sem) {
         nb_log_error("[%s] sem create failed", label);
         failed = 1;
@@ -681,7 +681,7 @@ static int run_overload_case(nb_transport_kind_t kind, const char *label)
             goto cleanup;
         }
     }
-    if (ntk_sem_timedwait(block.started, 3000) != NTK_OK) {
+    if (zb_sem_timedwait(block.started, 3000) != ZN_OK) {
         nb_log_error("[%s] worker did not start", label);
         failed = 1;
         goto cleanup;
@@ -698,7 +698,7 @@ static int run_overload_case(nb_transport_kind_t kind, const char *label)
             goto cleanup;
         }
     }
-    if (ntk_sem_timedwait(second.sem, 2000) != NTK_OK) {
+    if (zb_sem_timedwait(second.sem, 2000) != ZN_OK) {
         nb_log_error("[%s] overloaded call was not rejected", label);
         failed = 1;
     } else if (second.status != NB_ERR_AGAIN) {
@@ -706,9 +706,9 @@ static int run_overload_case(nb_transport_kind_t kind, const char *label)
         failed = 1;
     }
 
-    ntk_sem_post(block.release, 1);
+    zb_sem_post(block.release, 1);
     released = 1;
-    if (ntk_sem_timedwait(first.sem, 3000) != NTK_OK) {
+    if (zb_sem_timedwait(first.sem, 3000) != ZN_OK) {
         nb_log_error("[%s] first call timeout", label);
         failed = 1;
     } else if (first.status != NB_OK || first.app_status != NB_OK || first.len != pl.len ||
@@ -724,7 +724,7 @@ static int run_overload_case(nb_transport_kind_t kind, const char *label)
 cleanup:
     /* 失败路径也要放行阻塞 handler，否则 nb_node_destroy drain 时会卡住。 */
     if (block.release && !released) {
-        ntk_sem_post(block.release, 1);
+        zb_sem_post(block.release, 1);
     }
     if (proxy) {
         nb_proxy_destroy(proxy);
@@ -736,16 +736,16 @@ cleanup:
         nb_node_destroy(server);
     }
     if (block.started) {
-        ntk_sem_destroy(block.started);
+        zb_sem_destroy(block.started);
     }
     if (block.release) {
-        ntk_sem_destroy(block.release);
+        zb_sem_destroy(block.release);
     }
     if (first.sem) {
-        ntk_sem_destroy(first.sem);
+        zb_sem_destroy(first.sem);
     }
     if (second.sem) {
-        ntk_sem_destroy(second.sem);
+        zb_sem_destroy(second.sem);
     }
     return failed;
 }
@@ -792,22 +792,22 @@ static int run_executor_case(nb_transport_kind_t kind, const char *label)
     scfg.name = "exec-srv";
     scfg.rpc.kind = kind;
     scfg.rpc.bind_host = "127.0.0.1";
-    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.multicast_group = "127.0.0.1";
     scfg.rpc.discovery.port = sport;
     scfg.runtime.io_threads = 1;
     scfg.runtime.handler_threads = 0; /* 证明自定义 executor 不依赖内置池 */
-    scfg.rpc.discovery.hello_interval_ms = 200;
-    scfg.rpc.discovery.node_ttl_ms = 3000;
+    scfg.rpc.discovery.heartbeat_interval_ms = 200;
+    scfg.rpc.discovery.lease_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "exec-cli";
     ccfg.rpc.kind = kind;
     ccfg.rpc.bind_host = "127.0.0.1";
-    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.multicast_group = "127.0.0.1";
     ccfg.rpc.discovery.port = cport;
     ccfg.runtime.io_threads = 1;
-    ccfg.rpc.discovery.hello_interval_ms = 200;
-    ccfg.rpc.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.heartbeat_interval_ms = 200;
+    ccfg.rpc.discovery.lease_ms = 3000;
 
     if (nb_node_create(&scfg, &server) != NB_OK || nb_node_create(&ccfg, &client) != NB_OK) {
         nb_log_error("[%s] node create failed", label);
@@ -841,8 +841,8 @@ static int run_executor_case(nb_transport_kind_t kind, const char *label)
         goto cleanup;
     }
 
-    custom.sem = ntk_sem_create(0);
-    rejected.sem = ntk_sem_create(0);
+    custom.sem = zb_sem_create(0);
+    rejected.sem = zb_sem_create(0);
     if (!custom.sem || !rejected.sem) {
         nb_log_error("[%s] sem create failed", label);
         failed = 1;
@@ -863,7 +863,7 @@ static int run_executor_case(nb_transport_kind_t kind, const char *label)
             goto cleanup;
         }
     }
-    if (ntk_sem_timedwait(custom.sem, 3000) != NTK_OK) {
+    if (zb_sem_timedwait(custom.sem, 3000) != ZN_OK) {
         nb_log_error("[%s] custom call timeout", label);
         failed = 1;
     } else if (custom.status != NB_OK || custom.app_status != NB_OK || custom.len != pl.len ||
@@ -890,7 +890,7 @@ static int run_executor_case(nb_transport_kind_t kind, const char *label)
             goto cleanup;
         }
     }
-    if (ntk_sem_timedwait(rejected.sem, 3000) != NTK_OK) {
+    if (zb_sem_timedwait(rejected.sem, 3000) != ZN_OK) {
         nb_log_error("[%s] reject call timeout", label);
         failed = 1;
     } else if (rejected.status != NB_ERR_AGAIN) {
@@ -913,10 +913,10 @@ cleanup:
         nb_node_destroy(server);
     }
     if (custom.sem) {
-        ntk_sem_destroy(custom.sem);
+        zb_sem_destroy(custom.sem);
     }
     if (rejected.sem) {
-        ntk_sem_destroy(rejected.sem);
+        zb_sem_destroy(rejected.sem);
     }
     return failed;
 }
@@ -984,28 +984,28 @@ static int run_deadline_case(const char *label)
     scfg.name = "deadline-srv";
     scfg.rpc.kind = NB_TRANSPORT_KIND_TCP;
     scfg.rpc.bind_host = "127.0.0.1";
-    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.multicast_group = "127.0.0.1";
     scfg.rpc.discovery.port = sport;
     scfg.runtime.io_threads = 1;
     scfg.runtime.handler_threads = 1; /* 单 worker：第二个请求必然排队 */
-    scfg.rpc.discovery.hello_interval_ms = 200;
-    scfg.rpc.discovery.node_ttl_ms = 3000;
+    scfg.rpc.discovery.heartbeat_interval_ms = 200;
+    scfg.rpc.discovery.lease_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "deadline-cli";
     ccfg.rpc.kind = NB_TRANSPORT_KIND_TCP;
     ccfg.rpc.bind_host = "127.0.0.1";
-    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.multicast_group = "127.0.0.1";
     ccfg.rpc.discovery.port = cport;
     ccfg.runtime.io_threads = 1;
-    ccfg.rpc.discovery.hello_interval_ms = 200;
-    ccfg.rpc.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.heartbeat_interval_ms = 200;
+    ccfg.rpc.discovery.lease_ms = 3000;
 
-    block.started = ntk_sem_create(0);
-    block.release = ntk_sem_create(0);
-    probe_resp.sem = ntk_sem_create(0);
-    block_resp.sem = ntk_sem_create(0);
-    queued_resp.sem = ntk_sem_create(0);
+    block.started = zb_sem_create(0);
+    block.release = zb_sem_create(0);
+    probe_resp.sem = zb_sem_create(0);
+    block_resp.sem = zb_sem_create(0);
+    queued_resp.sem = zb_sem_create(0);
     if (!block.started || !block.release || !probe_resp.sem || !block_resp.sem ||
         !queued_resp.sem) {
         nb_log_error("[%s] sem create failed", label);
@@ -1051,7 +1051,7 @@ static int run_deadline_case(const char *label)
             goto cleanup;
         }
     }
-    if (ntk_sem_timedwait(probe_resp.sem, 3000) != NTK_OK || probe_resp.status != NB_OK) {
+    if (zb_sem_timedwait(probe_resp.sem, 3000) != ZN_OK || probe_resp.status != NB_OK) {
         nb_log_error("[%s] probe timeout/status=%d", label, probe_resp.status);
         failed = 1;
     } else if (probe.req_deadline == 0 || probe.call_deadline != probe.req_deadline) {
@@ -1074,7 +1074,7 @@ static int run_deadline_case(const char *label)
             goto cleanup;
         }
     }
-    if (ntk_sem_timedwait(block.started, 3000) != NTK_OK) {
+    if (zb_sem_timedwait(block.started, 3000) != ZN_OK) {
         nb_log_error("[%s] block handler did not start", label);
         failed = 1;
         goto cleanup;
@@ -1090,7 +1090,7 @@ static int run_deadline_case(const char *label)
             goto cleanup;
         }
     }
-    if (ntk_sem_timedwait(queued_resp.sem, 2000) != NTK_OK) {
+    if (zb_sem_timedwait(queued_resp.sem, 2000) != ZN_OK) {
         nb_log_error("[%s] queued deadline did not fire", label);
         failed = 1;
     } else if (queued_resp.status != NB_ERR_TIMEOUT) {
@@ -1099,14 +1099,14 @@ static int run_deadline_case(const char *label)
     }
 
     /* 确保服务端 deadline 已过，再放行 blocker；排队的任务应被跳过。 */
-    ntk_sleep_ms(150);
-    ntk_sem_post(block.release, 1);
+    zn_sleep_ms(150);
+    zb_sem_post(block.release, 1);
     released = 1;
-    if (ntk_sem_timedwait(block_resp.sem, 3000) != NTK_OK || block_resp.status != NB_OK) {
+    if (zb_sem_timedwait(block_resp.sem, 3000) != ZN_OK || block_resp.status != NB_OK) {
         nb_log_error("[%s] block response timeout/status=%d", label, block_resp.status);
         failed = 1;
     }
-    ntk_sleep_ms(300);
+    zn_sleep_ms(300);
     if (queued.runs != 0) {
         nb_log_error("[%s] expired handler ran %d time(s)", label, queued.runs);
         failed = 1;
@@ -1114,7 +1114,7 @@ static int run_deadline_case(const char *label)
 
 cleanup:
     if (block.release && !released) {
-        ntk_sem_post(block.release, 1);
+        zb_sem_post(block.release, 1);
     }
     if (proxy) {
         nb_proxy_destroy(proxy);
@@ -1126,19 +1126,19 @@ cleanup:
         nb_node_destroy(server);
     }
     if (block.started) {
-        ntk_sem_destroy(block.started);
+        zb_sem_destroy(block.started);
     }
     if (block.release) {
-        ntk_sem_destroy(block.release);
+        zb_sem_destroy(block.release);
     }
     if (probe_resp.sem) {
-        ntk_sem_destroy(probe_resp.sem);
+        zb_sem_destroy(probe_resp.sem);
     }
     if (block_resp.sem) {
-        ntk_sem_destroy(block_resp.sem);
+        zb_sem_destroy(block_resp.sem);
     }
     if (queued_resp.sem) {
-        ntk_sem_destroy(queued_resp.sem);
+        zb_sem_destroy(queued_resp.sem);
     }
     return failed;
 }
@@ -1179,28 +1179,28 @@ static int run_cancel_case(const char *label)
     scfg.name = "cancel-srv";
     scfg.rpc.kind = NB_TRANSPORT_KIND_TCP;
     scfg.rpc.bind_host = "127.0.0.1";
-    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.multicast_group = "127.0.0.1";
     scfg.rpc.discovery.port = sport;
     scfg.runtime.io_threads = 1;
     scfg.runtime.handler_threads = 1;
-    scfg.rpc.discovery.hello_interval_ms = 200;
-    scfg.rpc.discovery.node_ttl_ms = 3000;
+    scfg.rpc.discovery.heartbeat_interval_ms = 200;
+    scfg.rpc.discovery.lease_ms = 3000;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "cancel-cli";
     ccfg.rpc.kind = NB_TRANSPORT_KIND_TCP;
     ccfg.rpc.bind_host = "127.0.0.1";
-    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.multicast_group = "127.0.0.1";
     ccfg.rpc.discovery.port = cport;
     ccfg.runtime.io_threads = 1;
-    ccfg.rpc.discovery.hello_interval_ms = 200;
-    ccfg.rpc.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.heartbeat_interval_ms = 200;
+    ccfg.rpc.discovery.lease_ms = 3000;
 
-    block.started = ntk_sem_create(0);
-    block.release = ntk_sem_create(0);
-    block_resp.sem = ntk_sem_create(0);
-    queued_resp.sem = ntk_sem_create(0);
-    ping_resp.sem = ntk_sem_create(0);
+    block.started = zb_sem_create(0);
+    block.release = zb_sem_create(0);
+    block_resp.sem = zb_sem_create(0);
+    queued_resp.sem = zb_sem_create(0);
+    ping_resp.sem = zb_sem_create(0);
     if (!block.started || !block.release || !block_resp.sem || !queued_resp.sem || !ping_resp.sem) {
         nb_log_error("[%s] sem create failed", label);
         failed = 1;
@@ -1245,7 +1245,7 @@ static int run_cancel_case(const char *label)
             goto cleanup;
         }
     }
-    if (ntk_sem_timedwait(block.started, 3000) != NTK_OK) {
+    if (zb_sem_timedwait(block.started, 3000) != ZN_OK) {
         nb_log_error("[%s] block handler did not start", label);
         failed = 1;
         goto cleanup;
@@ -1271,7 +1271,7 @@ static int run_cancel_case(const char *label)
         opt.timeout_ms = 3000;
         if (nb_proxy_call_async(proxy, "cancel", "ping", &pl, &opt, on_response, &ping_resp) !=
                 NB_OK ||
-            ntk_sem_timedwait(ping_resp.sem, 3000) != NTK_OK || ping_resp.status != NB_OK) {
+            zb_sem_timedwait(ping_resp.sem, 3000) != ZN_OK || ping_resp.status != NB_OK) {
             nb_log_error("[%s] ping before cancel failed status=%d", label, ping_resp.status);
             failed = 1;
             goto cleanup;
@@ -1283,7 +1283,7 @@ static int run_cancel_case(const char *label)
         failed = 1;
         goto cleanup;
     }
-    if (ntk_sem_timedwait(queued_resp.sem, 2000) != NTK_OK) {
+    if (zb_sem_timedwait(queued_resp.sem, 2000) != ZN_OK) {
         nb_log_error("[%s] cancel callback missing", label);
         failed = 1;
     } else if (queued_resp.status != NB_ERR_NOTFOUND) {
@@ -1297,26 +1297,26 @@ static int run_cancel_case(const char *label)
         nb_call_options_t opt = NB_CALL_OPTIONS_INIT;
 
         memset(&ping2, 0, sizeof(ping2));
-        ping2.sem = ntk_sem_create(0);
+        ping2.sem = zb_sem_create(0);
         opt.timeout_ms = 3000;
         if (!ping2.sem ||
             nb_proxy_call_async(proxy, "cancel", "ping", &pl, &opt, on_response, &ping2) != NB_OK ||
-            ntk_sem_timedwait(ping2.sem, 3000) != NTK_OK || ping2.status != NB_OK) {
+            zb_sem_timedwait(ping2.sem, 3000) != ZN_OK || ping2.status != NB_OK) {
             nb_log_error("[%s] ping after cancel failed status=%d", label, ping2.status);
             failed = 1;
         }
         if (ping2.sem) {
-            ntk_sem_destroy(ping2.sem);
+            zb_sem_destroy(ping2.sem);
         }
     }
 
-    ntk_sem_post(block.release, 1);
+    zb_sem_post(block.release, 1);
     released = 1;
-    if (ntk_sem_timedwait(block_resp.sem, 3000) != NTK_OK || block_resp.status != NB_OK) {
+    if (zb_sem_timedwait(block_resp.sem, 3000) != ZN_OK || block_resp.status != NB_OK) {
         nb_log_error("[%s] block response timeout/status=%d", label, block_resp.status);
         failed = 1;
     }
-    ntk_sleep_ms(300);
+    zn_sleep_ms(300);
     if (queued.runs != 0) {
         nb_log_error("[%s] canceled handler ran %d time(s)", label, queued.runs);
         failed = 1;
@@ -1324,7 +1324,7 @@ static int run_cancel_case(const char *label)
 
 cleanup:
     if (block.release && !released) {
-        ntk_sem_post(block.release, 1);
+        zb_sem_post(block.release, 1);
     }
     if (proxy) {
         nb_proxy_destroy(proxy);
@@ -1336,19 +1336,19 @@ cleanup:
         nb_node_destroy(server);
     }
     if (block.started) {
-        ntk_sem_destroy(block.started);
+        zb_sem_destroy(block.started);
     }
     if (block.release) {
-        ntk_sem_destroy(block.release);
+        zb_sem_destroy(block.release);
     }
     if (block_resp.sem) {
-        ntk_sem_destroy(block_resp.sem);
+        zb_sem_destroy(block_resp.sem);
     }
     if (queued_resp.sem) {
-        ntk_sem_destroy(queued_resp.sem);
+        zb_sem_destroy(queued_resp.sem);
     }
     if (ping_resp.sem) {
-        ntk_sem_destroy(ping_resp.sem);
+        zb_sem_destroy(ping_resp.sem);
     }
     return failed;
 }

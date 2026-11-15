@@ -110,7 +110,7 @@ static int nb_node_rate_allow(nb_node_t *node, const nb_message_t *msg)
         return 1;
     }
     now = nb_now_ms();
-    ntk_mutex_lock(node->rate_lock);
+    zb_mutex_lock(node->rate_lock);
     for (i = 0; i < NB_NODE_RATE_LIMIT_SLOTS; i++) {
         nb_rate_slot_t *s = &node->rates[i];
         if (s->used && s->port == msg->peer_port && strcmp(s->ip, msg->peer_host) == 0) {
@@ -119,11 +119,11 @@ static int nb_node_rate_allow(nb_node_t *node, const nb_message_t *msg)
                 s->count = 0;
             }
             if (s->count >= node->rate_limit_pps) {
-                ntk_mutex_unlock(node->rate_lock);
+                zb_mutex_unlock(node->rate_lock);
                 return 0;
             }
             s->count++;
-            ntk_mutex_unlock(node->rate_lock);
+            zb_mutex_unlock(node->rate_lock);
             return 1;
         }
         if (!s->used || now - s->window_start_ms >= NB_NODE_RATE_WINDOW_MS) {
@@ -133,7 +133,7 @@ static int nb_node_rate_allow(nb_node_t *node, const nb_message_t *msg)
         }
     }
     if (free_slot < 0) {
-        ntk_mutex_unlock(node->rate_lock);
+        zb_mutex_unlock(node->rate_lock);
         return 1; /* 槽位耗尽：退化为不限速，避免误伤新对端 */
     }
     {
@@ -144,7 +144,7 @@ static int nb_node_rate_allow(nb_node_t *node, const nb_message_t *msg)
         s->window_start_ms = now;
         s->count = 1;
     }
-    ntk_mutex_unlock(node->rate_lock);
+    zb_mutex_unlock(node->rate_lock);
     return 1;
 }
 
@@ -318,8 +318,8 @@ static void nb_node_dispatch(nb_node_t *node, nb_transport_t *transport, nb_mess
         return;
     }
     if (msg->kind == KIND_RESPONSE) {
-        ntk_poller *owner = nb_pending_owner(node, msg->request_id);
-        if (owner && !ntk_poller_is_current_thread(owner)) {
+        zn_poller *owner = nb_pending_owner(node, msg->request_id);
+        if (owner && !zn_poller_is_current_thread(owner)) {
             nb_buf_t *frame_owner = msg->frame_owner;
             nb_response_task_t *task =
                 (nb_response_task_t *)calloc(1, sizeof(*task));
@@ -335,7 +335,7 @@ static void nb_node_dispatch(nb_node_t *node, nb_transport_t *transport, nb_mess
             if (nb_response_task_init(task, node, transport, msg, frame_owner) != NB_OK) {
                 return; /* nb_response_task_init 已释放 task */
             }
-            if (ntk_poller_async(owner, nb_response_dispatch_task, task, 1) != NTK_OK) {
+            if (zn_poller_async(owner, nb_response_dispatch_task, task, 1) != ZN_OK) {
                 nb_response_task_destroy(task);
             }
             return;

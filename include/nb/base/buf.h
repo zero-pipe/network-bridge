@@ -11,7 +11,7 @@
  * broadcast to several owners, then hand it out with nb_buf_ref() /
  * nb_buf_ref_n(). Every holder eventually calls nb_buf_release().
  *
- * This module does not depend on the rest of the framework or ntk; it is usable on its own.
+ * This module does not depend on the rest of the framework or znet; it is usable on its own.
  */
 
 #include <stddef.h>

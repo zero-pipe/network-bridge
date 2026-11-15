@@ -15,7 +15,7 @@
  *   - 在其他线程释放：nb_buf 的本地池直接 free 该块，避免向已停止的线程回投，
  *     也绝不会踩无锁 freelist（池块由 malloc 支撑，跨线程 free 始终安全）。
  *
- * 本模块不依赖任何框架（ntk 等），仅依赖 nb_buf，可独立使用。
+ * 本模块不依赖任何框架（znet 等），仅依赖 nb_buf，可独立使用。
  */
 void *nb_poller_alloc(size_t size);
 void nb_poller_free(void *ptr);

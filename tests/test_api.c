@@ -3,12 +3,12 @@
 #include <nb/rpc/node.h>
 #include <nb/rpc/codec.h>
 #include <nb/rpc/service.h>
-#include <platform.h>
+#include <zn/platform.h>
 
 #define NB_LOG_TAG "test"
 #include <nb/base/log.h>
 
-#include <thread/sync.h>
+#include <zb/os/sync.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -90,7 +90,7 @@ static int test_message_view(void)
 }
 
 typedef struct test_counter {
-    ntk_mutex *lock;
+    zb_mutex *lock;
     int value;
 } test_counter_t;
 
@@ -98,9 +98,9 @@ static int echo_sync(const nb_request_t *req, nb_message_view_t *resp, void *use
 {
     test_counter_t *counter = (test_counter_t *)user;
     if (counter && counter->lock) {
-        ntk_mutex_lock(counter->lock);
+        zb_mutex_lock(counter->lock);
         counter->value++;
-        ntk_mutex_unlock(counter->lock);
+        zb_mutex_unlock(counter->lock);
     }
     (void)nb_message_view_set_data(resp, req->payload.data, req->payload.len);
     return 0;
@@ -109,9 +109,9 @@ static int echo_sync(const nb_request_t *req, nb_message_view_t *resp, void *use
 static int counter_read(test_counter_t *counter)
 {
     int value;
-    ntk_mutex_lock(counter->lock);
+    zb_mutex_lock(counter->lock);
     value = counter->value;
-    ntk_mutex_unlock(counter->lock);
+    zb_mutex_unlock(counter->lock);
     return value;
 }
 
@@ -134,7 +134,7 @@ static int test_proxy_and_sync(void)
     sport = 42311;
     cport = 42312;
     memset(&counter, 0, sizeof(counter));
-    counter.lock = ntk_mutex_create(NTK_MUTEX_NORMAL);
+    counter.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     if (!counter.lock) {
         return 1;
     }
@@ -143,27 +143,27 @@ static int test_proxy_and_sync(void)
     scfg.name = "api_srv";
     scfg.rpc.kind = NB_TRANSPORT_KIND_UDP;
     scfg.rpc.bind_host = "127.0.0.1";
-    scfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    scfg.rpc.discovery.multicast_group = "127.0.0.1";
     scfg.rpc.discovery.port = sport;
     scfg.runtime.io_threads = 1;
-    scfg.rpc.discovery.hello_interval_ms = 200;
-    scfg.rpc.discovery.node_ttl_ms = 3000;
+    scfg.rpc.discovery.heartbeat_interval_ms = 200;
+    scfg.rpc.discovery.lease_ms = 3000;
     scfg.rpc.service_table = &g_order_table;
 
     memset(&ccfg, 0, sizeof(ccfg));
     ccfg.name = "api_cli";
     ccfg.rpc.kind = NB_TRANSPORT_KIND_UDP;
     ccfg.rpc.bind_host = "127.0.0.1";
-    ccfg.rpc.discovery.broadcast_host = "127.0.0.1";
+    ccfg.rpc.discovery.multicast_group = "127.0.0.1";
     ccfg.rpc.discovery.port = cport;
     ccfg.runtime.io_threads = 1;
-    ccfg.rpc.discovery.hello_interval_ms = 200;
-    ccfg.rpc.discovery.node_ttl_ms = 3000;
+    ccfg.rpc.discovery.heartbeat_interval_ms = 200;
+    ccfg.rpc.discovery.lease_ms = 3000;
 
     rc = nb_node_create(&scfg, &server);
     if (rc != NB_OK) {
         nb_log_error("server create failed: %d", rc);
-        ntk_mutex_destroy(counter.lock);
+        zb_mutex_destroy(counter.lock);
         return 1;
     }
     rc = nb_service_create(server, "OrderService", &svc);
@@ -173,14 +173,14 @@ static int test_proxy_and_sync(void)
     if (rc != NB_OK) {
         nb_log_error("service setup failed: %d", rc);
         nb_node_destroy(server);
-        ntk_mutex_destroy(counter.lock);
+        zb_mutex_destroy(counter.lock);
         return 1;
     }
     rc = nb_node_create(&ccfg, &client);
     if (rc != NB_OK) {
         nb_log_error("client create failed: %d", rc);
         nb_node_destroy(server);
-        ntk_mutex_destroy(counter.lock);
+        zb_mutex_destroy(counter.lock);
         return 1;
     }
     (void)nb_node_add_discovery_peer(server, "127.0.0.1", cport);
@@ -231,7 +231,7 @@ static int test_proxy_and_sync(void)
             nb_log_error("call_event failed: %d", rc);
             failed = 1;
         } else {
-            ntk_sleep_ms(100);
+            zn_sleep_ms(100);
             if (counter_read(&counter) <= before) {
                 nb_log_error("call_event was not delivered");
                 failed = 1;
@@ -249,7 +249,7 @@ cleanup:
     if (server) {
         nb_node_destroy(server);
     }
-    ntk_mutex_destroy(counter.lock);
+    zb_mutex_destroy(counter.lock);
     return failed;
 }
 

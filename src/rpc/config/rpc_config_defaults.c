@@ -1,7 +1,7 @@
 /* RPC config defaults, normalization and strict validation. */
 #include <nb/rpc/config.h>
 
-#include <ntk.h>
+#include <zn/zn.h>
 
 #include "caps.h"
 #include "defaults.h"
@@ -34,7 +34,8 @@ void nb_node_discovery_config_default(nb_node_discovery_config_t *cfg)
         return;
     }
     memset(cfg, 0, sizeof(*cfg));
-    cfg->broadcast_host = NB_DEFAULT_DISCOVERY_HOST;
+    /* multicast_group 留 NULL：由 formation_id 推导组播组。 */
+    cfg->multicast_group = NULL;
 }
 
 void nb_node_metrics_config_default(nb_node_metrics_config_t *cfg)
@@ -87,16 +88,13 @@ void nb_node_config_normalize(nb_node_config_t *cfg)
     if (!cfg->rpc.bind_host) {
         cfg->rpc.bind_host = NB_DEFAULT_BIND_HOST;
     }
-    if (!cfg->rpc.discovery.broadcast_host) {
-        cfg->rpc.discovery.broadcast_host = NB_DEFAULT_DISCOVERY_HOST;
-    }
     if (cfg->rpc.mode == NB_NODE_MODE_STATIC) {
         cfg->rpc.discovery.disable = true;
     } else if (cfg->rpc.discovery.disable) {
         cfg->rpc.mode = NB_NODE_MODE_STATIC;
     }
     if (!cfg->runtime.io_threads) {
-        unsigned hw = ntk_thread_hardware_concurrency();
+        unsigned hw = zb_thread_hardware_concurrency();
         cfg->runtime.io_threads = hw ? hw : 1u;
     }
     if (cfg->runtime.io_threads > NB_TRANSPORT_MAX_IO) {
@@ -132,11 +130,11 @@ void nb_node_config_normalize(nb_node_config_t *cfg)
     if (!cfg->rpc.discovery.port) {
         cfg->rpc.discovery.port = NB_DEFAULT_DISCOVERY_PORT;
     }
-    if (!cfg->rpc.discovery.hello_interval_ms) {
-        cfg->rpc.discovery.hello_interval_ms = NB_DEFAULT_HELLO_INTERVAL_MS;
+    if (!cfg->rpc.discovery.heartbeat_interval_ms) {
+        cfg->rpc.discovery.heartbeat_interval_ms = NB_DEFAULT_HEARTBEAT_INTERVAL_MS;
     }
-    if (!cfg->rpc.discovery.node_ttl_ms) {
-        cfg->rpc.discovery.node_ttl_ms = NB_DEFAULT_NODE_TTL_MS;
+    if (!cfg->rpc.discovery.lease_ms) {
+        cfg->rpc.discovery.lease_ms = NB_DEFAULT_LEASE_MS;
     }
     if (!cfg->runtime.max_inflight) {
         cfg->runtime.max_inflight = NB_DEFAULT_MAX_INFLIGHT;
@@ -165,8 +163,8 @@ int nb_node_config_validate(const nb_node_config_t *cfg)
     }
     if (strlen(cfg->rpc.bind_host) >= NB_HOST_MAX ||
         (cfg->name && strlen(cfg->name) >= NB_NAME_MAX) ||
-        (cfg->rpc.discovery.broadcast_host &&
-         strlen(cfg->rpc.discovery.broadcast_host) >= NB_HOST_MAX)) {
+        (cfg->rpc.discovery.multicast_group &&
+         strlen(cfg->rpc.discovery.multicast_group) >= NB_HOST_MAX)) {
         return NB_ERR_TOOBIG;
     }
     if (cfg->runtime.io_threads > NB_TRANSPORT_MAX_IO ||

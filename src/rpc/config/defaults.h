@@ -25,8 +25,10 @@
  * max_msg_bytes             1 MiB              0..NB_GLOBAL_MAX_MSG_BYTES_LIMIT  单条消息上限
  * backpressure_bytes        4 MiB              0..N                              出站高水位
  * rtcp_interval_ms          1000               0..N                              UDP RTCP 周期
- * hello_interval_ms         3000               0..N                              发现 HELLO 周期
- * node_ttl_ms               9000               0..N                              对端过期
+ * formation_id              0                  0..N                              编队隔离 ID
+ * heartbeat_interval_ms     500                0..N                              mesh 心跳周期
+ * lease_ms                  3000               0..N                              对端租约
+ * service_mask              0                  0..N                              核心服务能力掩码
  * metrics.sample_every      1                  1..N                              延迟采样
  *
  * 说明：capacity（缓冲/分片/队列容量）仍定义在 caps.h / transport_caps.h；
@@ -37,9 +39,9 @@
 
 #define NB_DEFAULT_NODE_NAME "nb"
 #define NB_DEFAULT_BIND_HOST "0.0.0.0"
-#define NB_DEFAULT_DISCOVERY_HOST "255.255.255.255"
-#define NB_DEFAULT_HELLO_INTERVAL_MS 3000u
-#define NB_DEFAULT_NODE_TTL_MS 9000u
+#define NB_DEFAULT_DISCOVERY_HOST ""
+#define NB_DEFAULT_HEARTBEAT_INTERVAL_MS 500u
+#define NB_DEFAULT_LEASE_MS 3000u
 #define NB_DEFAULT_METRICS_SAMPLE_EVERY 1u
 
 /* capacity 常量经 defaults 单点引用，node/config 不再各自挑来源。 */
