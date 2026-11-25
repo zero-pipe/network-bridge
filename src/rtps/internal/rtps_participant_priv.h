@@ -303,74 +303,82 @@ struct nb_rtps_participant {
     nb_rtps_locator_t metatraffic_multicast;
     /* TCP locator, Invalid when the participant is UDP-only. */
     nb_rtps_locator_t metatraffic_tcp;
-
-    /* ---- socket / 线程 / 锁（create 之后只读） ---- */
-    zn_socket *rx_sock;
-    zn_socket *unicast_sock;
-    /* Standard mapping only: user-data unicast port (d3+PG*pid). NULL means
-     * user data shares unicast_sock. */
-    zn_socket *data_sock;
-    uint16_t data_port;
-    zn_poller *poller;
-    zb_thread *thread;
-    zb_mutex *lock;
-
-    /* ---- 由 lock 保护的动态状态：表、计数、回调快照源 ---- */
-    nb_rtps_remote_participant_t *remotes;
-    nb_rtps_participant_callback_t callback;
-    void *callback_user;
-    nb_rtps_endpoint_callback_t endpoint_callback;
-    void *endpoint_user;
-    nb_rtps_data_callback_t data_callback;
-    void *data_user;
-    nb_rtps_status_callback_t status_callback;
-    void *status_user;
-    nb_rtps_local_endpoint_t *local_endpoints;
-    size_t max_local_endpoints;
-    size_t local_endpoint_count;
-    uint32_t next_entity_key;
-    nb_rtps_remote_endpoint_t *remote_endpoints;
-    size_t max_remote_endpoints;
-    nb_rtps_reliable_writer_t *publications_writer;
-    nb_rtps_reliable_writer_t *subscriptions_writer;
-    uint32_t publications_hb_count;
-    uint32_t subscriptions_hb_count;
+    /* SEDP/data heartbeat cadence and history depth: configured at create,
+     * read-only afterwards. */
     uint32_t sedp_heartbeat_ms;
     uint32_t data_heartbeat_ms;
     uint32_t data_history_depth;
-    nb_rtps_data_reader_state_t *data_readers;
-    size_t max_data_readers;
-    size_t data_reader_count;
-    int data_reader_overflow_logged;
-    /* Dense lists of the slots in use in the four fixed-size tables. The hot
-     * paths (one publish, one received sample) walk these instead of the whole
-     * table, which is sized for the worst case and is almost empty in practice.
-     * Removal swaps the last entry into the hole; iteration order carries no
-     * meaning. */
-    uint32_t *local_used;
-    size_t local_used_count;
-    uint32_t *remote_ep_used;
-    size_t remote_ep_used_count;
-    uint32_t *remotes_used;
-    size_t remotes_used_count;
-    uint32_t *data_reader_used;
-    size_t data_reader_used_count;
-    nb_rtps_frag_assembly_t *frag_assemblies;
-    size_t max_frag_assemblies;
-    size_t frag_bytes_in_use;
-    uint32_t frag_heartbeat_count;
+
+    /* ---- socket / 线程 / 锁（create 之后只读） ---- */
+    struct {
+        zn_socket *rx_sock;
+        zn_socket *unicast_sock;
+        /* Standard mapping only: user-data unicast port (d3+PG*pid). NULL means
+         * user data shares unicast_sock. */
+        zn_socket *data_sock;
+        uint16_t data_port;
+        zn_poller *poller;
+        zb_thread *thread;
+        zb_mutex *lock;
+    } net;
+
+    /* ---- 由 net.lock 保护的动态状态：表、计数、回调快照源 ---- */
+    struct {
+        nb_rtps_remote_participant_t *remotes;
+        nb_rtps_participant_callback_t callback;
+        void *callback_user;
+        nb_rtps_endpoint_callback_t endpoint_callback;
+        void *endpoint_user;
+        nb_rtps_data_callback_t data_callback;
+        void *data_user;
+        nb_rtps_status_callback_t status_callback;
+        void *status_user;
+        nb_rtps_local_endpoint_t *local_endpoints;
+        size_t max_local_endpoints;
+        size_t local_endpoint_count;
+        uint32_t next_entity_key;
+        nb_rtps_remote_endpoint_t *remote_endpoints;
+        size_t max_remote_endpoints;
+        nb_rtps_reliable_writer_t *publications_writer;
+        nb_rtps_reliable_writer_t *subscriptions_writer;
+        uint32_t publications_hb_count;
+        uint32_t subscriptions_hb_count;
+        nb_rtps_data_reader_state_t *data_readers;
+        size_t max_data_readers;
+        size_t data_reader_count;
+        int data_reader_overflow_logged;
+        /* Dense lists of the slots in use in the four fixed-size tables. The hot
+         * paths (one publish, one received sample) walk these instead of the whole
+         * table, which is sized for the worst case and is almost empty in practice.
+         * Removal swaps the last entry into the hole; iteration order carries no
+         * meaning. */
+        uint32_t *local_used;
+        size_t local_used_count;
+        uint32_t *remote_ep_used;
+        size_t remote_ep_used_count;
+        uint32_t *remotes_used;
+        size_t remotes_used_count;
+        uint32_t *data_reader_used;
+        size_t data_reader_used_count;
+        nb_rtps_frag_assembly_t *frag_assemblies;
+        size_t max_frag_assemblies;
+        size_t frag_bytes_in_use;
+        uint32_t frag_heartbeat_count;
+    } tables;
 
     /* ---- 参与者线程节拍：仅 thread_main 读写 ---- */
-    uint64_t spdp_sn;
-    uint64_t next_announce_ms;
-    uint64_t next_sweep_ms;
-    uint64_t next_sedp_heartbeat_ms;
-    uint64_t next_data_heartbeat_ms;
-    /* ParticipantMessageData cadence; 0 means no local publication needs
-     * automatic assertions, so nothing is sent. */
-    uint32_t pmd_interval_ms;
-    uint64_t pmd_sn;
-    uint64_t next_pmd_ms;
+    struct {
+        uint64_t spdp_sn;
+        uint64_t next_announce_ms;
+        uint64_t next_sweep_ms;
+        uint64_t next_sedp_heartbeat_ms;
+        uint64_t next_data_heartbeat_ms;
+        /* ParticipantMessageData cadence; 0 means no local publication needs
+         * automatic assertions, so nothing is sent. */
+        uint32_t pmd_interval_ms;
+        uint64_t pmd_sn;
+        uint64_t next_pmd_ms;
+    } timers;
 
     /* ---- 跨线程标志与统计 ---- */
     volatile int stop;

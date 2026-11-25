@@ -142,7 +142,7 @@ static int send_user_heartbeat_frag(nb_rtps_participant_t *participant,
     heartbeat.writer_id = writer_guid->entity;
     nb_rtps_sn_from_u64(&heartbeat.writer_sn, sn);
     heartbeat.last_fragment_num = last_fragment_num;
-    heartbeat.count = ++participant->frag_heartbeat_count;
+    heartbeat.count = ++participant->tables.frag_heartbeat_count;
 
     message_len = nb_rtps_wire_heartbeat_frag(message,
                                               sizeof(message),
@@ -594,9 +594,9 @@ void send_data_heartbeats(nb_rtps_participant_t *participant)
     size_t i;
     size_t j;
 
-    zb_mutex_lock(participant->lock);
-    for (i = 0; i < participant->max_local_endpoints; i++) {
-        nb_rtps_local_endpoint_t *local = &participant->local_endpoints[i];
+    zb_mutex_lock(participant->net.lock);
+    for (i = 0; i < participant->tables.max_local_endpoints; i++) {
+        nb_rtps_local_endpoint_t *local = &participant->tables.local_endpoints[i];
         uint64_t first_sn = 0;
         uint64_t last_sn = 0;
 
@@ -610,8 +610,8 @@ void send_data_heartbeats(nb_rtps_participant_t *participant)
          * reader ask; the writer answers a request for an evicted or expired
          * sample with GAP, which is how the reader converges instead of
          * retrying forever. */
-        for (j = 0; j < participant->max_remote_endpoints; j++) {
-            nb_rtps_remote_endpoint_t *remote = &participant->remote_endpoints[j];
+        for (j = 0; j < participant->tables.max_remote_endpoints; j++) {
+            nb_rtps_remote_endpoint_t *remote = &participant->tables.remote_endpoints[j];
             nb_rtps_targets_t targets;
 
             if (!remote->used || remote->kind != NB_RTPS_ENDPOINT_SUBSCRIPTION ||
@@ -626,7 +626,7 @@ void send_data_heartbeats(nb_rtps_participant_t *participant)
                 participant, local, &remote->info, first_sn, last_sn, &targets);
         }
     }
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
 }
 /*
  * Ownership: an EXCLUSIVE subscription takes data from one writer only. Among
@@ -666,8 +666,8 @@ static int writer_owns(nb_rtps_participant_t *participant,
     if (!writer_alive_for(participant, local, candidate)) {
         return 0;
     }
-    for (i = 0; i < participant->max_remote_endpoints; i++) {
-        const nb_rtps_remote_endpoint_t *other = &participant->remote_endpoints[i];
+    for (i = 0; i < participant->tables.max_remote_endpoints; i++) {
+        const nb_rtps_remote_endpoint_t *other = &participant->tables.remote_endpoints[i];
 
         if (!other->used || other == candidate ||
             other->kind != NB_RTPS_ENDPOINT_PUBLICATION ||
@@ -785,10 +785,10 @@ static void emit_queued_status(nb_rtps_participant_t *participant,
     nb_rtps_status_callback_t callback;
     void *user;
 
-    zb_mutex_lock(participant->lock);
-    callback = participant->status_callback;
-    user = participant->status_user;
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
+    callback = participant->tables.status_callback;
+    user = participant->tables.status_user;
+    zb_mutex_unlock(participant->net.lock);
     if (!callback) {
         return;
     }
@@ -1061,14 +1061,14 @@ static void handle_user_data(nb_rtps_participant_t *participant,
 
     derive_sample_info(data, &sample, instance_handle, &has_instance_handle);
 
-    zb_mutex_lock(participant->lock);
-    callback = participant->data_callback;
-    user = participant->data_user;
+    zb_mutex_lock(participant->net.lock);
+    callback = participant->tables.data_callback;
+    user = participant->tables.data_user;
     remote = find_remote_endpoint(participant, &writer_guid);
     if (remote) {
-        for (i = 0; i < participant->local_used_count; i++) {
+        for (i = 0; i < participant->tables.local_used_count; i++) {
             nb_rtps_local_endpoint_t *local =
-                &participant->local_endpoints[participant->local_used[i]];
+                &participant->tables.local_endpoints[participant->tables.local_used[i]];
             nb_rtps_data_reader_state_t *reader_state;
             const char *reject;
 
@@ -1145,7 +1145,7 @@ static void handle_user_data(nb_rtps_participant_t *participant,
             reader_count++;
         }
     }
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
 
     for (i = 0; i < queued_count; i++) {
         emit_queued_status(participant, &queued[i]);
@@ -1188,11 +1188,11 @@ void handle_user_gap(nb_rtps_participant_t *participant,
     writer_guid.prefix = *source_prefix;
     writer_guid.entity = gap->writer_id;
 
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     remote = find_remote_endpoint(participant, &writer_guid);
     if (remote) {
-        for (i = 0; i < participant->max_local_endpoints; i++) {
-            nb_rtps_local_endpoint_t *local = &participant->local_endpoints[i];
+        for (i = 0; i < participant->tables.max_local_endpoints; i++) {
+            nb_rtps_local_endpoint_t *local = &participant->tables.local_endpoints[i];
             nb_rtps_data_reader_state_t *state;
 
             if (!local->used || !data_endpoint_matches(local, remote)) {
@@ -1226,7 +1226,7 @@ void handle_user_gap(nb_rtps_participant_t *participant,
             }
         }
     }
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
     for (i = 0; i < queued_count; i++) {
         emit_queued_status(participant, &queued[i]);
     }
@@ -1241,9 +1241,9 @@ static uint64_t oldest_inflight_sn(nb_rtps_participant_t *participant,
     uint64_t oldest = last_sn + 1u;
     size_t i;
 
-    for (i = 0; i < participant->max_frag_assemblies; i++) {
+    for (i = 0; i < participant->tables.max_frag_assemblies; i++) {
         const nb_rtps_frag_assembly_t *assembly =
-            &participant->frag_assemblies[i];
+            &participant->tables.frag_assemblies[i];
 
         if (assembly->used && !assembly->complete && assembly->sn < oldest &&
             nb_rtps_guid_equal(&assembly->writer, writer)) {
@@ -1284,7 +1284,7 @@ void handle_user_heartbeat(nb_rtps_participant_t *participant,
     }
     copy_str(target_host, sizeof(target_host), source_host);
 
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     remote = find_remote_endpoint(participant, &writer_guid);
     if (remote) {
         if (endpoint_data_target(participant, remote, target_host,
@@ -1292,9 +1292,9 @@ void handle_user_heartbeat(nb_rtps_participant_t *participant,
             copy_str(target_host, sizeof(target_host), source_host);
             target_port = source_port;
         }
-        for (i = 0; i < participant->local_used_count; i++) {
+        for (i = 0; i < participant->tables.local_used_count; i++) {
             nb_rtps_local_endpoint_t *local =
-                &participant->local_endpoints[participant->local_used[i]];
+                &participant->tables.local_endpoints[participant->tables.local_used[i]];
             nb_rtps_data_reader_state_t *state;
             nb_rtps_acknack_t acknack;
 
@@ -1379,7 +1379,7 @@ void handle_user_heartbeat(nb_rtps_participant_t *participant,
             }
         }
     }
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
 }
 /*
  * LIFESPAN: a sample older than the writer's lifespan must not be delivered
@@ -1447,9 +1447,9 @@ void handle_user_acknack(nb_rtps_participant_t *participant,
                                 &nb_rtps_eid_participant_message_writer)) {
         uint64_t last;
 
-        zb_mutex_lock(participant->lock);
-        last = participant->pmd_sn;
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_lock(participant->net.lock);
+        last = participant->timers.pmd_sn;
+        zb_mutex_unlock(participant->net.lock);
         if (last < ack_base) {
             last = ack_base;
         }
@@ -1462,11 +1462,11 @@ void handle_user_acknack(nb_rtps_participant_t *participant,
                             source_port);
         return;
     }
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     local = find_local_endpoint(participant, &writer_guid);
     remote = find_remote_endpoint(participant, &reader_guid);
     if (!local || local->kind != NB_RTPS_ENDPOINT_PUBLICATION || !local->history) {
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         return;
     }
     if (remote &&
@@ -1483,7 +1483,7 @@ void handle_user_acknack(nb_rtps_participant_t *participant,
         nb_rtps_guid_equal(&local->last_resend_reader, &reader_guid) &&
         now >= local->last_resend_ms &&
         now - local->last_resend_ms < NB_RTPS_MIN_RESEND_INTERVAL_MS) {
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         return;
     }
     local->resend_seen = 1;
@@ -1553,7 +1553,7 @@ void handle_user_acknack(nb_rtps_participant_t *participant,
                             target_host,
                             target_port);
     }
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
 }
 /*
  * Writer side of fragment repair: a reader that lost a DATA_FRAG names the
@@ -1600,10 +1600,10 @@ void handle_user_nack_frag(nb_rtps_participant_t *participant,
     reader_guid.entity = nack->reader_id;
     copy_str(target_host, sizeof(target_host), source_host);
 
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     local = find_local_endpoint(participant, &writer_guid);
     if (!local || local->kind != NB_RTPS_ENDPOINT_PUBLICATION || !local->history) {
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         return;
     }
     remote = find_remote_endpoint(participant, &reader_guid);
@@ -1619,7 +1619,7 @@ void handle_user_nack_frag(nb_rtps_participant_t *participant,
     if (local->resend_seen && nb_rtps_guid_equal(&local->last_resend_reader, &reader_guid) &&
         now >= local->last_resend_ms &&
         now - local->last_resend_ms < NB_RTPS_MIN_RESEND_INTERVAL_MS) {
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         return;
     }
     local->resend_seen = 1;
@@ -1635,7 +1635,7 @@ void handle_user_nack_frag(nb_rtps_participant_t *participant,
                                       &has_handle,
                                       &status) != NB_OK ||
         !payload || payload_len == 0) {
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         return;
     }
     (void)nb_rtps_reliable_source_ns(
@@ -1648,7 +1648,7 @@ void handle_user_nack_frag(nb_rtps_participant_t *participant,
                             writer_sn,
                             target_host,
                             target_port);
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         return;
     }
     fragment_count = nb_rtps_fragment_count(payload_len);
@@ -1687,7 +1687,7 @@ void handle_user_nack_frag(nb_rtps_participant_t *participant,
                                    fragment_count,
                                    target_host,
                                    target_port);
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
 }
 /*
  * Route one complete sample. DATA and a reassembled DATA_FRAG sequence carry
@@ -1735,10 +1735,10 @@ static void frag_assembly_release(nb_rtps_participant_t *participant,
     if (!assembly || !assembly->used) {
         return;
     }
-    if (participant->frag_bytes_in_use >= assembly->reserved) {
-        participant->frag_bytes_in_use -= assembly->reserved;
+    if (participant->tables.frag_bytes_in_use >= assembly->reserved) {
+        participant->tables.frag_bytes_in_use -= assembly->reserved;
     } else {
-        participant->frag_bytes_in_use = 0;
+        participant->tables.frag_bytes_in_use = 0;
     }
     free(assembly->data);
     free(assembly->received);
@@ -1750,8 +1750,8 @@ static nb_rtps_frag_assembly_t *frag_assembly_find(nb_rtps_participant_t *partic
 {
     size_t i;
 
-    for (i = 0; i < participant->max_frag_assemblies; i++) {
-        nb_rtps_frag_assembly_t *assembly = &participant->frag_assemblies[i];
+    for (i = 0; i < participant->tables.max_frag_assemblies; i++) {
+        nb_rtps_frag_assembly_t *assembly = &participant->tables.frag_assemblies[i];
 
         if (assembly->used && assembly->sn == sn &&
             nb_rtps_guid_equal(&assembly->writer, writer)) {
@@ -1765,8 +1765,8 @@ static nb_rtps_frag_assembly_t *frag_assembly_free_slot(nb_rtps_participant_t *p
     nb_rtps_frag_assembly_t *oldest = NULL;
     size_t i;
 
-    for (i = 0; i < participant->max_frag_assemblies; i++) {
-        nb_rtps_frag_assembly_t *assembly = &participant->frag_assemblies[i];
+    for (i = 0; i < participant->tables.max_frag_assemblies; i++) {
+        nb_rtps_frag_assembly_t *assembly = &participant->tables.frag_assemblies[i];
 
         if (!assembly->used) {
             return assembly;
@@ -1798,12 +1798,12 @@ static nb_rtps_frag_assembly_t *frag_assembly_get(nb_rtps_participant_t *partici
     size_t reserved;
     size_t i;
 
-    if (participant->frag_assemblies == NULL) {
-        participant->max_frag_assemblies = NB_RTPS_FRAG_MAX_ACTIVE;
-        participant->frag_assemblies = (nb_rtps_frag_assembly_t *)calloc(
-            participant->max_frag_assemblies, sizeof(*participant->frag_assemblies));
-        if (!participant->frag_assemblies) {
-            participant->max_frag_assemblies = 0;
+    if (participant->tables.frag_assemblies == NULL) {
+        participant->tables.max_frag_assemblies = NB_RTPS_FRAG_MAX_ACTIVE;
+        participant->tables.frag_assemblies = (nb_rtps_frag_assembly_t *)calloc(
+            participant->tables.max_frag_assemblies, sizeof(*participant->tables.frag_assemblies));
+        if (!participant->tables.frag_assemblies) {
+            participant->tables.max_frag_assemblies = 0;
             return NULL;
         }
     }
@@ -1830,19 +1830,19 @@ static nb_rtps_frag_assembly_t *frag_assembly_get(nb_rtps_participant_t *partici
     }
 
     /* Expire samples that stopped arriving, then make room in the budget. */
-    for (i = 0; i < participant->max_frag_assemblies; i++) {
-        nb_rtps_frag_assembly_t *stale = &participant->frag_assemblies[i];
+    for (i = 0; i < participant->tables.max_frag_assemblies; i++) {
+        nb_rtps_frag_assembly_t *stale = &participant->tables.frag_assemblies[i];
 
         if (stale->used && !stale->complete &&
             now - stale->last_update_ms > NB_RTPS_FRAG_TIMEOUT_MS) {
             frag_assembly_release(participant, stale);
         }
     }
-    while (participant->frag_bytes_in_use + reserved > NB_RTPS_FRAG_BUDGET_BYTES) {
+    while (participant->tables.frag_bytes_in_use + reserved > NB_RTPS_FRAG_BUDGET_BYTES) {
         nb_rtps_frag_assembly_t *oldest = NULL;
 
-        for (i = 0; i < participant->max_frag_assemblies; i++) {
-            nb_rtps_frag_assembly_t *candidate = &participant->frag_assemblies[i];
+        for (i = 0; i < participant->tables.max_frag_assemblies; i++) {
+            nb_rtps_frag_assembly_t *candidate = &participant->tables.frag_assemblies[i];
 
             if (candidate->used && !candidate->complete &&
                 (!oldest || candidate->last_update_ms < oldest->last_update_ms)) {
@@ -1876,7 +1876,7 @@ static nb_rtps_frag_assembly_t *frag_assembly_get(nb_rtps_participant_t *partici
     assembly->fragment_count = (uint32_t)fragment_count;
     assembly->reserved = reserved;
     assembly->last_update_ms = now;
-    participant->frag_bytes_in_use += reserved;
+    participant->tables.frag_bytes_in_use += reserved;
     return assembly;
 }
 void handle_data_frag(nb_rtps_participant_t *participant,
@@ -1911,7 +1911,7 @@ void handle_data_frag(nb_rtps_participant_t *participant,
     writer.entity = fragment->writer_id;
 
     now = zn_wall_ms();
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     assembly = frag_assembly_get(participant,
                                  &writer,
                                  writer_sn,
@@ -1968,7 +1968,7 @@ void handle_data_frag(nb_rtps_participant_t *participant,
             }
         }
     }
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
 
     if (complete) {
         nb_rtps_data_view_t view;
@@ -1994,11 +1994,11 @@ void handle_data_frag(nb_rtps_participant_t *participant,
             assembly->has_source_ts ? &assembly->source_ts : NULL;
         dispatch_data_view(participant, &view, &out_rx);
 
-        zb_mutex_lock(participant->lock);
+        zb_mutex_lock(participant->net.lock);
         if (assembly->used && assembly->complete) {
             frag_assembly_release(participant, assembly);
         }
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
     }
 }
 /*
@@ -2051,7 +2051,7 @@ int send_frag_nack(nb_rtps_participant_t *participant,
             nack.bitmap[i / 32u] |= 1u << (31u - (i % 32u));
         }
     }
-    nack.count = ++participant->frag_heartbeat_count;
+    nack.count = ++participant->tables.frag_heartbeat_count;
 
     init_header(participant, &header);
     timestamp.seconds = (int32_t)(now / 1000u);
@@ -2103,10 +2103,10 @@ void handle_user_heartbeat_frag(nb_rtps_participant_t *participant,
     writer.entity = heartbeat->writer_id;
 
     now = zn_wall_ms();
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     assembly = frag_assembly_find(participant, &writer, writer_sn);
     if (assembly && !assembly->complete && assembly->nack_count < NB_RTPS_FRAG_MAX_NACKS) {
         (void)send_frag_nack(participant, assembly, now);
     }
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
 }

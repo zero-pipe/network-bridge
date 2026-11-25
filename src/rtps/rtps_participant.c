@@ -21,8 +21,8 @@
 
 zn_socket *participant_data_socket(const nb_rtps_participant_t *participant)
 {
-    return participant && participant->data_sock ? participant->data_sock
-                                                  : participant->unicast_sock;
+    return participant && participant->net.data_sock ? participant->net.data_sock
+                                                  : participant->net.unicast_sock;
 }
 
 #define NB_RTPS_DUMP_BYTES 48
@@ -182,10 +182,10 @@ void notify(nb_rtps_participant_t *participant,
     nb_rtps_participant_callback_t callback;
     void *user;
 
-    zb_mutex_lock(participant->lock);
-    callback = participant->callback;
-    user = participant->callback_user;
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
+    callback = participant->tables.callback;
+    user = participant->tables.callback_user;
+    zb_mutex_unlock(participant->net.lock);
     if (callback) {
         callback(user, event, info);
     }
@@ -195,10 +195,10 @@ static void allocate_local_entity(nb_rtps_participant_t *participant,
                                   nb_rtps_endpoint_kind_t kind,
                                   nb_rtps_entity_id_t *out)
 {
-    uint32_t key = ++participant->next_entity_key;
+    uint32_t key = ++participant->tables.next_entity_key;
 
     if (key == 0) {
-        key = ++participant->next_entity_key;
+        key = ++participant->tables.next_entity_key;
     }
     out->bytes[0] = (uint8_t)(key & 0xffu);
     out->bytes[1] = (uint8_t)((key >> 8) & 0xffu);
@@ -298,9 +298,9 @@ nb_rtps_local_endpoint_t *find_local_endpoint(nb_rtps_participant_t *participant
 {
     size_t i;
 
-    for (i = 0; i < participant->local_used_count; i++) {
+    for (i = 0; i < participant->tables.local_used_count; i++) {
         nb_rtps_local_endpoint_t *endpoint =
-            &participant->local_endpoints[participant->local_used[i]];
+            &participant->tables.local_endpoints[participant->tables.local_used[i]];
 
         if (nb_rtps_guid_equal(&endpoint->info.endpoint_guid, guid)) {
             return endpoint;
@@ -314,9 +314,9 @@ nb_rtps_remote_endpoint_t *find_remote_endpoint(nb_rtps_participant_t *participa
 {
     size_t i;
 
-    for (i = 0; i < participant->remote_ep_used_count; i++) {
+    for (i = 0; i < participant->tables.remote_ep_used_count; i++) {
         nb_rtps_remote_endpoint_t *endpoint =
-            &participant->remote_endpoints[participant->remote_ep_used[i]];
+            &participant->tables.remote_endpoints[participant->tables.remote_ep_used[i]];
 
         if (nb_rtps_guid_equal(&endpoint->info.endpoint_guid, guid)) {
             return endpoint;
@@ -358,10 +358,10 @@ void notify_endpoint(nb_rtps_participant_t *participant,
     nb_rtps_endpoint_callback_t callback;
     void *user;
 
-    zb_mutex_lock(participant->lock);
-    callback = participant->endpoint_callback;
-    user = participant->endpoint_user;
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
+    callback = participant->tables.endpoint_callback;
+    user = participant->tables.endpoint_user;
+    zb_mutex_unlock(participant->net.lock);
     if (callback) {
         callback(user, event, kind, info);
     }
@@ -372,9 +372,9 @@ nb_rtps_remote_participant_t *find_remote(nb_rtps_participant_t *participant,
 {
     size_t i;
 
-    for (i = 0; i < participant->remotes_used_count; i++) {
+    for (i = 0; i < participant->tables.remotes_used_count; i++) {
         nb_rtps_remote_participant_t *remote =
-            &participant->remotes[participant->remotes_used[i]];
+            &participant->tables.remotes[participant->tables.remotes_used[i]];
 
         if (nb_rtps_guid_prefix_equal(&remote->info.guid.prefix, prefix)) {
             return remote;
@@ -506,9 +506,9 @@ void replay_retained_history(nb_rtps_participant_t *participant,
     if (!participant || !reader_info) {
         return;
     }
-    zb_mutex_lock(participant->lock);
-    for (i = 0; i < participant->max_local_endpoints; i++) {
-        nb_rtps_local_endpoint_t *local = &participant->local_endpoints[i];
+    zb_mutex_lock(participant->net.lock);
+    for (i = 0; i < participant->tables.max_local_endpoints; i++) {
+        nb_rtps_local_endpoint_t *local = &participant->tables.local_endpoints[i];
         nb_rtps_remote_endpoint_t *remote;
         nb_rtps_targets_t targets;
         uint64_t first_sn = 0;
@@ -568,7 +568,7 @@ void replay_retained_history(nb_rtps_participant_t *participant,
                 participant, local, reader_info, first_sn, last_sn, &targets);
         }
     }
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
 }
 
 /* Peers may GAP built-in SEDP writers when their endpoint history is trimmed.
@@ -601,8 +601,8 @@ uint32_t matched_remote_count(nb_rtps_participant_t *participant,
     uint32_t matches = 0;
     size_t i;
 
-    for (i = 0; i < participant->max_remote_endpoints; i++) {
-        const nb_rtps_remote_endpoint_t *remote = &participant->remote_endpoints[i];
+    for (i = 0; i < participant->tables.max_remote_endpoints; i++) {
+        const nb_rtps_remote_endpoint_t *remote = &participant->tables.remote_endpoints[i];
 
         if (!remote->used) {
             continue;
@@ -638,7 +638,7 @@ uint32_t matched_remote_count(nb_rtps_participant_t *participant,
  */
 
 
-/* All data_reader helpers are called with participant->lock held. */
+/* All data_reader helpers are called with participant->net.lock held. */
 
 
 /*
@@ -666,19 +666,19 @@ static void drop_data_readers_for_reader(nb_rtps_participant_t *participant,
 {
     size_t i;
 
-    if (!participant->data_readers) {
+    if (!participant->tables.data_readers) {
         return;
     }
-    for (i = 0; i < participant->max_data_readers; i++) {
-        nb_rtps_data_reader_state_t *state = &participant->data_readers[i];
+    for (i = 0; i < participant->tables.max_data_readers; i++) {
+        nb_rtps_data_reader_state_t *state = &participant->tables.data_readers[i];
 
         if (state->used && nb_rtps_entity_id_equal(&state->reader, reader)) {
             state->used = 0;
-            nb_rtps_used_remove(participant->data_reader_used,
-                                &participant->data_reader_used_count,
+            nb_rtps_used_remove(participant->tables.data_reader_used,
+                                &participant->tables.data_reader_used_count,
                                 i);
-            if (participant->data_reader_count > 0) {
-                participant->data_reader_count--;
+            if (participant->tables.data_reader_count > 0) {
+                participant->tables.data_reader_count--;
             }
         }
     }
@@ -1039,8 +1039,8 @@ static uint32_t pmd_interval_from_local(nb_rtps_participant_t *participant)
     uint32_t interval;
     size_t i;
 
-    for (i = 0; i < participant->max_local_endpoints; i++) {
-        const nb_rtps_local_endpoint_t *local = &participant->local_endpoints[i];
+    for (i = 0; i < participant->tables.max_local_endpoints; i++) {
+        const nb_rtps_local_endpoint_t *local = &participant->tables.local_endpoints[i];
 
         if (!local->used || local->kind != NB_RTPS_ENDPOINT_PUBLICATION ||
             local->info.liveliness_kind != NB_RTPS_LIVELINESS_AUTOMATIC ||
@@ -1069,12 +1069,12 @@ static void refresh_pmd_interval(nb_rtps_participant_t *participant)
 {
     uint32_t interval = pmd_interval_from_local(participant);
 
-    if (interval == participant->pmd_interval_ms) {
+    if (interval == participant->timers.pmd_interval_ms) {
         return;
     }
-    participant->pmd_interval_ms = interval;
+    participant->timers.pmd_interval_ms = interval;
     /* Assert immediately so a peer that just matched sees the lease begin. */
-    participant->next_pmd_ms = 0;
+    participant->timers.next_pmd_ms = 0;
 }
 
 /*
@@ -1121,50 +1121,50 @@ static void free_participant(nb_rtps_participant_t *participant)
     /* The TCP module deregisters its sockets from the poller, so it has to go
      * before the poller itself. */
     nb_rtps_tcp_destroy(participant->tcp);
-    if (participant->poller) {
-        zn_poller_destroy(participant->poller);
+    if (participant->net.poller) {
+        zn_poller_destroy(participant->net.poller);
     }
-    if (participant->rx_sock) {
-        zn_socket_destroy(participant->rx_sock);
+    if (participant->net.rx_sock) {
+        zn_socket_destroy(participant->net.rx_sock);
     }
-    if (participant->unicast_sock) {
-        zn_socket_destroy(participant->unicast_sock);
+    if (participant->net.unicast_sock) {
+        zn_socket_destroy(participant->net.unicast_sock);
     }
-    if (participant->data_sock) {
-        zn_socket_destroy(participant->data_sock);
+    if (participant->net.data_sock) {
+        zn_socket_destroy(participant->net.data_sock);
     }
-    if (participant->lock) {
-        zb_mutex_destroy(participant->lock);
+    if (participant->net.lock) {
+        zb_mutex_destroy(participant->net.lock);
     }
-    nb_rtps_reliable_writer_destroy(participant->publications_writer);
-    nb_rtps_reliable_writer_destroy(participant->subscriptions_writer);
-    if (participant->local_endpoints) {
+    nb_rtps_reliable_writer_destroy(participant->tables.publications_writer);
+    nb_rtps_reliable_writer_destroy(participant->tables.subscriptions_writer);
+    if (participant->tables.local_endpoints) {
         uint32_t i;
 
-        for (i = 0; i < participant->max_local_endpoints; i++) {
-            nb_rtps_reliable_writer_destroy(participant->local_endpoints[i].history);
-            free(participant->local_endpoints[i].instances);
+        for (i = 0; i < participant->tables.max_local_endpoints; i++) {
+            nb_rtps_reliable_writer_destroy(participant->tables.local_endpoints[i].history);
+            free(participant->tables.local_endpoints[i].instances);
         }
     }
-    if (participant->frag_assemblies) {
+    if (participant->tables.frag_assemblies) {
         size_t i;
 
-        for (i = 0; i < participant->max_frag_assemblies; i++) {
-            nb_rtps_frag_assembly_t *assembly = &participant->frag_assemblies[i];
+        for (i = 0; i < participant->tables.max_frag_assemblies; i++) {
+            nb_rtps_frag_assembly_t *assembly = &participant->tables.frag_assemblies[i];
 
             free(assembly->data);
             free(assembly->received);
         }
-        free(participant->frag_assemblies);
+        free(participant->tables.frag_assemblies);
     }
-    free(participant->data_readers);
-    free(participant->data_reader_used);
-    free(participant->local_used);
-    free(participant->remote_ep_used);
-    free(participant->remotes_used);
-    free(participant->local_endpoints);
-    free(participant->remote_endpoints);
-    free(participant->remotes);
+    free(participant->tables.data_readers);
+    free(participant->tables.data_reader_used);
+    free(participant->tables.local_used);
+    free(participant->tables.remote_ep_used);
+    free(participant->tables.remotes_used);
+    free(participant->tables.local_endpoints);
+    free(participant->tables.remote_endpoints);
+    free(participant->tables.remotes);
     free(participant);
 }
 
@@ -1212,17 +1212,17 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
     if (participant->max_remotes > 65536u) {
         participant->max_remotes = 65536u;
     }
-    participant->max_local_endpoints =
+    participant->tables.max_local_endpoints =
         config->max_local_endpoints ? config->max_local_endpoints
                                     : NB_RTPS_DEFAULT_MAX_LOCAL_ENDPOINTS;
-    if (participant->max_local_endpoints > NB_RTPS_MAX_LOCAL_ENDPOINTS) {
-        participant->max_local_endpoints = NB_RTPS_MAX_LOCAL_ENDPOINTS;
+    if (participant->tables.max_local_endpoints > NB_RTPS_MAX_LOCAL_ENDPOINTS) {
+        participant->tables.max_local_endpoints = NB_RTPS_MAX_LOCAL_ENDPOINTS;
     }
-    participant->max_remote_endpoints =
+    participant->tables.max_remote_endpoints =
         config->max_remote_endpoints ? config->max_remote_endpoints
                                      : NB_RTPS_DEFAULT_MAX_REMOTE_ENDPOINTS;
-    if (participant->max_remote_endpoints > NB_RTPS_MAX_REMOTE_ENDPOINTS) {
-        participant->max_remote_endpoints = NB_RTPS_MAX_REMOTE_ENDPOINTS;
+    if (participant->tables.max_remote_endpoints > NB_RTPS_MAX_REMOTE_ENDPOINTS) {
+        participant->tables.max_remote_endpoints = NB_RTPS_MAX_REMOTE_ENDPOINTS;
     }
     participant->sedp_heartbeat_ms =
         config->sedp_heartbeat_ms ? config->sedp_heartbeat_ms
@@ -1341,41 +1341,41 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
         return NULL;
     }
 
-    participant->lock = zb_mutex_create(ZB_MUTEX_NORMAL);
-    participant->remotes =
+    participant->net.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
+    participant->tables.remotes =
         (nb_rtps_remote_participant_t *)calloc(participant->max_remotes,
                                                sizeof(nb_rtps_remote_participant_t));
-    participant->local_endpoints =
-        (nb_rtps_local_endpoint_t *)calloc(participant->max_local_endpoints,
+    participant->tables.local_endpoints =
+        (nb_rtps_local_endpoint_t *)calloc(participant->tables.max_local_endpoints,
                                            sizeof(nb_rtps_local_endpoint_t));
-    participant->remote_endpoints =
-        (nb_rtps_remote_endpoint_t *)calloc(participant->max_remote_endpoints,
+    participant->tables.remote_endpoints =
+        (nb_rtps_remote_endpoint_t *)calloc(participant->tables.max_remote_endpoints,
                                             sizeof(nb_rtps_remote_endpoint_t));
-    participant->local_used =
-        (uint32_t *)calloc(participant->max_local_endpoints, sizeof(uint32_t));
-    participant->remote_ep_used =
-        (uint32_t *)calloc(participant->max_remote_endpoints, sizeof(uint32_t));
-    participant->remotes_used =
+    participant->tables.local_used =
+        (uint32_t *)calloc(participant->tables.max_local_endpoints, sizeof(uint32_t));
+    participant->tables.remote_ep_used =
+        (uint32_t *)calloc(participant->tables.max_remote_endpoints, sizeof(uint32_t));
+    participant->tables.remotes_used =
         (uint32_t *)calloc(participant->max_remotes, sizeof(uint32_t));
-    participant->publications_writer =
-        nb_rtps_reliable_writer_create(participant->max_local_endpoints);
-    participant->subscriptions_writer =
-        nb_rtps_reliable_writer_create(participant->max_local_endpoints);
-    if (!participant->lock || !participant->remotes || !participant->local_endpoints ||
-        !participant->remote_endpoints || !participant->local_used ||
-        !participant->remote_ep_used || !participant->remotes_used ||
-        !participant->publications_writer ||
-        !participant->subscriptions_writer) {
+    participant->tables.publications_writer =
+        nb_rtps_reliable_writer_create(participant->tables.max_local_endpoints);
+    participant->tables.subscriptions_writer =
+        nb_rtps_reliable_writer_create(participant->tables.max_local_endpoints);
+    if (!participant->net.lock || !participant->tables.remotes || !participant->tables.local_endpoints ||
+        !participant->tables.remote_endpoints || !participant->tables.local_used ||
+        !participant->tables.remote_ep_used || !participant->tables.remotes_used ||
+        !participant->tables.publications_writer ||
+        !participant->tables.subscriptions_writer) {
         free_participant(participant);
         return NULL;
     }
 
-    participant->rx_sock = zn_socket_create();
-    if (!participant->rx_sock) {
+    participant->net.rx_sock = zn_socket_create();
+    if (!participant->net.rx_sock) {
         free_participant(participant);
         return NULL;
     }
-    if (zn_socket_bind_udp(participant->rx_sock,
+    if (zn_socket_bind_udp(participant->net.rx_sock,
                             participant->bind_host,
                             (uint16_t)spdp_port,
                             1) != ZN_OK) {
@@ -1383,7 +1383,7 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
         return NULL;
     }
     local_ip[0] = '\0';
-    if (zn_socket_get_local(participant->rx_sock,
+    if (zn_socket_get_local(participant->net.rx_sock,
                              local_ip,
                              sizeof(local_ip),
                              &local_port) != ZN_OK ||
@@ -1395,22 +1395,22 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
     if (participant->multicast_enabled) {
         const char *local_if =
             strcmp(participant->bind_host, "0.0.0.0") == 0 ? NULL : participant->bind_host;
-        if (zn_socket_join_multicast(participant->rx_sock,
+        if (zn_socket_join_multicast(participant->net.rx_sock,
                                       participant->multicast_group,
                                       local_if) != ZN_OK) {
             free_participant(participant);
             return NULL;
         }
-        (void)zn_socket_set_multicast_ttl(participant->rx_sock, 1);
-        (void)zn_socket_set_multicast_loop(participant->rx_sock, 1);
+        (void)zn_socket_set_multicast_ttl(participant->net.rx_sock, 1);
+        (void)zn_socket_set_multicast_loop(participant->net.rx_sock, 1);
     }
 
-    participant->unicast_sock = zn_socket_create();
-    if (!participant->unicast_sock) {
+    participant->net.unicast_sock = zn_socket_create();
+    if (!participant->net.unicast_sock) {
         free_participant(participant);
         return NULL;
     }
-    if (zn_socket_bind_udp(participant->unicast_sock,
+    if (zn_socket_bind_udp(participant->net.unicast_sock,
                             participant->bind_host,
                             (uint16_t)unicast_port,
                             0) != ZN_OK) {
@@ -1419,7 +1419,7 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
     }
     local_ip[0] = '\0';
     local_port = 0;
-    if (zn_socket_get_local(participant->unicast_sock,
+    if (zn_socket_get_local(participant->net.unicast_sock,
                              local_ip,
                              sizeof(local_ip),
                              &local_port) != ZN_OK ||
@@ -1438,9 +1438,9 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
         /* User data gets its own unicast socket on d3 + PG*participant_id. The
          * metatraffic socket keeps SEDP and SPDP unicast; peers learn this
          * locator from PID_DEFAULT_UNICAST_LOCATOR. */
-        participant->data_sock = zn_socket_create();
-        if (!participant->data_sock ||
-            zn_socket_bind_udp(participant->data_sock,
+        participant->net.data_sock = zn_socket_create();
+        if (!participant->net.data_sock ||
+            zn_socket_bind_udp(participant->net.data_sock,
                                 participant->bind_host,
                                 (uint16_t)data_port,
                                 0) != ZN_OK) {
@@ -1449,7 +1449,7 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
         }
         local_ip[0] = '\0';
         local_port = 0;
-        if (zn_socket_get_local(participant->data_sock,
+        if (zn_socket_get_local(participant->net.data_sock,
                                  local_ip,
                                  sizeof(local_ip),
                                  &local_port) != ZN_OK ||
@@ -1457,13 +1457,13 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
             free_participant(participant);
             return NULL;
         }
-        participant->data_port = local_port;
+        participant->net.data_port = local_port;
         nb_rtps_locator_ipv4(&participant->default_unicast,
                              participant->advertise_addr[0],
                              participant->advertise_addr[1],
                              participant->advertise_addr[2],
                              participant->advertise_addr[3],
-                             participant->data_port);
+                             participant->net.data_port);
     }
     if (participant->default_unicast.kind == NB_RTPS_LOCATOR_KIND_INVALID) {
         /* SPDP peers such as Cyclone DDS require a default unicast locator in
@@ -1517,55 +1517,55 @@ int nb_rtps_participant_start(nb_rtps_participant_t *participant)
     if (!participant || participant->started) {
         return NB_ERR_STATE;
     }
-    participant->poller = zn_poller_create();
-    if (!participant->poller) {
+    participant->net.poller = zn_poller_create();
+    if (!participant->net.poller) {
         return NB_ERR_NOMEM;
     }
-    if (zn_poller_add(participant->poller,
-                       zn_socket_fd(participant->rx_sock),
+    if (zn_poller_add(participant->net.poller,
+                       zn_socket_fd(participant->net.rx_sock),
                        ZN_POLL_IN,
                        NULL,
                        NULL) != ZN_OK ||
-        zn_poller_add(participant->poller,
-                       zn_socket_fd(participant->unicast_sock),
+        zn_poller_add(participant->net.poller,
+                       zn_socket_fd(participant->net.unicast_sock),
                        ZN_POLL_IN,
                        NULL,
                        NULL) != ZN_OK) {
-        zn_poller_destroy(participant->poller);
-        participant->poller = NULL;
+        zn_poller_destroy(participant->net.poller);
+        participant->net.poller = NULL;
         return NB_ERR_IO;
     }
-    if (participant->data_sock &&
-        zn_poller_add(participant->poller,
-                       zn_socket_fd(participant->data_sock),
+    if (participant->net.data_sock &&
+        zn_poller_add(participant->net.poller,
+                       zn_socket_fd(participant->net.data_sock),
                        ZN_POLL_IN,
                        NULL,
                        NULL) != ZN_OK) {
-        zn_poller_destroy(participant->poller);
-        participant->poller = NULL;
+        zn_poller_destroy(participant->net.poller);
+        participant->net.poller = NULL;
         return NB_ERR_IO;
     }
     if (participant->tcp &&
-        nb_rtps_tcp_set_poller(participant->tcp, participant->poller) != 0) {
-        zn_poller_destroy(participant->poller);
-        participant->poller = NULL;
+        nb_rtps_tcp_set_poller(participant->tcp, participant->net.poller) != 0) {
+        zn_poller_destroy(participant->net.poller);
+        participant->net.poller = NULL;
         return NB_ERR_IO;
     }
     participant->stop = 0;
-    participant->next_announce_ms = 0;
-    participant->next_sweep_ms = 0;
-    participant->next_sedp_heartbeat_ms = 0;
-    participant->next_data_heartbeat_ms = 0;
-    zb_mutex_lock(participant->lock);
+    participant->timers.next_announce_ms = 0;
+    participant->timers.next_sweep_ms = 0;
+    participant->timers.next_sedp_heartbeat_ms = 0;
+    participant->timers.next_data_heartbeat_ms = 0;
+    zb_mutex_lock(participant->net.lock);
     refresh_pmd_interval(participant);
-    zb_mutex_unlock(participant->lock);
-    participant->thread = zb_thread_create(thread_main, participant);
-    if (!participant->thread) {
+    zb_mutex_unlock(participant->net.lock);
+    participant->net.thread = zb_thread_create(thread_main, participant);
+    if (!participant->net.thread) {
         if (participant->tcp) {
             (void)nb_rtps_tcp_set_poller(participant->tcp, NULL);
         }
-        zn_poller_destroy(participant->poller);
-        participant->poller = NULL;
+        zn_poller_destroy(participant->net.poller);
+        participant->net.poller = NULL;
         return NB_ERR_NOMEM;
     }
     participant->started = 1;
@@ -1580,34 +1580,34 @@ void nb_rtps_participant_stop(nb_rtps_participant_t *participant)
         return;
     }
     participant->stop = 1;
-    if (participant->poller) {
-        (void)zn_poller_wake(participant->poller);
+    if (participant->net.poller) {
+        (void)zn_poller_wake(participant->net.poller);
     }
-    if (participant->thread) {
-        (void)zb_thread_join(participant->thread);
-        zb_thread_destroy(participant->thread);
-        participant->thread = NULL;
+    if (participant->net.thread) {
+        (void)zb_thread_join(participant->net.thread);
+        zb_thread_destroy(participant->net.thread);
+        participant->net.thread = NULL;
     }
     /* The TCP sockets are registered in the poller that is about to go away;
      * detach them first so nothing references it afterwards. */
     if (participant->tcp) {
         (void)nb_rtps_tcp_set_poller(participant->tcp, NULL);
     }
-    if (participant->poller) {
-        zn_poller_destroy(participant->poller);
-        participant->poller = NULL;
+    if (participant->net.poller) {
+        zn_poller_destroy(participant->net.poller);
+        participant->net.poller = NULL;
     }
     participant->started = 0;
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     for (i = 0; i < participant->max_remotes; i++) {
-        participant->remotes[i].used = 0;
+        participant->tables.remotes[i].used = 0;
     }
-    for (i = 0; i < participant->max_remote_endpoints; i++) {
-        participant->remote_endpoints[i].used = 0;
+    for (i = 0; i < participant->tables.max_remote_endpoints; i++) {
+        participant->tables.remote_endpoints[i].used = 0;
     }
-    participant->remotes_used_count = 0;
-    participant->remote_ep_used_count = 0;
-    zb_mutex_unlock(participant->lock);
+    participant->tables.remotes_used_count = 0;
+    participant->tables.remote_ep_used_count = 0;
+    zb_mutex_unlock(participant->net.lock);
 }
 
 void nb_rtps_participant_destroy(nb_rtps_participant_t *participant)
@@ -1622,10 +1622,10 @@ void nb_rtps_participant_set_callback(nb_rtps_participant_t *participant,
     if (!participant) {
         return;
     }
-    zb_mutex_lock(participant->lock);
-    participant->callback = callback;
-    participant->callback_user = user;
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
+    participant->tables.callback = callback;
+    participant->tables.callback_user = user;
+    zb_mutex_unlock(participant->net.lock);
 }
 
 void nb_rtps_participant_set_endpoint_callback(nb_rtps_participant_t *participant,
@@ -1635,10 +1635,10 @@ void nb_rtps_participant_set_endpoint_callback(nb_rtps_participant_t *participan
     if (!participant) {
         return;
     }
-    zb_mutex_lock(participant->lock);
-    participant->endpoint_callback = callback;
-    participant->endpoint_user = user;
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
+    participant->tables.endpoint_callback = callback;
+    participant->tables.endpoint_user = user;
+    zb_mutex_unlock(participant->net.lock);
 }
 
 void nb_rtps_participant_set_data_callback(nb_rtps_participant_t *participant,
@@ -1648,10 +1648,10 @@ void nb_rtps_participant_set_data_callback(nb_rtps_participant_t *participant,
     if (!participant) {
         return;
     }
-    zb_mutex_lock(participant->lock);
-    participant->data_callback = callback;
-    participant->data_user = user;
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
+    participant->tables.data_callback = callback;
+    participant->tables.data_user = user;
+    zb_mutex_unlock(participant->net.lock);
 }
 
 int nb_rtps_participant_set_status_callback(nb_rtps_participant_t *participant,
@@ -1661,10 +1661,10 @@ int nb_rtps_participant_set_status_callback(nb_rtps_participant_t *participant,
     if (!participant) {
         return NB_ERR_INVALID;
     }
-    zb_mutex_lock(participant->lock);
-    participant->status_callback = callback;
-    participant->status_user = user;
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
+    participant->tables.status_callback = callback;
+    participant->tables.status_user = user;
+    zb_mutex_unlock(participant->net.lock);
     return NB_OK;
 }
 
@@ -1695,14 +1695,14 @@ int nb_rtps_participant_add_endpoint(nb_rtps_participant_t *participant,
         local.max_instances = info->max_instances;
     }
 
-    zb_mutex_lock(participant->lock);
-    for (i = 0; i < participant->max_local_endpoints; i++) {
-        if (!participant->local_endpoints[i].used) {
+    zb_mutex_lock(participant->net.lock);
+    for (i = 0; i < participant->tables.max_local_endpoints; i++) {
+        if (!participant->tables.local_endpoints[i].used) {
             slot = i;
             break;
         }
-        if (i + 1u == participant->max_local_endpoints) {
-            zb_mutex_unlock(participant->lock);
+        if (i + 1u == participant->tables.max_local_endpoints) {
+            zb_mutex_unlock(participant->net.lock);
             return NB_ERR_TOOBIG;
         }
     }
@@ -1728,7 +1728,7 @@ int nb_rtps_participant_add_endpoint(nb_rtps_participant_t *participant,
         }
     }
     if (nb_rtps_sedp_build(&local.info, payload, sizeof(payload), &payload_len) != NB_OK) {
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         return NB_ERR_BAD_MESSAGE;
     }
     /* Reliable writers need a history for retransmission. A durable writer
@@ -1747,16 +1747,16 @@ int nb_rtps_participant_add_endpoint(nb_rtps_participant_t *participant,
         }
         local.history = nb_rtps_reliable_writer_create(depth);
         if (!local.history) {
-            zb_mutex_unlock(participant->lock);
+            zb_mutex_unlock(participant->net.lock);
             return NB_ERR_NOMEM;
         }
     }
-    history = kind == NB_RTPS_ENDPOINT_PUBLICATION ? participant->publications_writer
-                                                   : participant->subscriptions_writer;
+    history = kind == NB_RTPS_ENDPOINT_PUBLICATION ? participant->tables.publications_writer
+                                                   : participant->tables.subscriptions_writer;
     rc = nb_rtps_reliable_add(history, payload, payload_len, 0, &sn);
     if (rc != NB_OK) {
         nb_rtps_reliable_writer_destroy(local.history);
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         return rc;
     }
     local.sn = sn;
@@ -1764,15 +1764,15 @@ int nb_rtps_participant_add_endpoint(nb_rtps_participant_t *participant,
      * was created; the sweep counts from here. */
     local.last_write_ms = zn_wall_ms();
     local.next_deadline_ms = 0;
-    participant->local_endpoints[slot] = local;
-    nb_rtps_used_add(participant->local_used,
-                     &participant->local_used_count,
-                     participant->max_local_endpoints,
+    participant->tables.local_endpoints[slot] = local;
+    nb_rtps_used_add(participant->tables.local_used,
+                     &participant->tables.local_used_count,
+                     participant->tables.max_local_endpoints,
                      slot);
-    participant->local_endpoint_count++;
+    participant->tables.local_endpoint_count++;
     refresh_pmd_interval(participant);
     *info = local.info;
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
 
     /* Manual liveliness needs an explicit assertion this API does not offer, so
      * a peer would declare the writer dead once the lease runs out. Say so
@@ -1799,10 +1799,10 @@ int nb_rtps_participant_remove_endpoint(nb_rtps_participant_t *participant,
     if (!participant || !endpoint_guid) {
         return NB_ERR_INVALID;
     }
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     slot = find_local_endpoint(participant, endpoint_guid);
     if (!slot) {
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         return NB_ERR_NOTFOUND;
     }
     local = *slot;
@@ -1826,7 +1826,7 @@ int nb_rtps_participant_remove_endpoint(nb_rtps_participant_t *participant,
             }
         }
     }
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
 
     for (i = 0; i < dispose_count; i++) {
         (void)nb_rtps_participant_publish_instance(
@@ -1839,30 +1839,30 @@ int nb_rtps_participant_remove_endpoint(nb_rtps_participant_t *participant,
     }
     free(dispose_handles);
 
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     slot = find_local_endpoint(participant, endpoint_guid);
     if (!slot) {
         /* Somebody else removed it while the disposes were in flight. */
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         return NB_ERR_NOTFOUND;
     }
     local = *slot;
     slot->used = 0;
-    nb_rtps_used_remove(participant->local_used,
-                        &participant->local_used_count,
-                        (size_t)(slot - participant->local_endpoints));
+    nb_rtps_used_remove(participant->tables.local_used,
+                        &participant->tables.local_used_count,
+                        (size_t)(slot - participant->tables.local_endpoints));
     /* Ownership of the history moves to the local copy; clearing the slot
      * keeps participant destruction from freeing it twice. */
     slot->history = NULL;
     slot->instances = NULL;
-    if (participant->local_endpoint_count > 0) {
-        participant->local_endpoint_count--;
+    if (participant->tables.local_endpoint_count > 0) {
+        participant->tables.local_endpoint_count--;
     }
     if (local.kind == NB_RTPS_ENDPOINT_SUBSCRIPTION) {
         drop_data_readers_for_reader(participant, &local.info.endpoint_guid.entity);
     }
     refresh_pmd_interval(participant);
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
 
     if (nb_rtps_sedp_build_key(
             &local.info.endpoint_guid, payload, sizeof(payload), &payload_len) != NB_OK) {
@@ -1872,8 +1872,8 @@ int nb_rtps_participant_remove_endpoint(nb_rtps_participant_t *participant,
     }
     nb_rtps_reliable_writer_destroy(local.history);
     free(local.instances);
-    history = local.kind == NB_RTPS_ENDPOINT_PUBLICATION ? participant->publications_writer
-                                                         : participant->subscriptions_writer;
+    history = local.kind == NB_RTPS_ENDPOINT_PUBLICATION ? participant->tables.publications_writer
+                                                         : participant->tables.subscriptions_writer;
     rc = nb_rtps_reliable_add(history, payload, payload_len, 1, &sn);
     if (rc != NB_OK) {
         return rc;
@@ -1927,10 +1927,10 @@ static int publish_internal(nb_rtps_participant_t *participant,
         return NB_ERR_INVALID;
     }
 
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     local = find_local_endpoint(participant, writer_guid);
     if (!local || local->kind != NB_RTPS_ENDPOINT_PUBLICATION) {
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         return NB_ERR_NOTFOUND;
     }
 
@@ -1954,7 +1954,7 @@ static int publish_internal(nb_rtps_participant_t *participant,
                                            status,
                                            &sn);
         if (rc != NB_OK) {
-            zb_mutex_unlock(participant->lock);
+            zb_mutex_unlock(participant->net.lock);
             return rc;
         }
         nb_rtps_reliable_state(local->history, &first_sn, NULL, NULL);
@@ -1994,9 +1994,9 @@ static int publish_internal(nb_rtps_participant_t *participant,
         }
     }
 
-    for (i = 0; i < participant->remote_ep_used_count; i++) {
+    for (i = 0; i < participant->tables.remote_ep_used_count; i++) {
         nb_rtps_remote_endpoint_t *remote =
-            &participant->remote_endpoints[participant->remote_ep_used[i]];
+            &participant->tables.remote_endpoints[participant->tables.remote_ep_used[i]];
         nb_rtps_targets_t targets;
 
         if (remote->kind != NB_RTPS_ENDPOINT_SUBSCRIPTION) {
@@ -2059,7 +2059,7 @@ static int publish_internal(nb_rtps_participant_t *participant,
             }
         }
     }
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
 
     for (i = 0; i < batch_count; i++) {
         if (evicted_first) {
@@ -2159,10 +2159,10 @@ int nb_rtps_participant_reader_consumed(nb_rtps_participant_t *participant,
     if (!participant || !writer_guid || !reader_guid || sn == 0) {
         return 0;
     }
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     state = find_data_reader(participant, writer_guid, &reader_guid->entity);
     consumed = state ? nb_rtps_reader_has_sample(&state->state, sn) : 0;
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
     return consumed;
 }
 
@@ -2200,13 +2200,13 @@ int nb_rtps_participant_add_peer(nb_rtps_participant_t *participant,
     if (participant->peer_count >= NB_RTPS_MAX_PEERS) {
         return NB_ERR_TOOBIG;
     }
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     copy_str(participant->peers[participant->peer_count].host,
              sizeof(participant->peers[participant->peer_count].host),
              host);
     participant->peers[participant->peer_count].port = port;
     participant->peer_count++;
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
     return NB_OK;
 }
 
@@ -2223,13 +2223,13 @@ size_t nb_rtps_participant_remote_count(const nb_rtps_participant_t *participant
     if (!participant) {
         return 0;
     }
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     for (i = 0; i < participant->max_remotes; i++) {
-        if (participant->remotes[i].used) {
+        if (participant->tables.remotes[i].used) {
             count++;
         }
     }
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
     return count;
 }
 
@@ -2240,9 +2240,9 @@ size_t nb_rtps_participant_local_endpoint_count(const nb_rtps_participant_t *par
     if (!participant) {
         return 0;
     }
-    zb_mutex_lock(participant->lock);
-    count = participant->local_endpoint_count;
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
+    count = participant->tables.local_endpoint_count;
+    zb_mutex_unlock(participant->net.lock);
     return count;
 }
 
@@ -2254,13 +2254,13 @@ size_t nb_rtps_participant_remote_endpoint_count(const nb_rtps_participant_t *pa
     if (!participant) {
         return 0;
     }
-    zb_mutex_lock(participant->lock);
-    for (i = 0; i < participant->max_remote_endpoints; i++) {
-        if (participant->remote_endpoints[i].used) {
+    zb_mutex_lock(participant->net.lock);
+    for (i = 0; i < participant->tables.max_remote_endpoints; i++) {
+        if (participant->tables.remote_endpoints[i].used) {
             count++;
         }
     }
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
     return count;
 }
 
@@ -2282,7 +2282,7 @@ size_t nb_rtps_participant_matched_count(const nb_rtps_participant_t *participan
     if (!participant || !endpoint_guid) {
         return 0;
     }
-    zb_mutex_lock(mutable_participant->lock);
+    zb_mutex_lock(mutable_participant->net.lock);
     {
         const nb_rtps_local_endpoint_t *local =
             find_local_endpoint(mutable_participant, endpoint_guid);
@@ -2291,7 +2291,7 @@ size_t nb_rtps_participant_matched_count(const nb_rtps_participant_t *participan
             count = matched_remote_count(mutable_participant, local);
         }
     }
-    zb_mutex_unlock(mutable_participant->lock);
+    zb_mutex_unlock(mutable_participant->net.lock);
     return count;
 }
 
@@ -2409,7 +2409,7 @@ size_t nb_rtps_participant_discovery_read(nb_rtps_participant_t *participant,
         topic > NB_DDS_BUILTIN_TOPIC_TOPIC) {
         return 0;
     }
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     if (topic == NB_DDS_BUILTIN_TOPIC_PARTICIPANT) {
         if (count < max) {
             nb_dds_discovery_sample_t *sample = &out[count++];
@@ -2424,7 +2424,7 @@ size_t nb_rtps_participant_discovery_read(nb_rtps_participant_t *participant,
             sample->lease_ms = participant->lease_ms;
         }
         for (i = 0; i < participant->max_remotes && count < max; i++) {
-            nb_rtps_remote_participant_t *remote = &participant->remotes[i];
+            nb_rtps_remote_participant_t *remote = &participant->tables.remotes[i];
             nb_dds_discovery_sample_t *sample;
             if (!remote->used) {
                 continue;
@@ -2439,8 +2439,8 @@ size_t nb_rtps_participant_discovery_read(nb_rtps_participant_t *participant,
             sample->lease_ms = remote->lease_ms;
         }
     } else if (topic == NB_DDS_BUILTIN_TOPIC_TOPIC) {
-        for (i = 0; i < participant->max_local_endpoints; i++) {
-            nb_rtps_local_endpoint_t *endpoint = &participant->local_endpoints[i];
+        for (i = 0; i < participant->tables.max_local_endpoints; i++) {
+            nb_rtps_local_endpoint_t *endpoint = &participant->tables.local_endpoints[i];
             if (endpoint->used) {
                 nb_rtps_discovery_topic_add(out,
                                             &count,
@@ -2450,8 +2450,8 @@ size_t nb_rtps_participant_discovery_read(nb_rtps_participant_t *participant,
                                             endpoint->kind == NB_RTPS_ENDPOINT_PUBLICATION);
             }
         }
-        for (i = 0; i < participant->max_remote_endpoints; i++) {
-            nb_rtps_remote_endpoint_t *endpoint = &participant->remote_endpoints[i];
+        for (i = 0; i < participant->tables.max_remote_endpoints; i++) {
+            nb_rtps_remote_endpoint_t *endpoint = &participant->tables.remote_endpoints[i];
             if (endpoint->used) {
                 nb_rtps_discovery_topic_add(out,
                                             &count,
@@ -2465,20 +2465,20 @@ size_t nb_rtps_participant_discovery_read(nb_rtps_participant_t *participant,
         nb_rtps_endpoint_kind_t kind = topic == NB_DDS_BUILTIN_TOPIC_PUBLICATION
                                            ? NB_RTPS_ENDPOINT_PUBLICATION
                                            : NB_RTPS_ENDPOINT_SUBSCRIPTION;
-        for (i = 0; i < participant->max_local_endpoints && count < max; i++) {
-            nb_rtps_local_endpoint_t *endpoint = &participant->local_endpoints[i];
+        for (i = 0; i < participant->tables.max_local_endpoints && count < max; i++) {
+            nb_rtps_local_endpoint_t *endpoint = &participant->tables.local_endpoints[i];
             if (endpoint->used && endpoint->kind == kind) {
                 nb_rtps_discovery_endpoint(&out[count++], topic, &endpoint->info, 1);
             }
         }
-        for (i = 0; i < participant->max_remote_endpoints && count < max; i++) {
-            nb_rtps_remote_endpoint_t *endpoint = &participant->remote_endpoints[i];
+        for (i = 0; i < participant->tables.max_remote_endpoints && count < max; i++) {
+            nb_rtps_remote_endpoint_t *endpoint = &participant->tables.remote_endpoints[i];
             if (endpoint->used && endpoint->kind == kind) {
                 nb_rtps_discovery_endpoint(&out[count++], topic, &endpoint->info, 0);
             }
         }
     }
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
     return count;
 }
 
@@ -2516,7 +2516,7 @@ void nb_rtps_participant_metrics(const nb_rtps_participant_t *participant, nb_me
     if (!participant || !out) {
         return;
     }
-    zb_mutex_lock((zb_mutex *)participant->lock);
+    zb_mutex_lock((zb_mutex *)participant->net.lock);
     out->rtps_packets_sent = participant->stats.packets_sent;
     out->rtps_packets_received = participant->stats.packets_received;
     out->rtps_bytes_sent = participant->stats.bytes_sent;
@@ -2544,14 +2544,14 @@ void nb_rtps_participant_metrics(const nb_rtps_participant_t *participant, nb_me
     /* Gauges: this participant plus everything it has discovered. */
     out->rtps_participants = 1;
     for (i = 0; i < participant->max_remotes; i++) {
-        if (participant->remotes[i].used) {
+        if (participant->tables.remotes[i].used) {
             out->rtps_participants++;
         }
     }
     out->rtps_publications = 0;
     out->rtps_subscriptions = 0;
-    for (i = 0; i < participant->max_local_endpoints; i++) {
-        const nb_rtps_local_endpoint_t *endpoint = &participant->local_endpoints[i];
+    for (i = 0; i < participant->tables.max_local_endpoints; i++) {
+        const nb_rtps_local_endpoint_t *endpoint = &participant->tables.local_endpoints[i];
         if (!endpoint->used) {
             continue;
         }
@@ -2561,8 +2561,8 @@ void nb_rtps_participant_metrics(const nb_rtps_participant_t *participant, nb_me
             out->rtps_subscriptions++;
         }
     }
-    for (i = 0; i < participant->max_remote_endpoints; i++) {
-        const nb_rtps_remote_endpoint_t *endpoint = &participant->remote_endpoints[i];
+    for (i = 0; i < participant->tables.max_remote_endpoints; i++) {
+        const nb_rtps_remote_endpoint_t *endpoint = &participant->tables.remote_endpoints[i];
         if (!endpoint->used) {
             continue;
         }
@@ -2572,5 +2572,5 @@ void nb_rtps_participant_metrics(const nb_rtps_participant_t *participant, nb_me
             out->rtps_subscriptions++;
         }
     }
-    zb_mutex_unlock((zb_mutex *)participant->lock);
+    zb_mutex_unlock((zb_mutex *)participant->net.lock);
 }

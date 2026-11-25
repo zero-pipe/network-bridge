@@ -167,17 +167,17 @@ static void emit_match_event(nb_rtps_participant_t *participant,
     const char *reason;
 
     memset(&event, 0, sizeof(event));
-    zb_mutex_lock(participant->lock);
-    callback = participant->status_callback;
-    user = participant->status_user;
+    zb_mutex_lock(participant->net.lock);
+    callback = participant->tables.status_callback;
+    user = participant->tables.status_user;
     local = find_local_endpoint(participant, local_guid);
     if (!callback || !local || !local->used) {
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         return;
     }
     if (strcmp(local->info.topic_name, remote_info->topic_name) != 0 ||
         strcmp(local->info.type_name, remote_info->type_name) != 0) {
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         return;
     }
     if (local->kind == NB_RTPS_ENDPOINT_PUBLICATION &&
@@ -189,14 +189,14 @@ static void emit_match_event(nb_rtps_participant_t *participant,
         event.kind = NB_RTPS_STATUS_SUBSCRIPTION_MATCHED;
         reason = endpoint_qos_mismatch(remote_info, &local->info);
     } else {
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         return;
     }
     if (reason) {
         /* A pair that never matched has nothing to un-match, and repeating the
          * same incompatibility on every SEDP refresh would be noise. */
         if (!added) {
-            zb_mutex_unlock(participant->lock);
+            zb_mutex_unlock(participant->net.lock);
             return;
         }
         event.kind = NB_RTPS_STATUS_QOS_INCOMPATIBLE;
@@ -211,7 +211,7 @@ static void emit_match_event(nb_rtps_participant_t *participant,
     event.endpoint = local->info.endpoint_guid;
     event.writer = remote_info->endpoint_guid;
     event.has_peer = 1;
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
 
     callback(user, &event);
 }
@@ -226,16 +226,16 @@ void notify_matches(nb_rtps_participant_t *participant,
     if (!participant || !remote_info) {
         return;
     }
-    for (i = 0; i < participant->max_local_endpoints; i++) {
+    for (i = 0; i < participant->tables.max_local_endpoints; i++) {
         nb_rtps_guid_t local_guid;
         int used = 0;
 
-        zb_mutex_lock(participant->lock);
-        if (participant->local_endpoints[i].used) {
-            local_guid = participant->local_endpoints[i].info.endpoint_guid;
+        zb_mutex_lock(participant->net.lock);
+        if (participant->tables.local_endpoints[i].used) {
+            local_guid = participant->tables.local_endpoints[i].info.endpoint_guid;
             used = 1;
         }
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         if (used) {
             emit_match_event(participant, &local_guid, remote_info, remote_kind, added);
         }
@@ -250,18 +250,18 @@ void notify_matches_for_local(nb_rtps_participant_t *participant,
     if (!participant || !local_guid) {
         return;
     }
-    for (i = 0; i < participant->max_remote_endpoints; i++) {
+    for (i = 0; i < participant->tables.max_remote_endpoints; i++) {
         nb_rtps_endpoint_info_t remote_info;
         nb_rtps_endpoint_kind_t remote_kind;
         int used = 0;
 
-        zb_mutex_lock(participant->lock);
-        if (participant->remote_endpoints[i].used) {
-            remote_info = participant->remote_endpoints[i].info;
-            remote_kind = participant->remote_endpoints[i].kind;
+        zb_mutex_lock(participant->net.lock);
+        if (participant->tables.remote_endpoints[i].used) {
+            remote_info = participant->tables.remote_endpoints[i].info;
+            remote_kind = participant->tables.remote_endpoints[i].kind;
             used = 1;
         }
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         if (used) {
             emit_match_event(participant, local_guid, &remote_info, remote_kind, 1);
         }
@@ -295,26 +295,26 @@ int data_endpoint_matches(const nb_rtps_local_endpoint_t *local,
 
 int ensure_data_readers(nb_rtps_participant_t *participant)
 {
-    if (participant->data_readers) {
+    if (participant->tables.data_readers) {
         return NB_OK;
     }
-    participant->max_data_readers = participant->max_remote_endpoints;
-    if (participant->max_data_readers > NB_RTPS_MAX_DATA_READERS) {
-        participant->max_data_readers = NB_RTPS_MAX_DATA_READERS;
+    participant->tables.max_data_readers = participant->tables.max_remote_endpoints;
+    if (participant->tables.max_data_readers > NB_RTPS_MAX_DATA_READERS) {
+        participant->tables.max_data_readers = NB_RTPS_MAX_DATA_READERS;
     }
-    if (participant->max_data_readers == 0) {
+    if (participant->tables.max_data_readers == 0) {
         return NB_ERR_NOMEM;
     }
-    participant->data_readers = (nb_rtps_data_reader_state_t *)calloc(
-        participant->max_data_readers, sizeof(*participant->data_readers));
-    participant->data_reader_used =
-        (uint32_t *)calloc(participant->max_data_readers, sizeof(uint32_t));
-    if (!participant->data_readers || !participant->data_reader_used) {
-        free(participant->data_readers);
-        free(participant->data_reader_used);
-        participant->data_readers = NULL;
-        participant->data_reader_used = NULL;
-        participant->max_data_readers = 0;
+    participant->tables.data_readers = (nb_rtps_data_reader_state_t *)calloc(
+        participant->tables.max_data_readers, sizeof(*participant->tables.data_readers));
+    participant->tables.data_reader_used =
+        (uint32_t *)calloc(participant->tables.max_data_readers, sizeof(uint32_t));
+    if (!participant->tables.data_readers || !participant->tables.data_reader_used) {
+        free(participant->tables.data_readers);
+        free(participant->tables.data_reader_used);
+        participant->tables.data_readers = NULL;
+        participant->tables.data_reader_used = NULL;
+        participant->tables.max_data_readers = 0;
         return NB_ERR_NOMEM;
     }
     return NB_OK;
@@ -326,12 +326,12 @@ nb_rtps_data_reader_state_t *find_data_reader(nb_rtps_participant_t *participant
 {
     size_t i;
 
-    if (!participant->data_readers) {
+    if (!participant->tables.data_readers) {
         return NULL;
     }
-    for (i = 0; i < participant->data_reader_used_count; i++) {
+    for (i = 0; i < participant->tables.data_reader_used_count; i++) {
         nb_rtps_data_reader_state_t *state =
-            &participant->data_readers[participant->data_reader_used[i]];
+            &participant->tables.data_readers[participant->tables.data_reader_used[i]];
 
         if (nb_rtps_guid_equal(&state->writer, writer) &&
             nb_rtps_entity_id_equal(&state->reader, reader)) {
@@ -356,27 +356,27 @@ nb_rtps_data_reader_state_t *get_data_reader(nb_rtps_participant_t *participant,
     if (ensure_data_readers(participant) != NB_OK) {
         return NULL;
     }
-    for (i = 0; i < participant->max_data_readers; i++) {
-        if (!participant->data_readers[i].used) {
-            state = &participant->data_readers[i];
+    for (i = 0; i < participant->tables.max_data_readers; i++) {
+        if (!participant->tables.data_readers[i].used) {
+            state = &participant->tables.data_readers[i];
             break;
         }
     }
     if (!state) {
-        if (!participant->data_reader_overflow_logged) {
-            participant->data_reader_overflow_logged = 1;
+        if (!participant->tables.data_reader_overflow_logged) {
+            participant->tables.data_reader_overflow_logged = 1;
             nb_log_warn("rtps: reader window table is full (%zu entries); "
                         "extra reliable pairs run without deduplication",
-                        participant->max_data_readers);
+                        participant->tables.max_data_readers);
         }
         return NULL;
     }
     memset(state, 0, sizeof(*state));
     state->used = 1;
-    nb_rtps_used_add(participant->data_reader_used,
-                     &participant->data_reader_used_count,
-                     participant->max_data_readers,
-                     (size_t)(state - participant->data_readers));
+    nb_rtps_used_add(participant->tables.data_reader_used,
+                     &participant->tables.data_reader_used_count,
+                     participant->tables.max_data_readers,
+                     (size_t)(state - participant->tables.data_readers));
     state->writer = *writer;
     state->reader = *reader;
     /* The liveliness policy is the writer's, announced in SEDP. */
@@ -385,7 +385,7 @@ nb_rtps_data_reader_state_t *get_data_reader(nb_rtps_participant_t *participant,
         state->liveliness_kind = remote->info.liveliness_kind;
         state->liveliness_lease_ms = remote->info.liveliness_lease_ms;
     }
-    participant->data_reader_count++;
+    participant->tables.data_reader_count++;
     nb_rtps_reader_state_reset(&state->state, first_expected ? first_expected : 1u);
     state->last_sample_ms = zn_wall_ms();
     /* DDS considers a writer alive as soon as it is matched; the first missing
@@ -408,8 +408,8 @@ void arm_reader_deadlines(nb_rtps_participant_t *participant,
      * manual-by-participant renew on ParticipantMessageData, manual-by-topic on
      * a message from the writer itself. */
     monitors_liveliness = remote->info.liveliness_lease_ms > 0;
-    for (i = 0; i < participant->max_local_endpoints; i++) {
-        nb_rtps_local_endpoint_t *local = &participant->local_endpoints[i];
+    for (i = 0; i < participant->tables.max_local_endpoints; i++) {
+        nb_rtps_local_endpoint_t *local = &participant->tables.local_endpoints[i];
 
         if (!local->used || local->kind != NB_RTPS_ENDPOINT_SUBSCRIPTION) {
             continue;
@@ -432,19 +432,19 @@ void drop_data_readers_for_writer(nb_rtps_participant_t *participant,
 {
     size_t i;
 
-    if (!participant->data_readers) {
+    if (!participant->tables.data_readers) {
         return;
     }
-    for (i = 0; i < participant->max_data_readers; i++) {
-        nb_rtps_data_reader_state_t *state = &participant->data_readers[i];
+    for (i = 0; i < participant->tables.max_data_readers; i++) {
+        nb_rtps_data_reader_state_t *state = &participant->tables.data_readers[i];
 
         if (state->used && nb_rtps_guid_equal(&state->writer, writer)) {
             state->used = 0;
-            nb_rtps_used_remove(participant->data_reader_used,
-                                &participant->data_reader_used_count,
+            nb_rtps_used_remove(participant->tables.data_reader_used,
+                                &participant->tables.data_reader_used_count,
                                 i);
-            if (participant->data_reader_count > 0) {
-                participant->data_reader_count--;
+            if (participant->tables.data_reader_count > 0) {
+                participant->tables.data_reader_count--;
             }
         }
     }

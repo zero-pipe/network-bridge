@@ -32,18 +32,18 @@ void maybe_tcp_connect(nb_rtps_participant_t *participant,
     if (!participant->tcp || !prefix) {
         return;
     }
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     remote = find_remote(participant, prefix);
     if (!remote || remote->tcp_key[0] != '\0' ||
         remote->info.metatraffic_tcp.kind == NB_RTPS_LOCATOR_KIND_INVALID) {
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         return;
     }
     if (locator_to_host_any(&remote->info.metatraffic_tcp,
                             host,
                             sizeof(host),
                             &port) != NB_OK) {
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         return;
     }
     dial = memcmp(participant->local_guid.prefix.bytes,
@@ -51,11 +51,11 @@ void maybe_tcp_connect(nb_rtps_participant_t *participant,
                   sizeof(participant->local_guid.prefix.bytes)) < 0;
     now = zn_wall_ms();
     if (!dial || now < remote->next_tcp_connect_ms) {
-        zb_mutex_unlock(participant->lock);
+        zb_mutex_unlock(participant->net.lock);
         return;
     }
     remote->next_tcp_connect_ms = now + 1000u;
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
 
     if (nb_rtps_tcp_has_link(participant->tcp, host, port)) {
         return;
@@ -76,11 +76,11 @@ void retry_tcp_links(nb_rtps_participant_t *participant)
     if (!participant->tcp) {
         return;
     }
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     for (i = 0; i < participant->max_remotes &&
                 count < NB_RTPS_TCP_MAX_CONNECTIONS;
          i++) {
-        nb_rtps_remote_participant_t *remote = &participant->remotes[i];
+        nb_rtps_remote_participant_t *remote = &participant->tables.remotes[i];
 
         if (!remote->used || remote->tcp_key[0] != '\0' ||
             remote->info.metatraffic_tcp.kind == NB_RTPS_LOCATOR_KIND_INVALID) {
@@ -88,7 +88,7 @@ void retry_tcp_links(nb_rtps_participant_t *participant)
         }
         prefixes[count++] = remote->info.guid.prefix;
     }
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
     for (i = 0; i < count; i++) {
         maybe_tcp_connect(participant, &prefixes[i]);
     }
@@ -103,12 +103,12 @@ static void tcp_bind_remote(nb_rtps_participant_t *participant,
     if (!key) {
         return;
     }
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     remote = find_remote(participant, prefix);
     if (remote && remote->tcp_key[0] == '\0') {
         copy_str(remote->tcp_key, sizeof(remote->tcp_key), key);
     }
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
 }
 
 void tcp_on_message(void *user,
@@ -153,9 +153,9 @@ void tcp_on_link(void *user, int index)
         /* Inbound: the peer identifies itself with its first message. */
         return;
     }
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     for (i = 0; i < participant->max_remotes; i++) {
-        nb_rtps_remote_participant_t *remote = &participant->remotes[i];
+        nb_rtps_remote_participant_t *remote = &participant->tables.remotes[i];
         char remote_host[NB_RTPS_PEER_HOST_MAX];
         uint16_t remote_port = 0;
 
@@ -174,7 +174,7 @@ void tcp_on_link(void *user, int index)
             break;
         }
     }
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
 }
 
 void tcp_on_unlink(void *user, int index)
@@ -186,14 +186,14 @@ void tcp_on_unlink(void *user, int index)
     if (!key) {
         return;
     }
-    zb_mutex_lock(participant->lock);
+    zb_mutex_lock(participant->net.lock);
     for (i = 0; i < participant->max_remotes; i++) {
-        nb_rtps_remote_participant_t *remote = &participant->remotes[i];
+        nb_rtps_remote_participant_t *remote = &participant->tables.remotes[i];
 
         if (remote->used && strcmp(remote->tcp_key, key) == 0) {
             remote->tcp_key[0] = '\0';
             remote->next_tcp_connect_ms = 0;
         }
     }
-    zb_mutex_unlock(participant->lock);
+    zb_mutex_unlock(participant->net.lock);
 }
