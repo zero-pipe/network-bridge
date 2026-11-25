@@ -28,8 +28,19 @@
    - 缺 `zn_poller_current()` → RPC 侧用 `zn_poller_is_current_thread()` 反查兜底；
    - 缺批量收发 → UDP 传输回退到单包循环，失去 `sendmmsg` / `recvmmsg` 优化。
    建议在 znet 补齐后删掉本仓库的兜底代码。
-4. **DDS 侧**：`dds::Message` 的序列化仍是"长度前缀 + 原始字节"，与 Cyclone
-   互通时按需扩展类型化支持。
+4. **DDS 侧类型**：topic 传真实 IDL 类型名时按裸 CDR body 收发，编解码归应用
+   （IDL 生成代码）；默认 `dds::Message` 仍是不透明字节、长度精确。默认的按
+   type name 匹配下已可与 Cyclone DDS / Fast DDS 互通。
+5. **XTypes TypeObject（暂缓）**：严格类型一致性
+   （`EXACT_TYPE_TYPE_CONSISTENCY`）要求 SEDP 通告 `PID_TYPE_INFORMATION`：
+   `TypeIdentifier` + `MinimalTypeObject` + 14 字节 `EquivalenceHash`（对序列化
+   TypeObject 做 MD5），且必须与对端逐字节一致，否则严格对端拒绝匹配。当前无
+   任何 TypeObject 实现，仅有 `PID_TYPE_NAME`。
+   - 涉及模块：`rtps_sedp`（参数写入）、`rtps_param`（`PID_TYPE_INFORMATION`
+     编解码）、新增 TypeObject 模型与哈希（MD5 已有，`zbase`）。
+   - **前置条件**：Linux + Cyclone/FastDDS 参考对端。哈希算法连一个字节都不能
+     差，必须在真实对端上验收；本机（Windows、无参考对端）无法验证，故先挂起。
+   - 收尾：实现后用严格模式对端跑互通测试，并把本节移到"已完成"。
 
 ## 约定
 
