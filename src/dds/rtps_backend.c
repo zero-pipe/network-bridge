@@ -26,6 +26,14 @@ typedef struct nb_dds_rtps_reader {
     void *user;
 } nb_dds_rtps_reader_t;
 
+typedef struct nb_dds_rtps_writer {
+    rtps_writer_t *writer;
+    /* dds::Message topics use the spine's u32-length body over the engine; any
+     * other type name is a plain XCDR1 body that the application serializes
+     * itself (IDL-generated codec, or a private protocol). */
+    int dds_message;
+} nb_dds_rtps_writer_t;
+
 /* ---- QoS mapping ------------------------------------------------------- */
 
 static rtps_reliability_t nb_dds_rtps_reliability(nb_dds_reliability_t value)
@@ -340,14 +348,18 @@ static int nb_dds_rtps_topic_create(void *participant,
     rtps_topic_t *topic = NULL;
     int rc;
 
-    (void)type_name; /* advisory; the wire type both backends share is dds::Message */
     if (!wrapper || !wire_name || !out) {
         return NB_ERR_INVALID;
     }
     *out = NULL;
     rtps_topic_desc_init(&desc);
     desc.name = wire_name;
-    desc.type_name = NB_DDS_RTPS_WIRE_TYPE;
+    /* Pass the application's type name through. "dds::Message" (also the
+     * default the DDS spine fills in for a NULL type) keeps the opaque
+     * length-prefixed body; any other name is treated as a real IDL type and
+     * matched as such, with the payload an opaque CDR body on both ends. */
+    desc.type_name = (type_name && type_name[0]) ? type_name
+                                                 : NB_DDS_RTPS_WIRE_TYPE;
     nb_dds_rtps_make_qos(qos, &desc.qos);
     rc = rtps_topic_create(wrapper->participant, &desc, &topic);
     if (rc != RTPS_OK) {
@@ -368,8 +380,8 @@ static int nb_dds_rtps_writer_create(void *participant,
                                      const nb_dds_qos_t *qos,
                                      void **out)
 {
+    nb_dds_rtps_writer_t *wrapper;
     rtps_qos_t rtps_qos;
-    rtps_writer_t *writer = NULL;
     int rc;
 
     (void)participant;
@@ -377,22 +389,38 @@ static int nb_dds_rtps_writer_create(void *participant,
         return NB_ERR_INVALID;
     }
     *out = NULL;
+    wrapper = (nb_dds_rtps_writer_t *)calloc(1, sizeof(*wrapper));
+    if (!wrapper) {
+        return NB_ERR_NOMEM;
+    }
+    wrapper->dds_message =
+        strcmp(rtps_topic_type_name((rtps_topic_t *)topic),
+               NB_DDS_RTPS_WIRE_TYPE) == 0;
     nb_dds_rtps_make_qos(qos, &rtps_qos);
-    rc = rtps_writer_create((rtps_topic_t *)topic, &rtps_qos, &writer);
+    rc = rtps_writer_create((rtps_topic_t *)topic, &rtps_qos, &wrapper->writer);
     if (rc != RTPS_OK) {
+        free(wrapper);
         return NB_ERR_IO;
     }
-    *out = writer;
+    *out = wrapper;
     return NB_OK;
 }
 
 static int nb_dds_rtps_writer_write(void *writer, const void *data, size_t len)
 {
+    nb_dds_rtps_writer_t *wrapper = (nb_dds_rtps_writer_t *)writer;
     uint8_t *body;
     int rc;
 
-    if (!writer || !data || len == 0 || len > (64u * 1024u * 1024u) - 8u) {
+    if (!wrapper || !data || len == 0 || len > (64u * 1024u * 1024u) - 8u) {
         return NB_ERR_INVALID;
+    }
+    if (!wrapper->dds_message) {
+        /* Real IDL / private type: the bytes are already the XCDR1 CDR body the
+         * application produced; rtps_writer_write only adds the 4-byte
+         * encapsulation header. */
+        rc = rtps_writer_write(wrapper->writer, data, len);
+        return rc == RTPS_OK ? NB_OK : NB_ERR_IO;
     }
     /* dds::Message CDR body: u32 sequence length followed by the bytes.
      * rtps_writer_write prepends the 4-byte XCDR1 encapsulation. */
@@ -405,7 +433,7 @@ static int nb_dds_rtps_writer_write(void *writer, const void *data, size_t len)
     body[2] = (uint8_t)((len >> 16) & 0xffu);
     body[3] = (uint8_t)((len >> 24) & 0xffu);
     memcpy(body + 4, data, len);
-    rc = rtps_writer_write((rtps_writer_t *)writer, body, len + 4u);
+    rc = rtps_writer_write(wrapper->writer, body, len + 4u);
     free(body);
     if (rc != RTPS_OK) {
         return NB_ERR_IO;
@@ -415,8 +443,14 @@ static int nb_dds_rtps_writer_write(void *writer, const void *data, size_t len)
 
 static void nb_dds_rtps_writer_destroy(void *participant, void *writer)
 {
+    nb_dds_rtps_writer_t *wrapper = (nb_dds_rtps_writer_t *)writer;
+
     (void)participant;
-    (void)rtps_writer_destroy((rtps_writer_t *)writer);
+    if (!wrapper) {
+        return;
+    }
+    (void)rtps_writer_destroy(wrapper->writer);
+    free(wrapper);
 }
 
 static int nb_dds_rtps_reader_create(void *participant,

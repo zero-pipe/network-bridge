@@ -75,7 +75,7 @@ int main(void)
         nb_log_error("participant create failed: %d (%s)", rc, nb_error_name(rc));
         return 1;
     }
-    rc = nb_dds_topic_create(participant, "chat", "text", &qos, &topic);
+    rc = nb_dds_topic_create(participant, "chat", NULL, &qos, &topic);
     if (rc == NB_OK) {
         rc = nb_dds_reader_create(topic, &qos, on_chat, &chat, &callback_reader);
     }

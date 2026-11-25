@@ -135,13 +135,13 @@ int main(void)
     CHECK(strcmp(nb_dds_participant_name(p1), "dds-api-test") == 0);
 
     make_qos(&qos);
-    CHECK(nb_dds_topic_create(p1, "chat", "text", &qos, &pub_topic) == NB_OK);
-    CHECK(nb_dds_topic_create(p2, "chat", "text", &qos, &sub_topic) == NB_OK);
+    CHECK(nb_dds_topic_create(p1, "chat", NULL, &qos, &pub_topic) == NB_OK);
+    CHECK(nb_dds_topic_create(p2, "chat", NULL, &qos, &sub_topic) == NB_OK);
     if (!pub_topic || !sub_topic) {
         goto out;
     }
     /* Same wire name on one participant is rejected instead of double-owned. */
-    CHECK(nb_dds_topic_create(p2, "chat", "text", NULL, &dup) == NB_ERR_ALREADY);
+    CHECK(nb_dds_topic_create(p2, "chat", NULL, NULL, &dup) == NB_ERR_ALREADY);
 
     CHECK(nb_dds_writer_create(pub_topic, NULL, &writer) == NB_OK);
     CHECK(nb_dds_reader_create(sub_topic, NULL, NULL, NULL, &history_reader) == NB_OK);
@@ -203,6 +203,48 @@ int main(void)
     CHECK(nb_dds_writer_write(writer, NULL, 0) == NB_ERR_INVALID);
     CHECK(nb_dds_topic_create(p1, "", "text", NULL, &dup) == NB_ERR_INVALID);
     CHECK(nb_dds_reader_create(NULL, NULL, NULL, NULL, &history_reader) == NB_ERR_INVALID);
+
+    /* Raw-IDL mode: a real type name sends and returns a bare CDR body with no
+     * u32 length prefix. The payload is 4-octet aligned so the received length
+     * is exact (an unaligned body would carry 0-3 padding octets the codec
+     * ignores). */
+    {
+        nb_dds_topic_t *raw_pub = NULL;
+        nb_dds_topic_t *raw_sub = NULL;
+        nb_dds_writer_t *raw_writer = NULL;
+        nb_dds_reader_t *raw_reader = NULL;
+        const char raw_payload[8] = "RAWDATA1";
+
+        if (nb_dds_topic_create(p1, "raw", "Trade", &qos, &raw_pub) == NB_OK &&
+            nb_dds_topic_create(p2, "raw", "Trade", &qos, &raw_sub) == NB_OK) {
+            CHECK(nb_dds_writer_create(raw_pub, NULL, &raw_writer) == NB_OK);
+            CHECK(nb_dds_reader_create(raw_sub, NULL, NULL, NULL, &raw_reader) == NB_OK);
+            CHECK(nb_dds_topic_name(raw_pub) != NULL);
+            if (raw_writer && raw_reader) {
+                size_t got = 0;
+
+                for (i = 0; i < 100 && got == 0; i++) {
+                    (void)nb_dds_writer_write(raw_writer, raw_payload,
+                                              sizeof(raw_payload));
+                    got = nb_dds_reader_take(raw_reader, NULL, samples, 4);
+                    if (got == 0) {
+                        zn_sleep_ms(50);
+                    }
+                }
+                CHECK(got >= 1);
+                if (got >= 1) {
+                    CHECK(samples[0].data.len == sizeof(raw_payload));
+                    CHECK(memcmp(samples[0].data.data, raw_payload,
+                                 sizeof(raw_payload)) == 0);
+                    nb_dds_sample_release(samples, got);
+                }
+            }
+        }
+        nb_dds_reader_destroy(raw_reader);
+        nb_dds_writer_destroy(raw_writer);
+        nb_dds_topic_destroy(raw_sub);
+        nb_dds_topic_destroy(raw_pub);
+    }
 
 out:
     nb_dds_waitset_destroy(waitset);

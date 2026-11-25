@@ -189,11 +189,11 @@ static int create_topic_pair(nb_dds_participant_t *a,
                              nb_dds_topic_t **ta,
                              nb_dds_topic_t **tb)
 {
-    int rc = nb_dds_topic_create(a, name, "raw_bytes", qos, ta);
+    int rc = nb_dds_topic_create(a, name, NULL, qos, ta);
     if (rc != NB_OK) {
         return rc;
     }
-    return nb_dds_topic_create(b, name, "raw_bytes", qos, tb);
+    return nb_dds_topic_create(b, name, NULL, qos, tb);
 }
 
 static uint64_t percentile_us(const rtt_state_t *st, double q)

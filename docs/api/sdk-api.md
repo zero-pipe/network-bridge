@@ -222,6 +222,8 @@ nb_dds_participant_t *part = NULL;
 nb_dds_participant_create(&popt, &part);
 
 nb_dds_topic_t *ticks = NULL;
+/* 第三参是类型名：NULL/"dds::Message" = 不透明字节（长度精确）；真实 IDL 类型名
+ * = 裸 CDR body，交由应用编解码，可与 Cyclone DDS / Fast DDS 互通。 */
 nb_dds_topic_create(part, "ticks", "Trade", NULL, &ticks);
 
 nb_dds_reader_t *rd = NULL;

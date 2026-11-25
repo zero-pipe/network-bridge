@@ -53,7 +53,7 @@ int main(int argc, char **argv)
     nb_dds_qos_set_reliability(&qos, NB_DDS_RELIABILITY_RELIABLE);
     nb_dds_qos_set_history(&qos, NB_DDS_HISTORY_KEEP_LAST, 4);
 
-    rc = nb_dds_topic_create(participant, "chat", "text", &qos, &topic);
+    rc = nb_dds_topic_create(participant, "chat", NULL, &qos, &topic);
     if (rc == NB_OK) {
         rc = nb_dds_reader_create(topic, &qos, on_sample, NULL, &reader);
     }

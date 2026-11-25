@@ -266,9 +266,9 @@ int main(int argc, char **argv)
     nb_dds_qos_init(&qos);
     nb_dds_qos_set_reliability(&qos, NB_DDS_RELIABILITY_BEST_EFFORT);
     nb_dds_qos_set_history(&qos, NB_DDS_HISTORY_KEEP_LAST, 1);
-    rc = nb_dds_topic_create(pub, "dds_bench_1k", "raw_bytes", &qos, &pub_topic);
+    rc = nb_dds_topic_create(pub, "dds_bench_1k", NULL, &qos, &pub_topic);
     if (rc == NB_OK) {
-        rc = nb_dds_topic_create(sub, "dds_bench_1k", "raw_bytes", &qos, &sub_topic);
+        rc = nb_dds_topic_create(sub, "dds_bench_1k", NULL, &qos, &sub_topic);
     }
     if (rc == NB_OK) {
         rc = nb_dds_reader_create(sub_topic, &qos, on_sample, &stats, &reader);
