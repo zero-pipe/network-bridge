@@ -85,7 +85,6 @@ scheme 决定传输；同一 scheme 有多个 binding 时出站固定用第一�
 ```json
 {
   "dds": {
-    "backend": "rtps",
     "domain": 0,
     "partition": "orders",
     "prefix": "app",
@@ -96,7 +95,6 @@ scheme 决定传输；同一 scheme 有多个 binding 时出站固定用第一�
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `backend` | string | `"rtps"` | 只支持 `rtps`（内建引擎，唯一后端）；其它取值报错 |
 | `domain` | uint | 0 | DDS domain id |
 | `partition` | string | 空 | DDS partition，作为默认 QoS 继承 |
 | `prefix` | string | 空 | topic 名前缀，线上名 = `prefix/name` |
@@ -139,7 +137,6 @@ topic/writer/reader 的 QoS 逐级继承；线上格式与 Cyclone DDS / Fast DD
 | `rpc.listen[i]` | 不是字符串或 URI 非法 |
 | `rpc.routes[i].endpoint` | 缺少 service 或 URI 非法 |
 | `rpc.discovery.peers[i]` | 不是合法 `host:port` |
-| `dds.backend` | 不是 `rtps`（内建 RTPS 是唯一后端） |
 | `dds.qos.<field>` | 类型或取值非法 |
 | `dds.rtps.peers[i]` | 不是合法 `host:port` |
 | `log.level` | 不支持的级别 |

@@ -30,7 +30,6 @@
     ]
   },
   "dds": {
-    "backend": "rtps",
     "domain": 70,
     "partition": "orders",
     "prefix": "app",

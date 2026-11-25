@@ -2,14 +2,14 @@
 #define NB_DDS_H
 
 /*
- * DDS spine: participant / topic / writer / reader over a selectable backend.
+ * DDS spine: participant / topic / writer / reader over the built-in RTPS
+ * engine.
  *
- *   <nb/dds/participant.h>  domain, backend selection, status, discovery
+ *   <nb/dds/participant.h>  domain, status, discovery
  *   <nb/dds/topic.h>        name + type name + QoS
  *   <nb/dds/writer.h>       publications
  *   <nb/dds/reader.h>       subscriptions, history, wait sets
  *   <nb/dds/qos.h>          DDS policy set
- *   <nb/dds/backend.h>      backend SPI (built-in rtps)
  *
  * The spine is independent of the RPC node: it owns its DDS domain and lets
  * the backend run discovery (SPDP/SEDP). RPC links (tcp/udp/shm) never appear
@@ -25,6 +25,5 @@
 #include <nb/dds/topic.h>
 #include <nb/dds/writer.h>
 #include <nb/dds/reader.h>
-#include <nb/dds/backend.h>
 
 #endif /* NB_DDS_H */

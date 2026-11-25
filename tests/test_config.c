@@ -36,7 +36,7 @@ static void test_rpc_full(void)
                        "\"metrics\":{\"enabled\":false,\"latency_histogram\":false,"
                        "\"sample_every\":5},"
                        "\"log\":{\"enabled\":false,\"level\":\"debug\"},"
-                       "\"dds\":{\"backend\":\"rtps\",\"domain\":3}"
+                       "\"dds\":{\"domain\":3}"
                        "}";
     nb_rpc_config_doc_t *cfg = NULL;
     const nb_node_config_t *n;
@@ -216,7 +216,7 @@ static void test_dds(void)
                        "\"name\":\"dds-app\","
                        "\"rpc\":{\"mode\":\"static\"},"
                        "\"dds\":{"
-                       "\"backend\":\"rtps\",\"domain\":7,"
+                       "\"domain\":7,"
                        "\"partition\":\"orders\",\"prefix\":\"app\","
                        "\"qos\":{\"reliability\":\"reliable\",\"durability\":\"transient_local\","
                        "\"history\":\"keep_last\",\"depth\":8,\"deadline\":\"250ms\","
@@ -236,7 +236,6 @@ static void test_dds(void)
         nb_dds_config_doc_destroy(cfg);
         return;
     }
-    CHECK(d->backend == NB_DDS_BACKEND_RTPS);
     CHECK(d->domain == 7);
     CHECK(strcmp(d->partition, "orders") == 0);
     CHECK(strcmp(d->prefix, "app") == 0);
@@ -265,26 +264,8 @@ static void test_dds(void)
     cfg = NULL;
     CHECK(nb_dds_config_parse("{}", &cfg, NULL) == NB_OK);
     d = nb_dds_config_get(cfg);
-    CHECK(d != NULL && d->backend == NB_DDS_BACKEND_RTPS && d->domain == 0);
+    CHECK(d != NULL && d->domain == 0);
     nb_dds_config_doc_destroy(cfg);
-
-    cfg = (nb_dds_config_doc_t *)1;
-    CHECK(nb_dds_config_parse("{\"dds\":{\"backend\":\"nope\"}}", &cfg, NULL) ==
-          NB_ERR_INVALID);
-    CHECK(cfg == NULL);
-
-    /* 只有内建 RTPS 后端：已移除的 cyclone 必须明确报错而不是静默忽略。 */
-    {
-        nb_config_error_t cerr;
-
-        memset(&cerr, 0, sizeof(cerr));
-        cfg = (nb_dds_config_doc_t *)1;
-        CHECK(nb_dds_config_parse("{\"dds\":{\"backend\":\"cyclone\"}}", &cfg, &cerr) ==
-              NB_ERR_INVALID);
-        CHECK(cfg == NULL);
-        CHECK(strcmp(cerr.path, "dds.backend") == 0);
-        CHECK(strstr(cerr.reason, "rtps") != NULL);
-    }
 
     cfg = (nb_dds_config_doc_t *)1;
     CHECK(nb_dds_config_parse("{\"dds\":{\"qos\":{\"reliability\":\"sometimes\"}}}", &cfg,

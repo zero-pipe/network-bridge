@@ -74,7 +74,6 @@ static int make_participant(uint16_t spdp_port,
                             uint16_t unicast_port,
                             const char *const *peers,
                             size_t peer_count,
-                            nb_dds_backend_t backend,
                             nb_dds_participant_t **out)
 {
     nb_dds_rtps_options_t rtps;
@@ -82,7 +81,6 @@ static int make_participant(uint16_t spdp_port,
 
     make_rtps_options(&rtps, spdp_port, unicast_port, peers, peer_count);
     memset(&options, 0, sizeof(options));
-    options.backend = backend;
     options.domain = 0u;
     options.prefix = "app";
     options.name = "dds-api-test";
@@ -99,7 +97,6 @@ static void make_qos(nb_dds_qos_t *qos)
 
 int main(void)
 {
-    const nb_dds_backend_t backend = NB_DDS_BACKEND_RTPS;
     const char *p1_peers[] = {"127.0.0.1:48402"};
     const char *p2_peers[] = {"127.0.0.1:48400"};
     nb_dds_participant_t *p1 = NULL;
@@ -126,12 +123,11 @@ int main(void)
         return 1;
     }
 
-    CHECK(make_participant(48400, 48401, p1_peers, 1, backend, &p1) == NB_OK);
-    CHECK(make_participant(48402, 48403, p2_peers, 1, backend, &p2) == NB_OK);
+    CHECK(make_participant(48400, 48401, p1_peers, 1, &p1) == NB_OK);
+    CHECK(make_participant(48402, 48403, p2_peers, 1, &p2) == NB_OK);
     if (!p1 || !p2) {
         goto out;
     }
-    CHECK(nb_dds_participant_backend(p1) == backend);
     CHECK(strcmp(nb_dds_participant_name(p1), "dds-api-test") == 0);
 
     make_qos(&qos);

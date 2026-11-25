@@ -69,7 +69,7 @@ socket、poller、timer、thread、mutex、monotonic clock。所有 I/O 与线�
 `include/nb/dds/` + `src/dds/`：participant / topic / writer / reader；sample / history / wait set / status；QoS 继承（participant → topic → writer/reader）。
 
 - **核心字段**：`domain`、`partition`、`prefix`（topic 名前缀）、`qos`。QoS 从 participant 默认值 → topic → writer/reader 逐级继承；`present` 位掩码区分“显式 false”和“继承”。
-- **后端**：内建 RTPS 引擎是唯一后端（`NB_DDS_BACKEND_RTPS`）。后端只把 topic/writer/reader 映射到引擎上，线上类型是 `dds::Message`，与 Cyclone DDS / Fast DDS 互通。
+- **引擎**：内建 RTPS 引擎（唯一 DDS 引擎，无后端选择）。它只把 topic/writer/reader 映射到引擎上；默认线上类型是 `dds::Message`（不透明字节），topic 传真实 IDL 类型名时按裸 CDR body 发送，可与 Cyclone DDS / Fast DDS 互通。
 - **history / wait set**：由 DDS 模块统一实现（KEEP_LAST、read/take、状态掩码），后端只回调样本，语义与后端解耦。
 - **样本与信封**：应用写什么字节，reader 读什么字节；不再套 RPC 信封。
 - **发现**：后端自己跑 SPDP/SEDP，不依赖 `nb_mesh`，也不需要 RPC node。

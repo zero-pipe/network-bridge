@@ -45,7 +45,6 @@
 ```json
 {
   "dds": {
-    "backend": "rtps",
     "domain": 70,
     "partition": "example",
     "prefix": "app",
@@ -55,9 +54,9 @@
 }
 ```
 
-- `domain` / `partition` / `prefix` / `qos` 是 DDS 的核心；`backend` 只能写
-  `rtps`（内建 RTPS 是唯一后端），其它取值报配置错误。
-- DDS 面不读 `threads`：后端有自己的线程与发现机制；`rpc` 块在这里被静默忽略。
+- `domain` / `partition` / `prefix` / `qos` 是 DDS 的核心；固定使用内建 RTPS
+  引擎，配置里不再有 `backend` 字段（写了会被当作未知字段告警并忽略）。
+- DDS 面不读 `threads`：引擎有自己的线程与发现机制；`rpc` 块在这里被静默忽略。
 
 完整字段、取值范围和错误路径见 [`docs/api/config.md`](../../docs/api/config.md)，
 编辑器校验使用 [`docs/config.schema.json`](../../docs/config.schema.json)。

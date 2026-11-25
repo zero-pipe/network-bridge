@@ -1,5 +1,5 @@
 /*
- * 04 配置：DDS 面。JSON 里的 dds 块决定 backend/domain/partition/prefix/qos。
+ * 04 配置：DDS 面。JSON 里的 dds 块决定 domain/partition/prefix/qos。
  *
  * 用法：example_04_config_dds [dds.json]
  */

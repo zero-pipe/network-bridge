@@ -103,7 +103,6 @@ set(NB_RPC_SOURCES
 set(NB_DDS_SOURCES
     dds/sample_queue.c
     dds/dds_qos.c
-    dds/dds_backend.c
     dds/dds_participant.c
     dds/dds_topic.c
     dds/dds_writer.c

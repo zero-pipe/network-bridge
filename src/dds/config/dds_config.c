@@ -29,7 +29,6 @@ void nb_dds_config_default(nb_dds_config_t *config)
         return;
     }
     memset(config, 0, sizeof(*config));
-    config->backend = NB_DDS_BACKEND_RTPS;
     config->domain = 0;
     snprintf(config->name, sizeof(config->name), "%s", "nb-dds");
     nb_dds_qos_init(&config->qos);
@@ -353,20 +352,10 @@ static int cfg_parse_rtps(dds_doc_t *doc, const cJSON *dds, nb_config_error_t *e
     return rc;
 }
 
-/* 内建 RTPS 是唯一后端：其它取值（含已移除的 cyclone）一律明确报错。 */
-static int cfg_parse_backend(const char *text, nb_dds_backend_t *out, nb_config_error_t *err)
-{
-    if (strcmp(text, "rtps") == 0) {
-        *out = NB_DDS_BACKEND_RTPS;
-        return NB_OK;
-    }
-    return nb_json_fail(err, "dds.backend",
-                        "unsupported backend; only \"rtps\" is available");
-}
-
+/* 内建 RTPS 是唯一 DDS 引擎，配置里不再有 backend 选择。 */
 static int cfg_parse_dds(dds_doc_t *doc, const cJSON *root, nb_config_error_t *err)
 {
-    static const char *const known[] = {"backend", "domain", "partition", "prefix", "name",
+    static const char *const known[] = {"domain", "partition", "prefix", "name",
                                         "qos", "rtps"};
     const cJSON *dds = NULL;
     const cJSON *qos = NULL;
@@ -377,10 +366,6 @@ static int cfg_parse_dds(dds_doc_t *doc, const cJSON *root, nb_config_error_t *e
         return rc;
     }
     nb_json_warn_unknown(dds, CFG_KEYS(known), "dds");
-    rc = nb_json_string_field(dds, "backend", &text, err, "dds");
-    if (rc == NB_OK && text) {
-        rc = cfg_parse_backend(text, &doc->dds.backend, err);
-    }
     text = NULL;
     if (rc == NB_OK) {
         rc = nb_json_u32_field(dds, "domain", &doc->dds.domain, err, "dds");
@@ -521,13 +506,15 @@ int nb_dds_participant_create_from_config(const nb_dds_config_doc_t *doc,
     }
     cfg = &doc->dds;
     memset(&options, 0, sizeof(options));
-    options.backend = cfg->backend;
     options.domain = cfg->domain;
     options.partition = cfg->partition[0] ? cfg->partition : NULL;
     options.prefix = cfg->prefix[0] ? cfg->prefix : NULL;
     options.name = cfg->name;
     options.default_qos = &cfg->qos;
-    if (cfg->has_rtps || cfg->backend == NB_DDS_BACKEND_RTPS) {
+    {
+        /* RTPS is the only engine, so its tuning is always applied; an absent
+         * "rtps" section leaves the zeroed values, which select engine
+         * defaults. */
         memset(&rtps, 0, sizeof(rtps));
         rtps.struct_size = sizeof(rtps);
         rtps.bind_host = cfg->rtps.bind_host[0] ? cfg->rtps.bind_host : NULL;

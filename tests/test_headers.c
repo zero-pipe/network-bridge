@@ -22,7 +22,6 @@
 #include <nb/dds/topic.h>
 #include <nb/dds/writer.h>
 #include <nb/dds/reader.h>
-#include <nb/dds/backend.h>
 
 int main(void)
 {

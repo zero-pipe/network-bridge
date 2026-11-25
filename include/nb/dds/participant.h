@@ -2,14 +2,14 @@
 #define NB_DDS_PARTICIPANT_H
 
 /*
- * DDS spine: participant lifecycle and backend selection.
+ * DDS spine: participant lifecycle.
  *
- * A participant owns a DDS domain and one backend (the built-in RTPS engine). Unlike
+ * A participant owns a DDS domain and runs on the built-in RTPS engine. Unlike
  * the old pub/sub API it does not need an RPC node, bindings, routes or the
- * zn_discovery control plane: the backend runs its own DDS discovery
+ * zn_discovery control plane: the engine runs its own DDS discovery
  * (SPDP/SEDP).
  *
- *   nb_dds_participant_t   domain + backend + default QoS/partition/prefix
+ *   nb_dds_participant_t   domain + default QoS/partition/prefix
  *   nb_dds_topic_t         name + type name + QoS
  *   nb_dds_writer_t        publishes samples on a topic
  *   nb_dds_reader_t        receives samples (callback or history)
@@ -34,11 +34,7 @@ typedef struct nb_dds_writer nb_dds_writer_t;
 typedef struct nb_dds_reader nb_dds_reader_t;
 typedef struct nb_dds_waitset nb_dds_waitset_t;
 
-typedef enum nb_dds_backend {
-    NB_DDS_BACKEND_RTPS = 0 /* in-tree RTPS engine (the only built-in backend) */
-} nb_dds_backend_t;
-
-/* RTPS backend tuning. All fields are optional; 0/NULL selects the engine
+/* RTPS engine tuning. All fields are optional; 0/NULL selects the engine
  * default. peers entries are "host:port" unicast SPDP targets, which keeps
  * tests and single-host deployments away from multicast. */
 typedef struct nb_dds_rtps_options {
@@ -61,7 +57,6 @@ typedef struct nb_dds_rtps_options {
 } nb_dds_rtps_options_t;
 
 typedef struct nb_dds_participant_options {
-    nb_dds_backend_t backend;
     uint32_t domain;
     /* Default partition/prefix/QoS. Topic and endpoint QoS may override them. */
     const char *partition;
@@ -96,7 +91,6 @@ int nb_dds_participant_create(const nb_dds_participant_options_t *options,
                               nb_dds_participant_t **out);
 void nb_dds_participant_destroy(nb_dds_participant_t *participant);
 const char *nb_dds_participant_name(const nb_dds_participant_t *participant);
-nb_dds_backend_t nb_dds_participant_backend(const nb_dds_participant_t *participant);
 
 /* Status events run on the backend thread; the application must not call back
  * into the same participant from the callback. */

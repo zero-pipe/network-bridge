@@ -63,10 +63,7 @@ int nb_dds_participant_create(const nb_dds_participant_options_t *options,
         return NB_ERR_INVALID;
     }
     *out = NULL;
-    ops = nb_dds_backend_find(options->backend);
-    if (!ops) {
-        return NB_ERR_NOT_SUPPORTED;
-    }
+    ops = &nb_dds_rtps_backend_ops;
     participant = (nb_dds_participant_t *)calloc(1, sizeof(*participant));
     if (!participant) {
         return NB_ERR_NOMEM;
@@ -85,7 +82,6 @@ int nb_dds_participant_create(const nb_dds_participant_options_t *options,
         !(participant->default_qos.present & NB_DDS_QOS_PRESENT_PARTITION)) {
         nb_dds_qos_set_partition(&participant->default_qos, participant->partition);
     }
-    participant->backend_id = options->backend;
     participant->ops = ops;
     participant->lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     if (!participant->lock) {
@@ -149,11 +145,6 @@ void nb_dds_participant_destroy(nb_dds_participant_t *participant)
 const char *nb_dds_participant_name(const nb_dds_participant_t *participant)
 {
     return participant ? participant->name : "";
-}
-
-nb_dds_backend_t nb_dds_participant_backend(const nb_dds_participant_t *participant)
-{
-    return participant ? participant->backend_id : NB_DDS_BACKEND_RTPS;
 }
 
 int nb_dds_participant_set_status_callback(nb_dds_participant_t *participant,

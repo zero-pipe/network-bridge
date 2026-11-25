@@ -217,7 +217,7 @@ DDS 面使用 `nb_dds_participant_t` / `nb_dds_topic_t` / `nb_dds_reader_t`，
 ```c
 #include <nb/dds.h>
 
-nb_dds_participant_options_t popt = { .backend = NB_DDS_BACKEND_RTPS, .domain = 0 };
+nb_dds_participant_options_t popt = { .domain = 0 };
 nb_dds_participant_t *part = NULL;
 nb_dds_participant_create(&popt, &part);
 
@@ -413,7 +413,7 @@ provider 接口只描述点对点 RPC 链路：
   （按路由扇出 RPC EVENT，只有 shm 实现）。
 
 `nb_transport_provider_ops_t` 不再包含发布/订阅角色、QoS 或 topic 注册；
-DDS 后端由 `nb_dds_backend_ops_t` 单独定义。
+DDS 面由内建 RTPS 引擎承载，与 provider SPI 无关。
 
 指针生命周期规则：`options.endpoint` 在实例生命周期内有效；`message` 及其
 `payload`/`metadata` 指针只在当前回调内有效；`frame_owner` 归核心所有，由
@@ -426,20 +426,18 @@ provider SPI 只使用三个公共对象：
 - `nb_message_t`：与核心内部相同的消息结构；不存在第二份 provider 消息拷贝。
 - `nb_metrics_t`：可选的计数合并。
 
-## DDS 后端
+## DDS 引擎
 
-DDS 面不再经过 RPC provider。`nb_dds_participant_create` 用枚举选择后端：
+DDS 面不再经过 RPC provider，固定使用内建 RTPS 引擎（不再有后端选择）：
 
 ```c
-nb_dds_participant_options_t popt = { .backend = NB_DDS_BACKEND_RTPS, .domain = 0 };
+nb_dds_participant_options_t popt = { .domain = 0 };
 nb_dds_participant_create(&popt, &part);
 ```
 
-- `NB_DDS_BACKEND_RTPS`：内建 RTPS 引擎，也是唯一的内建后端。
-- 后端 SPI 仍保留（`nb_dds_backend_register`），自定义后端可以按 id 注册。
-
-内建 RTPS 后端使用统一的 DDS 默认 QoS 和线上类型 `dds::Message`，因此与
-Cyclone DDS / Fast DDS 在线缆上可以互通。
+内建 RTPS 引擎使用统一的 DDS 默认 QoS。线上类型默认 `dds::Message`（不透明字节，
+长度精确）；topic 传真实 IDL 类型名时按裸 CDR body 发送，可与 Cyclone DDS /
+Fast DDS 在线缆上互通，编解码由应用（IDL 生成代码）负责。
 具体接口见 `<nb/dds.h>`。
 ## 发现视图
 

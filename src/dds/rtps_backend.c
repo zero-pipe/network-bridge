@@ -1,5 +1,5 @@
-/* DDS backend: in-tree RTPS engine adapter. */
-#include <nb/dds/backend.h>
+/* DDS backend: in-tree RTPS engine adapter (the only DDS engine). */
+#include "dds_internal.h"
 
 #include <nb/base/error.h>
 
@@ -594,10 +594,6 @@ static void nb_dds_rtps_metrics_read(const void *participant, nb_dds_metrics_t *
 }
 
 const nb_dds_backend_ops_t nb_dds_rtps_backend_ops = {
-    .abi_version = NB_DDS_BACKEND_ABI_VERSION,
-    .struct_size = sizeof(nb_dds_backend_ops_t),
-    .id = NB_DDS_BACKEND_RTPS,
-    .name = "rtps",
     .participant_create = nb_dds_rtps_participant_create,
     .participant_destroy = nb_dds_rtps_participant_destroy,
     .participant_start = nb_dds_rtps_participant_start,

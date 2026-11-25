@@ -168,7 +168,6 @@ static int make_participant(uint32_t domain,
     rtps.peer_count = 1;
 
     memset(&options, 0, sizeof(options));
-    options.backend = NB_DDS_BACKEND_RTPS;
     options.domain = domain;
     options.prefix = "dds-bench";
     options.name = "dds-bench";

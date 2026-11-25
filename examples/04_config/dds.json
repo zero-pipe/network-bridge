@@ -3,7 +3,6 @@
   "threads": { "io": 1 },
   "log": { "enabled": true, "level": "info" },
   "dds": {
-    "backend": "rtps",
     "domain": 70,
     "partition": "example",
     "prefix": "app",

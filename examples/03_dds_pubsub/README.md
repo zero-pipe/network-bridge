@@ -24,5 +24,5 @@ binding、路由或 zn_discovery。
   DDS 默认值。
 - 同一个 participant 上的 writer/reader 由框架做进程内投递，后端只负责远端；
   两个进程互通时使用相同的 domain、partition 和 topic 名即可。
-- `backend` 固定为 `NB_DDS_BACKEND_RTPS`：内建 RTPS 是唯一后端，线上格式与
+- 固定使用内建 RTPS 引擎（无需也不再有 `backend` 选项），线上格式与
   Cyclone DDS / Fast DDS 互通。

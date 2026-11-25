@@ -9,12 +9,62 @@
 
 #include "sample_queue.h"
 
+/*
+ * The spine is bound to the in-tree RTPS engine through this vtable. It is an
+ * internal binding, not a pluggable backend SPI: RTPS is the only DDS engine.
+ */
+typedef void (*nb_dds_backend_on_sample_fn)(void *user,
+                                            const void *data,
+                                            size_t len,
+                                            uint32_t encoding,
+                                            const nb_dds_sample_info_t *info);
+
+typedef struct nb_dds_backend_ops {
+    int (*participant_create)(const nb_dds_participant_options_t *options, void **out);
+    void (*participant_destroy)(void *participant);
+    int (*participant_start)(void *participant);
+    void (*participant_stop)(void *participant);
+
+    int (*topic_create)(void *participant,
+                        const char *wire_name,
+                        const char *type_name,
+                        const nb_dds_qos_t *qos,
+                        void **out);
+    void (*topic_destroy)(void *participant, void *topic);
+
+    int (*writer_create)(void *participant,
+                         void *topic,
+                         const nb_dds_qos_t *qos,
+                         void **out);
+    int (*writer_write)(void *writer, const void *data, size_t len);
+    void (*writer_destroy)(void *participant, void *writer);
+
+    int (*reader_create)(void *participant,
+                         void *topic,
+                         const nb_dds_qos_t *qos,
+                         nb_dds_backend_on_sample_fn on_sample,
+                         void *user,
+                         void **out);
+    void (*reader_destroy)(void *participant, void *reader);
+
+    int (*set_status_callback)(void *participant,
+                               nb_dds_status_callback_t callback,
+                               void *user);
+    size_t (*discovery_read)(void *participant,
+                             nb_dds_builtin_topic_t topic,
+                             nb_dds_discovery_sample_t *out,
+                             size_t max);
+    void (*metrics_read)(const void *participant, nb_dds_metrics_t *out);
+} nb_dds_backend_ops_t;
+
+/* The single backend: the in-tree RTPS engine (rtps_backend.c). */
+extern const nb_dds_backend_ops_t nb_dds_rtps_backend_ops;
+
 struct nb_dds_participant {
     char name[NB_NAME_MAX];
     char prefix[NB_DDS_TOPIC_NAME_MAX];
     char partition[NB_DDS_QOS_PARTITION_MAX];
     nb_dds_qos_t default_qos;
-    nb_dds_backend_t backend_id;
     const nb_dds_backend_ops_t *ops;
     void *backend;
     zb_mutex *lock; /* protects topics/status callback/backend lifetime */

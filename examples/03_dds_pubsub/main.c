@@ -64,7 +64,6 @@ int main(void)
     make_qos(&qos);
 
     memset(&popt, 0, sizeof(popt));
-    popt.backend = NB_DDS_BACKEND_RTPS;
     popt.domain = 70;
     popt.prefix = "example";
     popt.name = "dds-pubsub-example";

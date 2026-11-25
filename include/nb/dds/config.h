@@ -6,7 +6,7 @@
  *
  * A document may also contain an `rpc` block; this parser ignores it. The DDS
  * spine is independent of the RPC node: it reads name/log plus the `dds` block
- * (backend, domain, partition, prefix, QoS, backend tuning).
+ * (domain, partition, prefix, name, QoS, engine tuning).
  */
 
 #include <nb/base/config_error.h>
@@ -49,7 +49,6 @@ typedef struct nb_dds_rtps_config {
 } nb_dds_rtps_config_t;
 
 typedef struct nb_dds_config {
-    nb_dds_backend_t backend;
     uint32_t domain;
     char partition[NB_DDS_QOS_PARTITION_MAX];
     char prefix[NB_DDS_TOPIC_NAME_MAX];

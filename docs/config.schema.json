@@ -173,13 +173,8 @@
     },
     "dds": {
       "type": "object",
-      "description": "DDS 主干：participant/topic/writer/reader，后端固定为内建 rtps。不依赖 RPC node。",
+      "description": "DDS 主干：participant/topic/writer/reader，固定使用内建 RTPS 引擎。不依赖 RPC node。",
       "properties": {
-        "backend": {
-          "type": "string",
-          "enum": ["rtps"],
-          "description": "DDS 后端。只支持内建 rtps（唯一后端），其它取值报错。"
-        },
         "domain": {
           "type": "integer",
           "minimum": 0,
