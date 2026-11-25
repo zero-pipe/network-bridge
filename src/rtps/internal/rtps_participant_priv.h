@@ -259,7 +259,26 @@ typedef struct nb_rtps_targets {
     uint16_t port[NB_RTPS_DATA_TARGET_MAX];
 } nb_rtps_targets_t;
 
+/*
+ * 参与者状态。并发契约（改动任何字段前先核对这一条）：
+ *
+ * - `lock` 保护全部动态表及其 *_used 稠密索引与计数：
+ *     remotes[], remote_endpoints[], local_endpoints[], data_readers[],
+ *     next_entity_key, frag_assemblies[], frag_bytes_in_use。
+ *   热路径遍历 *_used 而不是整表；增删都必须在同一把锁下维护对应 *_used。
+ * - 回调指针（callback / endpoint_callback / data_callback / status_callback
+ *   及 *_user）由 setter 在 lock 下写入；调用方在锁内取快照、解锁后再回调，
+ *   回调期间不得持锁。
+ * - 参与者线程节拍（next_announce_ms / next_sweep_ms / next_sedp_heartbeat_ms /
+ *   next_data_heartbeat_ms / next_pmd_ms / pmd_interval_ms / pmd_sn / spdp_sn）
+ *   只由 thread_main 读写，其它线程不得触碰。
+ * - 配置字段（bind_host … data_port、max_*、peers、local_guid、metatraffic_*）
+ *   在 create 之后只读。
+ * - `stop` 是跨线程停止标志（volatile）；其余字段要么受 lock 保护，要么线程
+ *   私有/只读，禁止无锁写入。
+ */
 struct nb_rtps_participant {
+    /* ---- 配置：create 之后只读 ---- */
     char bind_host[NB_RTPS_PEER_HOST_MAX];
     char advertise_host[NB_RTPS_PEER_HOST_MAX];
     char multicast_group[NB_RTPS_PEER_HOST_MAX];
@@ -285,6 +304,7 @@ struct nb_rtps_participant {
     /* TCP locator, Invalid when the participant is UDP-only. */
     nb_rtps_locator_t metatraffic_tcp;
 
+    /* ---- socket / 线程 / 锁（create 之后只读） ---- */
     zn_socket *rx_sock;
     zn_socket *unicast_sock;
     /* Standard mapping only: user-data unicast port (d3+PG*pid). NULL means
@@ -294,6 +314,8 @@ struct nb_rtps_participant {
     zn_poller *poller;
     zb_thread *thread;
     zb_mutex *lock;
+
+    /* ---- 由 lock 保护的动态状态：表、计数、回调快照源 ---- */
     nb_rtps_remote_participant_t *remotes;
     nb_rtps_participant_callback_t callback;
     void *callback_user;
@@ -337,9 +359,8 @@ struct nb_rtps_participant {
     size_t max_frag_assemblies;
     size_t frag_bytes_in_use;
     uint32_t frag_heartbeat_count;
-    volatile int stop;
-    int started;
-    uint32_t rng;
+
+    /* ---- 参与者线程节拍：仅 thread_main 读写 ---- */
     uint64_t spdp_sn;
     uint64_t next_announce_ms;
     uint64_t next_sweep_ms;
@@ -350,8 +371,15 @@ struct nb_rtps_participant {
     uint32_t pmd_interval_ms;
     uint64_t pmd_sn;
     uint64_t next_pmd_ms;
+
+    /* ---- 跨线程标志与统计 ---- */
+    volatile int stop;
+    int started;
+    uint32_t rng;
     nb_rtps_stats_t stats;
     int dump_frames;
+
+    /* ---- TCP ---- */
     nb_rtps_tcp_t *tcp;
 };
 
@@ -451,14 +479,51 @@ int locator_to_host_any(const nb_rtps_locator_t *locator, char *host, size_t cap
 void send_pmd(nb_rtps_participant_t *participant, uint32_t kind);
 void maybe_tcp_connect(nb_rtps_participant_t *participant, const nb_rtps_guid_prefix_t *prefix);
 
+/* ---- 跨编译单元共享的参与者内部函数 ---- */
+/* 接收 socket 排空（rtps_participant.c）由调度线程调用。 */
+void drain_socket(nb_rtps_participant_t *participant, zn_socket *socket);
+/* 调度线程主体与 TCP 链路维护（rtps_schedule.c / rtps_tcp_link.c）。 */
+void thread_main(void *user);
+void retry_tcp_links(nb_rtps_participant_t *participant);
+void tcp_on_message(void *user,
+                    int index,
+                    const nb_rtps_header_t *header,
+                    const nb_rtps_submessage_view_t *view,
+                    nb_rtps_receiver_state_t *state);
+void tcp_on_link(void *user, int index);
+void tcp_on_unlink(void *user, int index);
+/* 端点增删后重放匹配事件（rtps_matching.c）。 */
+void notify_matches_for_local(nb_rtps_participant_t *participant,
+                              const nb_rtps_guid_t *local_guid);
+/* 匹配判定与计数（rtps_matching.c）：被匹配重放与统计共用。 */
+const char *endpoint_qos_mismatch(
+    const nb_rtps_endpoint_info_t *publication,
+    const nb_rtps_endpoint_info_t *subscription);
+uint32_t matched_remote_count(nb_rtps_participant_t *participant,
+                              const nb_rtps_local_endpoint_t *local);
+/* 单条子消息分派（rtps_participant.c），TCP 链路复用同一路径。 */
+void handle_submessage(nb_rtps_participant_t *participant,
+                       const nb_rtps_header_t *header,
+                       const nb_rtps_submessage_view_t *view,
+                       nb_rtps_receiver_state_t *state,
+                       const char *source_host,
+                       uint16_t source_port);
+
+/* Origin of one received datagram, threaded through the receive path so the
+ * handlers carry one argument instead of prefix/host/port/timestamp each. The
+ * pointers borrow from the caller's stack for the duration of the call. */
+typedef struct nb_rtps_rx_ctx {
+    const nb_rtps_guid_prefix_t *prefix;
+    const char *host;
+    uint16_t port;
+    const nb_rtps_time_t *source_ts; /* NULL when the datagram carried none */
+} nb_rtps_rx_ctx_t;
+
 /* ---- 由 rtps_datapath.c 提供给参与者调度使用 ---- */
 void dispatch_data_view(
     nb_rtps_participant_t *participant,
     const nb_rtps_data_view_t *data,
-    const nb_rtps_time_t *source_ts,
-    const nb_rtps_guid_prefix_t *prefix,
-    const char *source_host,
-    uint16_t source_port);
+    const nb_rtps_rx_ctx_t *rx);
 nb_rtps_instance_t *get_instance(
     nb_rtps_local_endpoint_t *local,
     const uint8_t *handle,
@@ -466,36 +531,27 @@ nb_rtps_instance_t *get_instance(
 void handle_data_frag(
     nb_rtps_participant_t *participant,
     const nb_rtps_data_frag_t *fragment,
-    const nb_rtps_time_t *source_ts,
-    const nb_rtps_guid_prefix_t *prefix,
-    const char *source_host,
-    uint16_t source_port);
+    const nb_rtps_rx_ctx_t *rx);
 void handle_user_acknack(
     nb_rtps_participant_t *participant,
     const nb_rtps_acknack_t *acknack,
-    const nb_rtps_guid_prefix_t *source_prefix,
-    const char *source_host,
-    uint16_t source_port);
+    const nb_rtps_rx_ctx_t *rx);
 void handle_user_gap(
     nb_rtps_participant_t *participant,
     const nb_rtps_gap_t *gap,
-    const nb_rtps_guid_prefix_t *source_prefix);
+    const nb_rtps_rx_ctx_t *rx);
 void handle_user_heartbeat(
     nb_rtps_participant_t *participant,
     const nb_rtps_heartbeat_t *heartbeat,
-    const nb_rtps_guid_prefix_t *source_prefix,
-    const char *source_host,
-    uint16_t source_port);
+    const nb_rtps_rx_ctx_t *rx);
 void handle_user_heartbeat_frag(
     nb_rtps_participant_t *participant,
     const nb_rtps_heartbeat_frag_t *heartbeat,
-    const nb_rtps_guid_prefix_t *source_prefix);
+    const nb_rtps_rx_ctx_t *rx);
 void handle_user_nack_frag(
     nb_rtps_participant_t *participant,
     const nb_rtps_nack_frag_t *nack,
-    const nb_rtps_guid_prefix_t *source_prefix,
-    const char *source_host,
-    uint16_t source_port);
+    const nb_rtps_rx_ctx_t *rx);
 void mark_instances_no_writers(nb_rtps_local_endpoint_t *local, const nb_rtps_guid_t *writer);
 int sample_expired(const nb_rtps_local_endpoint_t *local, uint64_t sn, uint64_t now);
 void send_data_heartbeats(nb_rtps_participant_t *participant);

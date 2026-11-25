@@ -801,16 +801,243 @@ static void emit_queued_status(nb_rtps_participant_t *participant,
     }
     callback(user, &event);
 }
+/* Build the SampleInfo for an incoming DATA sample: disposition from the DATA
+ * submessage flags and the inline PID_STATUS_INFO, plus the key hash (which
+ * decides instance tracking) and the source timestamp. */
+static void derive_sample_info(const nb_rtps_data_view_t *data,
+                               nb_sample_info_t *sample,
+                               uint8_t instance_handle[NB_INSTANCE_HANDLE_SIZE],
+                               int *has_instance_handle)
+{
+    uint8_t key_hash[NB_RTPS_KEY_HASH_SIZE];
+    int disposed = 0;
+    int unregistered = 0;
+    int has_key_hash = 0;
+
+    memset(sample, 0, sizeof(*sample));
+    sample->reception_timestamp_ns = (int64_t)(zn_wall_ms() * 1000000ull);
+    /* Dispose and unregister reach the application as a sample that is not
+     * alive, the way DDS SampleInfo reports them. The writers that can express
+     * it do so either with the DATA submessage flags (key-only / dispose) or
+     * with PID_STATUS_INFO in the inline QoS; both are accepted. */
+    (void)nb_rtps_inline_qos_status(data->inline_qos,
+                                    data->inline_qos_len,
+                                    &disposed,
+                                    &unregistered,
+                                    key_hash,
+                                    &has_key_hash);
+    /* PID_STATUS_INFO is authoritative when the peer sent it: a key-only
+     * sample alone cannot say whether the writer disposed the instance or just
+     * unregistered, and the DATA decoder has to report the former for peers
+     * that omit the status bits. */
+    if (unregistered) {
+        sample->state = NB_SAMPLE_STATE_NO_WRITERS;
+    } else if (data->dispose || disposed) {
+        sample->state = NB_SAMPLE_STATE_DISPOSED;
+    } else if (data->key) {
+        /* KEY set without PID_STATUS_INFO: the payload is a key, so the sample
+         * reports a state change rather than a new value. */
+        sample->state = NB_SAMPLE_STATE_DISPOSED;
+    } else {
+        sample->state = NB_SAMPLE_STATE_VALID;
+    }
+    if (has_key_hash) {
+        sample->has_instance_handle = true;
+        memcpy(sample->instance_handle, key_hash, sizeof(key_hash));
+        memcpy(instance_handle, key_hash, sizeof(key_hash));
+        *has_instance_handle = 1;
+    }
+    if (data->has_source_ts) {
+        sample->source_timestamp_ns = (int64_t)rtps_time_to_ns(&data->source_ts);
+    }
+}
+
+/* Record a sample one local endpoint refused: count it for status and queue a
+ * SAMPLE_REJECTED event attributed to that endpoint. */
+static void reject_sample(nb_rtps_participant_t *participant,
+                          nb_rtps_local_endpoint_t *local,
+                          nb_rtps_queued_status_t *queued,
+                          size_t *queued_count,
+                          const char *reason)
+{
+    local->sample_rejected_count++;
+    participant->stats.samples_dropped++;
+    queue_status_event(queued,
+                       queued_count,
+                       NB_RTPS_MAX_DATA_TARGETS,
+                       NB_RTPS_STATUS_SAMPLE_REJECTED,
+                       &local->info.endpoint_guid,
+                       local->sample_rejected_count,
+                       reason);
+}
+
+/* Apply DESTINATION_ORDER (BY_SOURCE) and TIME_BASED_FILTER to one candidate
+ * sample for one local endpoint. Returns a rejection reason, or NULL when the
+ * sample may be delivered.
+ *
+ * BY_SOURCE_TIMESTAMP: a sample stamped at or before the last delivered one
+ * arrives out of order and is discarded, which is what Cyclone does for its
+ * reader history. Without a timestamp the sample keeps reception order;
+ * matching still requires both ends to announce the same policy, so this only
+ * affects peers that asked for source ordering.
+ *
+ * TIME_BASED_FILTER: a sample stamped less than the requested minimum
+ * separation after the last delivered one is dropped, the same test Cyclone
+ * applies on insertion into its reader history.
+ *
+ * Both policies only advance their timestamp when a sample is actually
+ * delivered, so a sample rejected by either does not make the next one look
+ * too early. */
+static const char *time_filter_reject(nb_rtps_local_endpoint_t *local,
+                                      const nb_rtps_data_view_t *data,
+                                      nb_sample_state_t state)
+{
+    uint64_t source_ns;
+
+    if (!data->has_source_ts) {
+        return NULL;
+    }
+    source_ns = (uint64_t)rtps_time_to_ns(&data->source_ts);
+
+    if (local->info.destination_order == NB_RTPS_DESTINATION_ORDER_BY_SOURCE &&
+        local->has_last_source && source_ns <= local->last_source_ns) {
+        return "destination order";
+    }
+    if (local->info.min_separation_ms > 0 &&
+        state == NB_SAMPLE_STATE_VALID &&
+        local->has_last_filtered &&
+        source_ns <
+            local->last_filtered_ns +
+                (uint64_t)local->info.min_separation_ms * 1000000ull) {
+        return "time based filter";
+    }
+    if (local->info.destination_order == NB_RTPS_DESTINATION_ORDER_BY_SOURCE) {
+        local->has_last_source = 1;
+        local->last_source_ns = source_ns;
+    }
+    if (local->info.min_separation_ms > 0) {
+        local->has_last_filtered = 1;
+        local->last_filtered_ns = source_ns;
+    }
+    return NULL;
+}
+
+/* Fill the per-instance parts of SampleInfo for one local endpoint: the
+ * instance keeps its generation rank while it stays alive and gets a new one
+ * when a writer registers it again, and the view is NEW only for the sample
+ * that brings a fresh instance to the reader. Returns 0 when the endpoint has
+ * no room for another instance. */
+static int fill_instance_sample_info(nb_rtps_local_endpoint_t *local,
+                                     const nb_rtps_guid_t *writer_guid,
+                                     const uint8_t *instance_handle,
+                                     int has_instance_handle,
+                                     nb_sample_info_t *sample)
+{
+    nb_rtps_instance_t *instance;
+
+    if (!has_instance_handle) {
+        return 1;
+    }
+    instance = get_instance(local, instance_handle, writer_guid);
+    if (!instance) {
+        return 0;
+    }
+    if (sample->state == NB_SAMPLE_STATE_VALID) {
+        /* NEW means "the reader has not seen this instance, or the instance was
+         * re-registered since it last saw it". */
+        int fresh = !instance->seen ||
+                    instance->state != NB_INSTANCE_STATE_ALIVE;
+
+        if (instance->state != NB_INSTANCE_STATE_ALIVE) {
+            instance->generation_rank++;
+        }
+        sample->view_state = fresh ? NB_VIEW_STATE_NEW : NB_VIEW_STATE_NOT_NEW;
+        instance->state = NB_INSTANCE_STATE_ALIVE;
+        instance->seen = 1;
+    } else if (sample->state == NB_SAMPLE_STATE_DISPOSED) {
+        sample->view_state = NB_VIEW_STATE_NOT_NEW;
+        instance->state = NB_INSTANCE_STATE_NOT_ALIVE_DISPOSED;
+    } else {
+        sample->view_state = NB_VIEW_STATE_NOT_NEW;
+        instance->state = NB_INSTANCE_STATE_NOT_ALIVE_NO_WRITERS;
+    }
+    sample->instance_state = instance->state;
+    sample->generation_rank = (int32_t)instance->generation_rank;
+    return 1;
+}
+
+/* Hand the accepted samples to the data callback. A sample whose state is not
+ * VALID carries only metadata (dispose/unregister); a dds::Message payload is
+ * deserialized once and reused, any other type is handed over as its XCDR1
+ * body so the application can run its own codec. */
+static void deliver_samples(nb_rtps_data_callback_t callback,
+                            void *user,
+                            const nb_rtps_guid_t *writer_guid,
+                            uint64_t sample_sn,
+                            const nb_rtps_data_view_t *data,
+                            const nb_rtps_guid_t *readers,
+                            const uint8_t *dds_reader,
+                            const nb_sample_info_t *samples,
+                            size_t reader_count)
+{
+    nb_rtps_dds_message_t message;
+    int dds_parsed = 0;
+    int dds_ok = 0;
+    size_t i;
+
+    if (!callback) {
+        return;
+    }
+    for (i = 0; i < reader_count; i++) {
+        nb_rtps_dds_message_t view;
+        nb_sample_info_t delivered = samples[i];
+
+        /* A state-change notification has no payload: hand the application the
+         * metadata only, so it can react to the instance rather than to data. */
+        if (delivered.state != NB_SAMPLE_STATE_VALID) {
+            memset(&view, 0, sizeof(view));
+            view.sample = delivered;
+            view.writer_sn = sample_sn;
+            callback(user, &readers[i], writer_guid, &view);
+            continue;
+        }
+        if (dds_reader[i]) {
+            if (!dds_parsed) {
+                dds_parsed = 1;
+                dds_ok = nb_rtps_dds_message_deserialize(
+                             data->payload, data->payload_len, &message) == NB_OK;
+            }
+            if (!dds_ok) {
+                continue;
+            }
+            view = message;
+            view.sample = delivered;
+        } else {
+            /* Any other type travels as an XCDR1 encapsulated sample. Hand the
+             * application the CDR body; it owns the codec for its own type. */
+            if (data->payload_len <= NB_RTPS_CDR_HEADER_SIZE ||
+                data->payload[0] != 0x00 ||
+                (data->payload[1] != 0x01 && data->payload[1] != 0x03)) {
+                continue;
+            }
+            view.payload = data->payload + NB_RTPS_CDR_HEADER_SIZE;
+            view.payload_len = data->payload_len - NB_RTPS_CDR_HEADER_SIZE;
+            view.sample = delivered;
+        }
+        view.writer_sn = sample_sn;
+        callback(user, &readers[i], writer_guid, &view);
+    }
+}
+
 static void handle_user_data(nb_rtps_participant_t *participant,
                              const nb_rtps_data_view_t *data,
                              const nb_rtps_guid_prefix_t *source_prefix)
 {
-    nb_rtps_dds_message_t message;
-    uint8_t dds_reader[NB_RTPS_MAX_DATA_TARGETS];
     nb_rtps_guid_t writer_guid;
     nb_rtps_guid_t readers[NB_RTPS_MAX_DATA_TARGETS];
     nb_sample_info_t samples[NB_RTPS_MAX_DATA_TARGETS];
     nb_rtps_queued_status_t queued[NB_RTPS_MAX_DATA_TARGETS];
+    uint8_t dds_reader[NB_RTPS_MAX_DATA_TARGETS];
     nb_rtps_data_callback_t callback;
     void *user;
     nb_rtps_remote_endpoint_t *remote;
@@ -819,8 +1046,6 @@ static void handle_user_data(nb_rtps_participant_t *participant,
     size_t reader_count = 0;
     size_t queued_count = 0;
     int has_instance_handle = 0;
-    int dds_parsed = 0;
-    int dds_ok = 0;
     uint64_t sample_sn;
     size_t i;
 
@@ -834,50 +1059,7 @@ static void handle_user_data(nb_rtps_participant_t *participant,
     writer_guid.prefix = *source_prefix;
     writer_guid.entity = data->writer_id;
 
-    /* Dispose and unregister reach the application as a sample that is not
-     * alive, the way DDS SampleInfo reports them. The writers that can express
-     * it do so either with the DATA submessage flags (key-only / dispose) or
-     * with PID_STATUS_INFO in the inline QoS; both are accepted. */
-    {
-        uint8_t key_hash[NB_RTPS_KEY_HASH_SIZE];
-        int disposed = 0;
-        int unregistered = 0;
-        int has_key_hash = 0;
-
-        memset(&sample, 0, sizeof(sample));
-        sample.reception_timestamp_ns = (int64_t)(zn_wall_ms() * 1000000ull);
-        (void)nb_rtps_inline_qos_status(data->inline_qos,
-                                       data->inline_qos_len,
-                                       &disposed,
-                                       &unregistered,
-                                       key_hash,
-                                       &has_key_hash);
-        /* PID_STATUS_INFO is authoritative when the peer sent it: a key-only
-         * sample alone cannot say whether the writer disposed the instance or
-         * just unregistered, and the DATA decoder has to report the former for
-         * peers that omit the status bits. */
-        if (unregistered) {
-            sample.state = NB_SAMPLE_STATE_NO_WRITERS;
-        } else if (data->dispose || disposed) {
-            sample.state = NB_SAMPLE_STATE_DISPOSED;
-        } else if (data->key) {
-            /* KEY set without PID_STATUS_INFO: the payload is a key, so the
-             * sample reports a state change rather than a new value. */
-            sample.state = NB_SAMPLE_STATE_DISPOSED;
-        } else {
-            sample.state = NB_SAMPLE_STATE_VALID;
-        }
-        if (has_key_hash) {
-            sample.has_instance_handle = true;
-            memcpy(sample.instance_handle, key_hash, sizeof(key_hash));
-            memcpy(instance_handle, key_hash, sizeof(key_hash));
-            has_instance_handle = 1;
-        }
-        if (data->has_source_ts) {
-            sample.source_timestamp_ns =
-                (int64_t)rtps_time_to_ns(&data->source_ts);
-        }
-    }
+    derive_sample_info(data, &sample, instance_handle, &has_instance_handle);
 
     zb_mutex_lock(participant->lock);
     callback = participant->data_callback;
@@ -888,6 +1070,7 @@ static void handle_user_data(nb_rtps_participant_t *participant,
             nb_rtps_local_endpoint_t *local =
                 &participant->local_endpoints[participant->local_used[i]];
             nb_rtps_data_reader_state_t *reader_state;
+            const char *reject;
 
             if (!local->used ||
                 !data_endpoint_matches(local, remote) ||
@@ -903,9 +1086,10 @@ static void handle_user_data(nb_rtps_participant_t *participant,
              * DATA submessage, a retransmit that was already handled, or the
              * same sample sent to several of our locators must not reach the
              * application twice. The window advances even without a callback so
-             * a reliable reader does not request the same samples forever. */
-            /* A window is normally opened by the first sample that arrives,
-             * but starting it at that sample's sequence number loses both a
+             * a reliable reader does not request the same samples forever.
+             *
+             * A window is normally opened by the first sample that arrives, but
+             * starting it at that sample's sequence number loses both a
              * reordered older sample and the retained history a durable
              * subscription is entitled to. Durable readers therefore start at
              * the beginning of the sequence space and let the writer GAP what
@@ -934,120 +1118,22 @@ static void handle_user_data(nb_rtps_participant_t *participant,
              * not keep asking for a sample it will never be given. */
             if (local->info.ownership == NB_RTPS_OWNERSHIP_EXCLUSIVE &&
                 !writer_owns(participant, local, remote)) {
-                local->sample_rejected_count++;
-                participant->stats.samples_dropped++;
-                queue_status_event(queued,
-                                   &queued_count,
-                                   NB_RTPS_MAX_DATA_TARGETS,
-                                   NB_RTPS_STATUS_SAMPLE_REJECTED,
-                                   &local->info.endpoint_guid,
-                                   local->sample_rejected_count,
-                                   "ownership");
+                reject_sample(participant, local, queued, &queued_count,
+                              "ownership");
                 continue;
             }
-            /* BY_SOURCE_TIMESTAMP: a sample stamped at or before the last
-             * delivered one arrives out of order and is discarded, which is what
-             * Cyclone does for its reader history. Without a timestamp the
-             * sample keeps reception order; matching still requires both ends
-             * to announce the same policy, so this only affects peers that
-             * asked for source ordering.
-             *
-             * TIME_BASED_FILTER: a sample stamped less than the requested
-             * minimum separation after the last delivered one is dropped, the
-             * same test Cyclone applies on insertion into its reader history.
-             * Both policies only advance their timestamp when a sample is
-             * actually delivered, so a sample rejected by one of them does not
-             * make the next one look too early. */
-            {
-                int has_source = data->has_source_ts != 0;
-                uint64_t source_ns =
-                    has_source ? (uint64_t)rtps_time_to_ns(&data->source_ts) : 0;
-
-                if (has_source &&
-                    local->info.destination_order == NB_RTPS_DESTINATION_ORDER_BY_SOURCE &&
-                    local->has_last_source && source_ns <= local->last_source_ns) {
-                    local->sample_rejected_count++;
-                    participant->stats.samples_dropped++;
-                    queue_status_event(queued,
-                                       &queued_count,
-                                       NB_RTPS_MAX_DATA_TARGETS,
-                                       NB_RTPS_STATUS_SAMPLE_REJECTED,
-                                       &local->info.endpoint_guid,
-                                       local->sample_rejected_count,
-                                       "destination order");
-                    continue;
-                }
-                if (has_source && local->info.min_separation_ms > 0 &&
-                    sample.state == NB_SAMPLE_STATE_VALID &&
-                    local->has_last_filtered &&
-                    source_ns <
-                        local->last_filtered_ns +
-                            (uint64_t)local->info.min_separation_ms * 1000000ull) {
-                    local->sample_rejected_count++;
-                    participant->stats.samples_dropped++;
-                    queue_status_event(queued,
-                                       &queued_count,
-                                       NB_RTPS_MAX_DATA_TARGETS,
-                                       NB_RTPS_STATUS_SAMPLE_REJECTED,
-                                       &local->info.endpoint_guid,
-                                       local->sample_rejected_count,
-                                       "time based filter");
-                    continue;
-                }
-                if (has_source &&
-                    local->info.destination_order == NB_RTPS_DESTINATION_ORDER_BY_SOURCE) {
-                    local->has_last_source = 1;
-                    local->last_source_ns = source_ns;
-                }
-                if (has_source && local->info.min_separation_ms > 0) {
-                    local->has_last_filtered = 1;
-                    local->last_filtered_ns = source_ns;
-                }
+            reject = time_filter_reject(local, data, sample.state);
+            if (reject) {
+                reject_sample(participant, local, queued, &queued_count, reject);
+                continue;
             }
-            /* Per-instance state, exactly what DDS puts in SampleInfo: the
-             * instance keeps its generation rank while it stays alive and gets
-             * a new one when a writer registers it again, and the view is NEW
-             * only for the sample that brings a fresh instance to the reader. */
             samples[reader_count] = sample;
-            if (has_instance_handle) {
-                nb_rtps_instance_t *instance =
-                    get_instance(local, instance_handle, &writer_guid);
-
-                if (!instance) {
-                    local->sample_rejected_count++;
-                    participant->stats.samples_dropped++;
-                    queue_status_event(queued,
-                                       &queued_count,
-                                       NB_RTPS_MAX_DATA_TARGETS,
-                                       NB_RTPS_STATUS_SAMPLE_REJECTED,
-                                       &local->info.endpoint_guid,
-                                       local->sample_rejected_count,
-                                       "resource limits");
-                    continue;
-                }
-                if (samples[reader_count].state == NB_SAMPLE_STATE_VALID) {
-                    /* NEW means "the reader has not seen this instance, or the
-                     * instance was re-registered since it last saw it". */
-                    int fresh = !instance->seen ||
-                                instance->state != NB_INSTANCE_STATE_ALIVE;
-
-                    if (instance->state != NB_INSTANCE_STATE_ALIVE) {
-                        instance->generation_rank++;
-                    }
-                    samples[reader_count].view_state =
-                        fresh ? NB_VIEW_STATE_NEW : NB_VIEW_STATE_NOT_NEW;
-                    instance->state = NB_INSTANCE_STATE_ALIVE;
-                    instance->seen = 1;
-                } else if (samples[reader_count].state == NB_SAMPLE_STATE_DISPOSED) {
-                    samples[reader_count].view_state = NB_VIEW_STATE_NOT_NEW;
-                    instance->state = NB_INSTANCE_STATE_NOT_ALIVE_DISPOSED;
-                } else {
-                    samples[reader_count].view_state = NB_VIEW_STATE_NOT_NEW;
-                    instance->state = NB_INSTANCE_STATE_NOT_ALIVE_NO_WRITERS;
-                }
-                samples[reader_count].instance_state = instance->state;
-                samples[reader_count].generation_rank =
-                    (int32_t)instance->generation_rank;
+            if (!fill_instance_sample_info(local, &writer_guid, instance_handle,
+                                           has_instance_handle,
+                                           &samples[reader_count])) {
+                reject_sample(participant, local, queued, &queued_count,
+                              "resource limits");
+                continue;
             }
             readers[reader_count] = local->info.endpoint_guid;
             dds_reader[reader_count] =
@@ -1064,48 +1150,8 @@ static void handle_user_data(nb_rtps_participant_t *participant,
     for (i = 0; i < queued_count; i++) {
         emit_queued_status(participant, &queued[i]);
     }
-    if (!callback) {
-        return;
-    }
-    for (i = 0; i < reader_count; i++) {
-        nb_rtps_dds_message_t view;
-        nb_sample_info_t delivered = samples[i];
-
-        /* A state-change notification has no payload: hand the application the
-         * metadata only, so it can react to the instance rather than to data. */
-        if (delivered.state != NB_SAMPLE_STATE_VALID) {
-            memset(&view, 0, sizeof(view));
-            view.sample = delivered;
-            view.writer_sn = sample_sn;
-            callback(user, &readers[i], &writer_guid, &view);
-            continue;
-        }
-        if (dds_reader[i]) {
-            if (!dds_parsed) {
-                dds_parsed = 1;
-                dds_ok = nb_rtps_dds_message_deserialize(
-                             data->payload, data->payload_len, &message) == NB_OK;
-            }
-            if (!dds_ok) {
-                continue;
-            }
-            view = message;
-            view.sample = delivered;
-        } else {
-            /* Any other type travels as an XCDR1 encapsulated sample. Hand the
-             * application the CDR body; it owns the codec for its own type. */
-            if (data->payload_len <= NB_RTPS_CDR_HEADER_SIZE ||
-                data->payload[0] != 0x00 ||
-                (data->payload[1] != 0x01 && data->payload[1] != 0x03)) {
-                continue;
-            }
-            view.payload = data->payload + NB_RTPS_CDR_HEADER_SIZE;
-            view.payload_len = data->payload_len - NB_RTPS_CDR_HEADER_SIZE;
-            view.sample = delivered;
-        }
-        view.writer_sn = sample_sn;
-        callback(user, &readers[i], &writer_guid, &view);
-    }
+    deliver_samples(callback, user, &writer_guid, sample_sn, data,
+                    readers, dds_reader, samples, reader_count);
 }
 /*
  * A GAP tells the reader that some writer sequence numbers will never arrive.
@@ -1114,8 +1160,9 @@ static void handle_user_data(nb_rtps_participant_t *participant,
  */
 void handle_user_gap(nb_rtps_participant_t *participant,
                             const nb_rtps_gap_t *gap,
-                            const nb_rtps_guid_prefix_t *source_prefix)
+                            const nb_rtps_rx_ctx_t *rx)
 {
+    const nb_rtps_guid_prefix_t *source_prefix = rx->prefix;
     nb_rtps_guid_t writer_guid;
     nb_rtps_remote_endpoint_t *remote;
     nb_rtps_queued_status_t queued[NB_RTPS_MAX_DATA_TARGETS];
@@ -1208,10 +1255,11 @@ static uint64_t oldest_inflight_sn(nb_rtps_participant_t *participant,
 /* Answer a writer HEARTBEAT with the set of samples still missing. */
 void handle_user_heartbeat(nb_rtps_participant_t *participant,
                                   const nb_rtps_heartbeat_t *heartbeat,
-                                  const nb_rtps_guid_prefix_t *source_prefix,
-                                  const char *source_host,
-                                  uint16_t source_port)
+                                  const nb_rtps_rx_ctx_t *rx)
 {
+    const nb_rtps_guid_prefix_t *source_prefix = rx->prefix;
+    const char *source_host = rx->host;
+    uint16_t source_port = rx->port;
     nb_rtps_guid_t writer_guid;
     nb_rtps_remote_endpoint_t *remote;
     char target_host[NB_RTPS_PEER_HOST_MAX];
@@ -1357,10 +1405,11 @@ int sample_expired(const nb_rtps_local_endpoint_t *local, uint64_t sn, uint64_t 
  */
 void handle_user_acknack(nb_rtps_participant_t *participant,
                                 const nb_rtps_acknack_t *acknack,
-                                const nb_rtps_guid_prefix_t *source_prefix,
-                                const char *source_host,
-                                uint16_t source_port)
+                                const nb_rtps_rx_ctx_t *rx)
 {
+    const nb_rtps_guid_prefix_t *source_prefix = rx->prefix;
+    const char *source_host = rx->host;
+    uint16_t source_port = rx->port;
     nb_rtps_guid_t writer_guid;
     nb_rtps_guid_t reader_guid;
     nb_rtps_local_endpoint_t *local;
@@ -1513,10 +1562,11 @@ void handle_user_acknack(nb_rtps_participant_t *participant,
  */
 void handle_user_nack_frag(nb_rtps_participant_t *participant,
                                   const nb_rtps_nack_frag_t *nack,
-                                  const nb_rtps_guid_prefix_t *source_prefix,
-                                  const char *source_host,
-                                  uint16_t source_port)
+                                  const nb_rtps_rx_ctx_t *rx)
 {
+    const nb_rtps_guid_prefix_t *source_prefix = rx->prefix;
+    const char *source_host = rx->host;
+    uint16_t source_port = rx->port;
     nb_rtps_guid_t writer_guid;
     nb_rtps_guid_t reader_guid;
     nb_rtps_local_endpoint_t *local;
@@ -1645,11 +1695,12 @@ void handle_user_nack_frag(nb_rtps_participant_t *participant,
  */
 void dispatch_data_view(nb_rtps_participant_t *participant,
                                const nb_rtps_data_view_t *data,
-                               const nb_rtps_time_t *source_ts,
-                               const nb_rtps_guid_prefix_t *prefix,
-                               const char *source_host,
-                               uint16_t source_port)
+                               const nb_rtps_rx_ctx_t *rx)
 {
+    const nb_rtps_time_t *source_ts = rx->source_ts;
+    const nb_rtps_guid_prefix_t *prefix = rx->prefix;
+    const char *source_host = rx->host;
+    uint16_t source_port = rx->port;
     nb_rtps_participant_info_t info;
     nb_rtps_data_view_t view = *data;
 
@@ -1830,11 +1881,12 @@ static nb_rtps_frag_assembly_t *frag_assembly_get(nb_rtps_participant_t *partici
 }
 void handle_data_frag(nb_rtps_participant_t *participant,
                              const nb_rtps_data_frag_t *fragment,
-                             const nb_rtps_time_t *source_ts,
-                             const nb_rtps_guid_prefix_t *prefix,
-                             const char *source_host,
-                             uint16_t source_port)
+                             const nb_rtps_rx_ctx_t *rx)
 {
+    const nb_rtps_time_t *source_ts = rx->source_ts;
+    const nb_rtps_guid_prefix_t *prefix = rx->prefix;
+    const char *source_host = rx->host;
+    uint16_t source_port = rx->port;
     nb_rtps_guid_t writer;
     nb_rtps_frag_assembly_t *assembly;
     uint32_t index;
@@ -1933,12 +1985,14 @@ void handle_data_frag(nb_rtps_participant_t *participant,
             view.inline_qos = assembly->inline_qos;
             view.inline_qos_len = assembly->inline_qos_len;
         }
-        dispatch_data_view(participant,
-                           &view,
-                           assembly->has_source_ts ? &assembly->source_ts : NULL,
-                           prefix,
-                           source_host,
-                           source_port);
+        nb_rtps_rx_ctx_t out_rx;
+
+        out_rx.prefix = prefix;
+        out_rx.host = source_host;
+        out_rx.port = source_port;
+        out_rx.source_ts =
+            assembly->has_source_ts ? &assembly->source_ts : NULL;
+        dispatch_data_view(participant, &view, &out_rx);
 
         zb_mutex_lock(participant->lock);
         if (assembly->used && assembly->complete) {
@@ -2031,8 +2085,9 @@ int send_frag_nack(nb_rtps_participant_t *participant,
  */
 void handle_user_heartbeat_frag(nb_rtps_participant_t *participant,
                                        const nb_rtps_heartbeat_frag_t *heartbeat,
-                                       const nb_rtps_guid_prefix_t *source_prefix)
+                                       const nb_rtps_rx_ctx_t *rx)
 {
+    const nb_rtps_guid_prefix_t *source_prefix = rx->prefix;
     nb_rtps_guid_t writer;
     nb_rtps_frag_assembly_t *assembly;
     uint64_t now;

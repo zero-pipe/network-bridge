@@ -488,81 +488,9 @@ int endpoint_data_target(nb_rtps_participant_t *participant,
  * The lower GUID prefix dials and the other one accepts, which is stable across
  * restarts because the prefix is unique per participant.
  */
-void maybe_tcp_connect(nb_rtps_participant_t *participant,
-                              const nb_rtps_guid_prefix_t *prefix)
-{
-    nb_rtps_remote_participant_t *remote;
-    char host[NB_RTPS_PEER_HOST_MAX];
-    uint16_t port = 0;
-    uint64_t now;
-    int dial;
-
-    if (!participant->tcp || !prefix) {
-        return;
-    }
-    zb_mutex_lock(participant->lock);
-    remote = find_remote(participant, prefix);
-    if (!remote || remote->tcp_key[0] != '\0' ||
-        remote->info.metatraffic_tcp.kind == NB_RTPS_LOCATOR_KIND_INVALID) {
-        zb_mutex_unlock(participant->lock);
-        return;
-    }
-    if (locator_to_host_any(&remote->info.metatraffic_tcp,
-                            host,
-                            sizeof(host),
-                            &port) != NB_OK) {
-        zb_mutex_unlock(participant->lock);
-        return;
-    }
-    dial = memcmp(participant->local_guid.prefix.bytes,
-                  remote->info.guid.prefix.bytes,
-                  sizeof(participant->local_guid.prefix.bytes)) < 0;
-    now = zn_wall_ms();
-    if (!dial || now < remote->next_tcp_connect_ms) {
-        zb_mutex_unlock(participant->lock);
-        return;
-    }
-    remote->next_tcp_connect_ms = now + 1000u;
-    zb_mutex_unlock(participant->lock);
-
-    if (nb_rtps_tcp_has_link(participant->tcp, host, port)) {
-        return;
-    }
-    if (nb_rtps_tcp_connect(participant->tcp, host, port) < 0) {
-        nb_log_debug("rtps: tcp connect to %s:%u failed",
-                     host,
-                     (unsigned)port);
-    }
-}
 
 /* Periodic retry: discovery is retransmitted every announce interval, so a
  * failed dial must not wait for the next SPDP sample to be retried. */
-static void retry_tcp_links(nb_rtps_participant_t *participant)
-{
-    nb_rtps_guid_prefix_t prefixes[NB_RTPS_TCP_MAX_CONNECTIONS];
-    size_t count = 0;
-    size_t i;
-
-    if (!participant->tcp) {
-        return;
-    }
-    zb_mutex_lock(participant->lock);
-    for (i = 0; i < participant->max_remotes &&
-                count < NB_RTPS_TCP_MAX_CONNECTIONS;
-         i++) {
-        nb_rtps_remote_participant_t *remote = &participant->remotes[i];
-
-        if (!remote->used || remote->tcp_key[0] != '\0' ||
-            remote->info.metatraffic_tcp.kind == NB_RTPS_LOCATOR_KIND_INVALID) {
-            continue;
-        }
-        prefixes[count++] = remote->info.guid.prefix;
-    }
-    zb_mutex_unlock(participant->lock);
-    for (i = 0; i < count; i++) {
-        maybe_tcp_connect(participant, &prefixes[i]);
-    }
-}
 
 /*
  * TRANSIENT_LOCAL late joiner support: a reader that matches a publication
@@ -655,150 +583,19 @@ void replay_retained_history(nb_rtps_participant_t *participant,
  * several names separated by commas. Two endpoints match when any name on one
  * side matches any name on the other.
  */
-static int partition_name_match(const char *pattern,
-                                size_t pattern_len,
-                                const char *name,
-                                size_t name_len)
-{
-    size_t pi = 0;
-    size_t ni = 0;
 
-    while (pi < pattern_len) {
-        if (pattern[pi] == '*') {
-            size_t k;
-
-            while (pi < pattern_len && pattern[pi] == '*') {
-                pi++;
-            }
-            if (pi == pattern_len) {
-                return 1;
-            }
-            for (k = ni; k <= name_len; k++) {
-                if (partition_name_match(
-                        pattern + pi, pattern_len - pi, name + k, name_len - k)) {
-                    return 1;
-                }
-            }
-            return 0;
-        }
-        if (ni >= name_len || name[ni] != pattern[pi]) {
-            return 0;
-        }
-        pi++;
-        ni++;
-    }
-    return ni == name_len;
-}
-
-static int partition_lists_match(const char *left, const char *right)
-{
-    const char *lp = left;
-
-    for (;;) {
-        size_t left_len = strcspn(lp, ",");
-        const char *rp = right;
-
-        for (;;) {
-            size_t right_len = strcspn(rp, ",");
-
-            if (partition_name_match(lp, left_len, rp, right_len) ||
-                partition_name_match(rp, right_len, lp, left_len)) {
-                return 1;
-            }
-            rp += right_len;
-            if (*rp != ',') {
-                break;
-            }
-            rp++;
-        }
-        lp += left_len;
-        if (*lp != ',') {
-            break;
-        }
-        lp++;
-    }
-    return 0;
-}
 
 /*
  * Returns NULL when the pair can be matched, otherwise a short reason for the
  * mismatch. The reason is only used for diagnostics: matching happens in the
  * hot path, so it is logged at debug level and never formatted per packet.
  */
-static const char *endpoint_qos_mismatch(const nb_rtps_endpoint_info_t *publication,
-                                         const nb_rtps_endpoint_info_t *subscription)
-{
-    uint32_t pub_reliability;
-    uint32_t sub_reliability;
-
-    if (strcmp(publication->topic_name, subscription->topic_name) != 0) {
-        return "topic";
-    }
-    if (strcmp(publication->type_name, subscription->type_name) != 0) {
-        return "type";
-    }
-    if (!partition_lists_match(publication->partition, subscription->partition)) {
-        return "partition";
-    }
-    pub_reliability = publication->reliability ? publication->reliability
-                                               : NB_RTPS_RELIABILITY_BEST_EFFORT;
-    sub_reliability = subscription->reliability ? subscription->reliability
-                                                : NB_RTPS_RELIABILITY_BEST_EFFORT;
-    if (sub_reliability == NB_RTPS_RELIABILITY_RELIABLE &&
-        pub_reliability != NB_RTPS_RELIABILITY_RELIABLE) {
-        return "reliability";
-    }
-    if (publication->durability < subscription->durability) {
-        return "durability";
-    }
-    /*
-     * Requested/offered policies, in the sense of DDS 1.4 section 2.2.3:
-     * the writer has to offer at least what the reader requests. A zero
-     * duration means "not set", which is the default and never a constraint.
-     */
-    if (subscription->deadline_ms > 0 &&
-        (publication->deadline_ms == 0 ||
-         publication->deadline_ms > subscription->deadline_ms)) {
-        return "deadline";
-    }
-    if (subscription->latency_budget_ms > 0 &&
-        publication->latency_budget_ms > subscription->latency_budget_ms) {
-        return "latency budget";
-    }
-    if (publication->ownership != subscription->ownership) {
-        return "ownership";
-    }
-    /* AUTOMATIC < MANUAL_BY_PARTICIPANT < MANUAL_BY_TOPIC. */
-    if (publication->liveliness_kind < subscription->liveliness_kind) {
-        return "liveliness kind";
-    }
-    if (subscription->liveliness_lease_ms > 0 &&
-        (publication->liveliness_lease_ms == 0 ||
-         publication->liveliness_lease_ms > subscription->liveliness_lease_ms)) {
-        return "liveliness lease";
-    }
-    if (publication->destination_order < subscription->destination_order) {
-        return "destination order";
-    }
-    /* Presentation: INSTANCE < TOPIC < GROUP, and the writer has to offer the
-     * coherent/ordered access the reader asked for. */
-    if (publication->presentation_scope < subscription->presentation_scope) {
-        return "presentation scope";
-    }
-    if (subscription->coherent_access && !publication->coherent_access) {
-        return "coherent access";
-    }
-    if (subscription->ordered_access && !publication->ordered_access) {
-        return "ordered access";
-    }
-    return NULL;
-}
 
 /*
  * How many remote endpoints a local endpoint is matched with right now.
  * Called with the participant lock held.
  */
-static uint32_t matched_remote_count(nb_rtps_participant_t *participant,
+uint32_t matched_remote_count(nb_rtps_participant_t *participant,
                                      const nb_rtps_local_endpoint_t *local)
 {
     uint32_t matches = 0;
@@ -831,199 +628,18 @@ static uint32_t matched_remote_count(nb_rtps_participant_t *participant,
  * means a previously matched peer went away, which is how DDS reports the
  * change in PublicationMatchedStatus/SubscriptionMatchedStatus.
  */
-static void emit_match_event(nb_rtps_participant_t *participant,
-                             const nb_rtps_guid_t *local_guid,
-                             const nb_rtps_endpoint_info_t *remote_info,
-                             nb_rtps_endpoint_kind_t remote_kind,
-                             int added)
-{
-    nb_rtps_status_event_t event;
-    nb_rtps_status_callback_t callback;
-    void *user;
-    nb_rtps_local_endpoint_t *local;
-    const char *reason;
-
-    memset(&event, 0, sizeof(event));
-    zb_mutex_lock(participant->lock);
-    callback = participant->status_callback;
-    user = participant->status_user;
-    local = find_local_endpoint(participant, local_guid);
-    if (!callback || !local || !local->used) {
-        zb_mutex_unlock(participant->lock);
-        return;
-    }
-    if (strcmp(local->info.topic_name, remote_info->topic_name) != 0 ||
-        strcmp(local->info.type_name, remote_info->type_name) != 0) {
-        zb_mutex_unlock(participant->lock);
-        return;
-    }
-    if (local->kind == NB_RTPS_ENDPOINT_PUBLICATION &&
-        remote_kind == NB_RTPS_ENDPOINT_SUBSCRIPTION) {
-        event.kind = NB_RTPS_STATUS_PUBLICATION_MATCHED;
-        reason = endpoint_qos_mismatch(&local->info, remote_info);
-    } else if (local->kind == NB_RTPS_ENDPOINT_SUBSCRIPTION &&
-               remote_kind == NB_RTPS_ENDPOINT_PUBLICATION) {
-        event.kind = NB_RTPS_STATUS_SUBSCRIPTION_MATCHED;
-        reason = endpoint_qos_mismatch(remote_info, &local->info);
-    } else {
-        zb_mutex_unlock(participant->lock);
-        return;
-    }
-    if (reason) {
-        /* A pair that never matched has nothing to un-match, and repeating the
-         * same incompatibility on every SEDP refresh would be noise. */
-        if (!added) {
-            zb_mutex_unlock(participant->lock);
-            return;
-        }
-        event.kind = NB_RTPS_STATUS_QOS_INCOMPATIBLE;
-        copy_str(event.reason, sizeof(event.reason), reason);
-    } else {
-        if (added) {
-            local->match_total++;
-        }
-        event.count = matched_remote_count(participant, local);
-        event.total_count = local->match_total;
-    }
-    event.endpoint = local->info.endpoint_guid;
-    event.writer = remote_info->endpoint_guid;
-    event.has_peer = 1;
-    zb_mutex_unlock(participant->lock);
-
-    callback(user, &event);
-}
 
 /* Notify every local endpoint that could relate to a remote one. */
-void notify_matches(nb_rtps_participant_t *participant,
-                           const nb_rtps_endpoint_info_t *remote_info,
-                           nb_rtps_endpoint_kind_t remote_kind,
-                           int added)
-{
-    size_t i;
-
-    if (!participant || !remote_info) {
-        return;
-    }
-    for (i = 0; i < participant->max_local_endpoints; i++) {
-        nb_rtps_guid_t local_guid;
-        int used = 0;
-
-        zb_mutex_lock(participant->lock);
-        if (participant->local_endpoints[i].used) {
-            local_guid = participant->local_endpoints[i].info.endpoint_guid;
-            used = 1;
-        }
-        zb_mutex_unlock(participant->lock);
-        if (used) {
-            emit_match_event(participant, &local_guid, remote_info, remote_kind, added);
-        }
-    }
-}
 
 /*
  * The mirror case: an endpoint created after its peers already discovered.
  * SEDP replay tells the peers, but the local side also has to learn that it
  * matched something that was already there.
  */
-static void notify_matches_for_local(nb_rtps_participant_t *participant,
-                                     const nb_rtps_guid_t *local_guid)
-{
-    size_t i;
 
-    if (!participant || !local_guid) {
-        return;
-    }
-    for (i = 0; i < participant->max_remote_endpoints; i++) {
-        nb_rtps_endpoint_info_t remote_info;
-        nb_rtps_endpoint_kind_t remote_kind;
-        int used = 0;
-
-        zb_mutex_lock(participant->lock);
-        if (participant->remote_endpoints[i].used) {
-            remote_info = participant->remote_endpoints[i].info;
-            remote_kind = participant->remote_endpoints[i].kind;
-            used = 1;
-        }
-        zb_mutex_unlock(participant->lock);
-        if (used) {
-            emit_match_event(participant, local_guid, &remote_info, remote_kind, 1);
-        }
-    }
-}
-
-int endpoint_qos_compatible(const nb_rtps_endpoint_info_t *publication,
-                                   const nb_rtps_endpoint_info_t *subscription)
-{
-    const char *reason = endpoint_qos_mismatch(publication, subscription);
-
-    if (reason) {
-        nb_log_debug("rtps: %s endpoints on topic '%s' do not match: %s",
-                     publication->topic_name[0] ? "publisher/subscriber" : "endpoint",
-                     publication->topic_name,
-                     reason);
-        return 0;
-    }
-    return 1;
-}
-
-int data_endpoint_matches(const nb_rtps_local_endpoint_t *local,
-                                 const nb_rtps_remote_endpoint_t *remote)
-{
-    if (!local || !remote || local->kind != NB_RTPS_ENDPOINT_SUBSCRIPTION ||
-        remote->kind != NB_RTPS_ENDPOINT_PUBLICATION) {
-        return 0;
-    }
-    return endpoint_qos_compatible(&remote->info, &local->info);
-}
 
 /* All data_reader helpers are called with participant->lock held. */
-int ensure_data_readers(nb_rtps_participant_t *participant)
-{
-    if (participant->data_readers) {
-        return NB_OK;
-    }
-    participant->max_data_readers = participant->max_remote_endpoints;
-    if (participant->max_data_readers > NB_RTPS_MAX_DATA_READERS) {
-        participant->max_data_readers = NB_RTPS_MAX_DATA_READERS;
-    }
-    if (participant->max_data_readers == 0) {
-        return NB_ERR_NOMEM;
-    }
-    participant->data_readers = (nb_rtps_data_reader_state_t *)calloc(
-        participant->max_data_readers, sizeof(*participant->data_readers));
-    participant->data_reader_used =
-        (uint32_t *)calloc(participant->max_data_readers, sizeof(uint32_t));
-    if (!participant->data_readers || !participant->data_reader_used) {
-        free(participant->data_readers);
-        free(participant->data_reader_used);
-        participant->data_readers = NULL;
-        participant->data_reader_used = NULL;
-        participant->max_data_readers = 0;
-        return NB_ERR_NOMEM;
-    }
-    return NB_OK;
-}
 
-nb_rtps_data_reader_state_t *find_data_reader(nb_rtps_participant_t *participant,
-                                                     const nb_rtps_guid_t *writer,
-                                                     const nb_rtps_entity_id_t *reader)
-{
-    size_t i;
-
-    if (!participant->data_readers) {
-        return NULL;
-    }
-    for (i = 0; i < participant->data_reader_used_count; i++) {
-        nb_rtps_data_reader_state_t *state =
-            &participant->data_readers[participant->data_reader_used[i]];
-
-        if (nb_rtps_guid_equal(&state->writer, writer) &&
-            nb_rtps_entity_id_equal(&state->reader, reader)) {
-            return state;
-        }
-    }
-    return NULL;
-}
 
 /*
  * Return the window for a (writer, reader) pair, creating it when needed.
@@ -1036,59 +652,6 @@ nb_rtps_data_reader_state_t *find_data_reader(nb_rtps_participant_t *participant
  * history, which turns into a duplicate storm for the pairs that were working.
  * Sizing max_remote_endpoints for writers x local readers avoids the state.
  */
-nb_rtps_data_reader_state_t *get_data_reader(nb_rtps_participant_t *participant,
-                                                    const nb_rtps_guid_t *writer,
-                                                    const nb_rtps_entity_id_t *reader,
-                                                    uint64_t first_expected)
-{
-    nb_rtps_data_reader_state_t *state = find_data_reader(participant, writer, reader);
-    nb_rtps_remote_endpoint_t *remote;
-    size_t i;
-
-    if (state) {
-        return state;
-    }
-    if (ensure_data_readers(participant) != NB_OK) {
-        return NULL;
-    }
-    for (i = 0; i < participant->max_data_readers; i++) {
-        if (!participant->data_readers[i].used) {
-            state = &participant->data_readers[i];
-            break;
-        }
-    }
-    if (!state) {
-        if (!participant->data_reader_overflow_logged) {
-            participant->data_reader_overflow_logged = 1;
-            nb_log_warn("rtps: reader window table is full (%zu entries); "
-                        "extra reliable pairs run without deduplication",
-                        participant->max_data_readers);
-        }
-        return NULL;
-    }
-    memset(state, 0, sizeof(*state));
-    state->used = 1;
-    nb_rtps_used_add(participant->data_reader_used,
-                     &participant->data_reader_used_count,
-                     participant->max_data_readers,
-                     (size_t)(state - participant->data_readers));
-    state->writer = *writer;
-    state->reader = *reader;
-    /* The liveliness policy is the writer's, announced in SEDP. */
-    remote = find_remote_endpoint(participant, writer);
-    if (remote && remote->kind == NB_RTPS_ENDPOINT_PUBLICATION) {
-        state->liveliness_kind = remote->info.liveliness_kind;
-        state->liveliness_lease_ms = remote->info.liveliness_lease_ms;
-    }
-    participant->data_reader_count++;
-    nb_rtps_reader_state_reset(&state->state, first_expected ? first_expected : 1u);
-    state->last_sample_ms = zn_wall_ms();
-    /* DDS considers a writer alive as soon as it is matched; the first missing
-     * assertion is what changes that. */
-    state->alive = 1;
-    state->last_liveliness_ms = state->last_sample_ms;
-    return state;
-}
 
 /*
  * A matched writer starts the subscription's requested-deadline timer even if
@@ -1096,60 +659,7 @@ nb_rtps_data_reader_state_t *get_data_reader(nb_rtps_participant_t *participant,
  * window carries the writer's liveliness state, which only exists for writers
  * that announce a finite lease. Called with the participant lock held.
  */
-void arm_reader_deadlines(nb_rtps_participant_t *participant,
-                                 const nb_rtps_remote_endpoint_t *remote)
-{
-    int monitors_liveliness;
-    size_t i;
 
-    if (!remote || remote->kind != NB_RTPS_ENDPOINT_PUBLICATION) {
-        return;
-    }
-    /* Every liveliness kind with a finite lease is monitored: automatic and
-     * manual-by-participant renew on ParticipantMessageData, manual-by-topic on
-     * a message from the writer itself. */
-    monitors_liveliness = remote->info.liveliness_lease_ms > 0;
-    for (i = 0; i < participant->max_local_endpoints; i++) {
-        nb_rtps_local_endpoint_t *local = &participant->local_endpoints[i];
-
-        if (!local->used || local->kind != NB_RTPS_ENDPOINT_SUBSCRIPTION) {
-            continue;
-        }
-        if (local->info.deadline_ms == 0 && !monitors_liveliness) {
-            continue;
-        }
-        if (!endpoint_qos_compatible(&remote->info, &local->info)) {
-            continue;
-        }
-        (void)get_data_reader(participant,
-                              &remote->info.endpoint_guid,
-                              &local->info.endpoint_guid.entity,
-                              1u);
-    }
-}
-
-void drop_data_readers_for_writer(nb_rtps_participant_t *participant,
-                                         const nb_rtps_guid_t *writer)
-{
-    size_t i;
-
-    if (!participant->data_readers) {
-        return;
-    }
-    for (i = 0; i < participant->max_data_readers; i++) {
-        nb_rtps_data_reader_state_t *state = &participant->data_readers[i];
-
-        if (state->used && nb_rtps_guid_equal(&state->writer, writer)) {
-            state->used = 0;
-            nb_rtps_used_remove(participant->data_reader_used,
-                                &participant->data_reader_used_count,
-                                i);
-            if (participant->data_reader_count > 0) {
-                participant->data_reader_count--;
-            }
-        }
-    }
-}
 
 static void drop_data_readers_for_reader(nb_rtps_participant_t *participant,
                                          const nb_rtps_entity_id_t *reader)
@@ -1184,6 +694,48 @@ static void drop_data_readers_for_reader(nb_rtps_participant_t *participant,
  * `has_source_ts` and `source_ts` are per-message state: INFO_TS applies to
  * every DATA that follows it until the next INFO_TS or the next message.
  */
+/* Which built-in writer an incoming submessage is addressed from, so the
+ * dispatch below picks the discovery handler or the user-data handler without
+ * repeating the entity-id comparison per submessage kind. */
+typedef enum nb_rtps_writer_class {
+    NB_RTPS_WRITER_USER = 0,
+    NB_RTPS_WRITER_SPDP,
+    NB_RTPS_WRITER_SEDP_PUBLICATIONS,
+    NB_RTPS_WRITER_SEDP_SUBSCRIPTIONS
+} nb_rtps_writer_class_t;
+
+static nb_rtps_writer_class_t classify_writer(const nb_rtps_entity_id_t *writer_id)
+{
+    if (nb_rtps_entity_id_equal(writer_id, &nb_rtps_eid_spdp_writer)) {
+        return NB_RTPS_WRITER_SPDP;
+    }
+    if (nb_rtps_entity_id_equal(writer_id,
+                                &nb_rtps_eid_sedp_publications_writer)) {
+        return NB_RTPS_WRITER_SEDP_PUBLICATIONS;
+    }
+    if (nb_rtps_entity_id_equal(writer_id,
+                                &nb_rtps_eid_sedp_subscriptions_writer)) {
+        return NB_RTPS_WRITER_SEDP_SUBSCRIPTIONS;
+    }
+    return NB_RTPS_WRITER_USER;
+}
+
+/* Map a SEDP writer class to the endpoint kind its handler expects. Returns 0
+ * for SPDP/user writers, which use the user-data path. */
+static int writer_class_sedp_kind(nb_rtps_writer_class_t cls,
+                                  nb_rtps_endpoint_kind_t *kind)
+{
+    if (cls == NB_RTPS_WRITER_SEDP_PUBLICATIONS) {
+        *kind = NB_RTPS_ENDPOINT_PUBLICATION;
+        return 1;
+    }
+    if (cls == NB_RTPS_WRITER_SEDP_SUBSCRIPTIONS) {
+        *kind = NB_RTPS_ENDPOINT_SUBSCRIPTION;
+        return 1;
+    }
+    return 0;
+}
+
 static int guid_prefix_is_zero(const nb_rtps_guid_prefix_t *prefix)
 {
     size_t i;
@@ -1199,7 +751,12 @@ static int guid_prefix_is_zero(const nb_rtps_guid_prefix_t *prefix)
     return 1;
 }
 
-static void handle_submessage(nb_rtps_participant_t *participant,
+static void dispatch_entity_submessage(nb_rtps_participant_t *participant,
+                                       const nb_rtps_submessage_view_t *view,
+                                       nb_rtps_receiver_state_t *state,
+                                       const nb_rtps_rx_ctx_t *rx);
+
+void handle_submessage(nb_rtps_participant_t *participant,
                               const nb_rtps_header_t *header,
                               const nb_rtps_submessage_view_t *view,
                               nb_rtps_receiver_state_t *state,
@@ -1249,6 +806,30 @@ static void handle_submessage(nb_rtps_participant_t *participant,
         return;
     }
 
+    {
+        nb_rtps_rx_ctx_t rx;
+
+        rx.prefix = source_prefix;
+        rx.host = source_host;
+        rx.port = source_port;
+        rx.source_ts = NULL;
+        dispatch_entity_submessage(participant, view, state, &rx);
+    }
+}
+
+/* Dispatch one entity submessage against the resolved receive context. Split
+ * out of handle_submessage only to scope the per-message rx context. */
+static void dispatch_entity_submessage(nb_rtps_participant_t *participant,
+                                       const nb_rtps_submessage_view_t *view,
+                                       nb_rtps_receiver_state_t *state,
+                                       const nb_rtps_rx_ctx_t *rx)
+{
+    nb_rtps_rx_ctx_t local = *rx;
+
+    /* The source timestamp is per-submessage (INFO_TS), so it is refreshed for
+     * the DATA/DATA_FRAG dispatch; the other handlers ignore it. */
+    local.source_ts = state->has_source_ts ? &state->source_ts : NULL;
+
     if (view->id == NB_RTPS_SUBMSG_DATA) {
         nb_rtps_data_view_t data;
 
@@ -1256,34 +837,26 @@ static void handle_submessage(nb_rtps_participant_t *participant,
             participant->stats.parse_errors++;
             return;
         }
-        if (nb_rtps_entity_id_equal(&data.writer_id, &nb_rtps_eid_spdp_writer)) {
-            participant->stats.spdp_received++;
-        } else if (nb_rtps_entity_id_equal(&data.writer_id,
-                                           &nb_rtps_eid_sedp_publications_writer) ||
-                   nb_rtps_entity_id_equal(&data.writer_id,
-                                           &nb_rtps_eid_sedp_subscriptions_writer)) {
+        switch (classify_writer(&data.writer_id)) {
+        case NB_RTPS_WRITER_SEDP_PUBLICATIONS:
+        case NB_RTPS_WRITER_SEDP_SUBSCRIPTIONS:
             participant->stats.sedp_received++;
-        } else {
+            break;
+        case NB_RTPS_WRITER_SPDP:
+            participant->stats.spdp_received++;
+            break;
+        default:
             participant->stats.data_received++;
+            break;
         }
-        dispatch_data_view(participant,
-                           &data,
-                           state->has_source_ts ? &state->source_ts : NULL,
-                           source_prefix,
-                           source_host,
-                           source_port);
+        dispatch_data_view(participant, &data, &local);
     } else if (view->id == NB_RTPS_SUBMSG_DATA_FRAG) {
         nb_rtps_data_frag_t fragment;
 
         if (nb_rtps_data_frag_decode(
                 view->flags, view->body, view->body_len, &fragment) == NB_OK) {
             participant->stats.fragments_received++;
-            handle_data_frag(participant,
-                             &fragment,
-                             state->has_source_ts ? &state->source_ts : NULL,
-                             source_prefix,
-                             source_host,
-                             source_port);
+            handle_data_frag(participant, &fragment, &local);
         } else {
             participant->stats.parse_errors++;
         }
@@ -1307,28 +880,20 @@ static void handle_submessage(nb_rtps_participant_t *participant,
         participant->stats.heartbeats_received++;
         /* The decoder already set the L (liveliness) and F (final/ack
          * requested) bits from the submessage flags. */
-        if (nb_rtps_entity_id_equal(&heartbeat.writer_id,
-                                    &nb_rtps_eid_sedp_publications_writer)) {
-            handle_sedp_heartbeat(participant,
-                                  NB_RTPS_ENDPOINT_PUBLICATION,
-                                  &heartbeat,
-                                  source_prefix,
-                                  source_host,
-                                  source_port);
-        } else if (nb_rtps_entity_id_equal(&heartbeat.writer_id,
-                                           &nb_rtps_eid_sedp_subscriptions_writer)) {
-            handle_sedp_heartbeat(participant,
-                                  NB_RTPS_ENDPOINT_SUBSCRIPTION,
-                                  &heartbeat,
-                                  source_prefix,
-                                  source_host,
-                                  source_port);
-        } else {
-            handle_user_heartbeat(participant,
-                                  &heartbeat,
-                                  source_prefix,
-                                  source_host,
-                                  source_port);
+        {
+            nb_rtps_endpoint_kind_t sedp_kind;
+
+            if (writer_class_sedp_kind(classify_writer(&heartbeat.writer_id),
+                                       &sedp_kind)) {
+                handle_sedp_heartbeat(participant,
+                                      sedp_kind,
+                                      &heartbeat,
+                                      rx->prefix,
+                                      rx->host,
+                                      rx->port);
+            } else {
+                handle_user_heartbeat(participant, &heartbeat, &local);
+            }
         }
     } else if (view->id == NB_RTPS_SUBMSG_ACKNACK) {
         nb_rtps_acknack_t acknack;
@@ -1338,36 +903,27 @@ static void handle_submessage(nb_rtps_participant_t *participant,
             return;
         }
         participant->stats.acknacks_received++;
-        if (nb_rtps_entity_id_equal(&acknack.writer_id,
-                                    &nb_rtps_eid_sedp_publications_writer)) {
-            handle_sedp_acknack(participant,
-                                NB_RTPS_ENDPOINT_PUBLICATION,
-                                &acknack,
-                                source_prefix,
-                                source_host,
-                                source_port);
-        } else if (nb_rtps_entity_id_equal(&acknack.writer_id,
-                                           &nb_rtps_eid_sedp_subscriptions_writer)) {
-            handle_sedp_acknack(participant,
-                                NB_RTPS_ENDPOINT_SUBSCRIPTION,
-                                &acknack,
-                                source_prefix,
-                                source_host,
-                                source_port);
-        } else {
-            handle_user_acknack(participant,
-                                &acknack,
-                                source_prefix,
-                                source_host,
-                                source_port);
+        {
+            nb_rtps_endpoint_kind_t sedp_kind;
+
+            if (writer_class_sedp_kind(classify_writer(&acknack.writer_id),
+                                       &sedp_kind)) {
+                handle_sedp_acknack(participant,
+                                    sedp_kind,
+                                    &acknack,
+                                    rx->prefix,
+                                    rx->host,
+                                    rx->port);
+            } else {
+                handle_user_acknack(participant, &acknack, &local);
+            }
         }
     } else if (view->id == NB_RTPS_SUBMSG_NACK_FRAG) {
         nb_rtps_nack_frag_t nack;
 
         if (nb_rtps_nack_frag_decode(view->body, view->body_len, &nack) == NB_OK) {
             participant->stats.nack_frags_received++;
-            handle_user_nack_frag(
-                participant, &nack, source_prefix, source_host, source_port);
+            handle_user_nack_frag(participant, &nack, &local);
         } else {
             participant->stats.parse_errors++;
         }
@@ -1376,7 +932,7 @@ static void handle_submessage(nb_rtps_participant_t *participant,
 
         if (nb_rtps_heartbeat_frag_decode(view->body, view->body_len, &heartbeat) == NB_OK) {
             participant->stats.heartbeats_received++;
-            handle_user_heartbeat_frag(participant, &heartbeat, source_prefix);
+            handle_user_heartbeat_frag(participant, &heartbeat, &local);
         } else {
             participant->stats.parse_errors++;
         }
@@ -1385,21 +941,18 @@ static void handle_submessage(nb_rtps_participant_t *participant,
 
         if (nb_rtps_gap_decode(view->body, view->body_len, &gap) == NB_OK) {
             participant->stats.gaps_received++;
-            if (nb_rtps_entity_id_equal(&gap.writer_id,
-                                        &nb_rtps_eid_sedp_publications_writer)) {
-                handle_sedp_gap(participant,
-                                NB_RTPS_ENDPOINT_PUBLICATION,
-                                &gap,
-                                source_prefix);
-            } else if (nb_rtps_entity_id_equal(
-                           &gap.writer_id,
-                           &nb_rtps_eid_sedp_subscriptions_writer)) {
-                handle_sedp_gap(participant,
-                                NB_RTPS_ENDPOINT_SUBSCRIPTION,
-                                &gap,
-                                source_prefix);
-            } else {
-                handle_user_gap(participant, &gap, source_prefix);
+            {
+                nb_rtps_endpoint_kind_t sedp_kind;
+
+                if (writer_class_sedp_kind(classify_writer(&gap.writer_id),
+                                           &sedp_kind)) {
+                    handle_sedp_gap(participant,
+                                    sedp_kind,
+                                    &gap,
+                                    rx->prefix);
+                } else {
+                    handle_user_gap(participant, &gap, &local);
+                }
             }
         }
     }
@@ -1440,114 +993,14 @@ static void handle_datagram(nb_rtps_participant_t *participant,
  * message on a connection tells us which participant is at the other end, and
  * from then on everything addressed to that participant goes over this link.
  */
-static void tcp_bind_remote(nb_rtps_participant_t *participant,
-                            const nb_rtps_guid_prefix_t *prefix,
-                            const char *key)
-{
-    nb_rtps_remote_participant_t *remote;
 
-    if (!key) {
-        return;
-    }
-    zb_mutex_lock(participant->lock);
-    remote = find_remote(participant, prefix);
-    if (remote && remote->tcp_key[0] == '\0') {
-        copy_str(remote->tcp_key, sizeof(remote->tcp_key), key);
-    }
-    zb_mutex_unlock(participant->lock);
-}
-
-static void tcp_on_message(void *user,
-                           int index,
-                           const nb_rtps_header_t *header,
-                           const nb_rtps_submessage_view_t *view,
-                           nb_rtps_receiver_state_t *state)
-{
-    nb_rtps_participant_t *participant = (nb_rtps_participant_t *)user;
-    const char *key = nb_rtps_tcp_key(participant->tcp, index);
-
-    if (!key) {
-        return;
-    }
-    if (nb_rtps_guid_prefix_equal(&header->guid_prefix,
-                                  &participant->local_guid.prefix)) {
-        return;
-    }
-    tcp_bind_remote(participant, &header->guid_prefix, key);
-    handle_submessage(participant,
-                      header,
-                      view,
-                      state,
-                      key,
-                      (uint16_t)(index + 1));
-}
 
 /* A dialled connection knows the address it went to, which is enough to bind it
  * to the participant that advertised that locator. */
-static void tcp_on_link(void *user, int index)
-{
-    nb_rtps_participant_t *participant = (nb_rtps_participant_t *)user;
-    const char *key = nb_rtps_tcp_key(participant->tcp, index);
-    char host[NB_RTPS_PEER_HOST_MAX];
-    uint16_t port = 0;
-    uint32_t i;
-
-    if (!key) {
-        return;
-    }
-    host[0] = '\0';
-    nb_rtps_tcp_link_info(participant->tcp, index, host, sizeof(host), &port);
-    if (host[0] == '\0' || port == 0) {
-        /* Inbound: the peer identifies itself with its first message. */
-        return;
-    }
-    zb_mutex_lock(participant->lock);
-    for (i = 0; i < participant->max_remotes; i++) {
-        nb_rtps_remote_participant_t *remote = &participant->remotes[i];
-        char remote_host[NB_RTPS_PEER_HOST_MAX];
-        uint16_t remote_port = 0;
-
-        if (!remote->used ||
-            remote->info.metatraffic_tcp.kind == NB_RTPS_LOCATOR_KIND_INVALID) {
-            continue;
-        }
-        if (locator_to_host_any(&remote->info.metatraffic_tcp,
-                                remote_host,
-                                sizeof(remote_host),
-                                &remote_port) != NB_OK) {
-            continue;
-        }
-        if (remote_port == port && strcmp(remote_host, host) == 0) {
-            copy_str(remote->tcp_key, sizeof(remote->tcp_key), key);
-            break;
-        }
-    }
-    zb_mutex_unlock(participant->lock);
-}
 
 /* The link is gone: fall back to UDP until a new connection is established. */
-static void tcp_on_unlink(void *user, int index)
-{
-    nb_rtps_participant_t *participant = (nb_rtps_participant_t *)user;
-    const char *key = nb_rtps_tcp_key(participant->tcp, index);
-    uint32_t i;
 
-    if (!key) {
-        return;
-    }
-    zb_mutex_lock(participant->lock);
-    for (i = 0; i < participant->max_remotes; i++) {
-        nb_rtps_remote_participant_t *remote = &participant->remotes[i];
-
-        if (remote->used && strcmp(remote->tcp_key, key) == 0) {
-            remote->tcp_key[0] = '\0';
-            remote->next_tcp_connect_ms = 0;
-        }
-    }
-    zb_mutex_unlock(participant->lock);
-}
-
-static void drain_socket(nb_rtps_participant_t *participant, zn_socket *socket)
+void drain_socket(nb_rtps_participant_t *participant, zn_socket *socket)
 {
     uint8_t buf[NB_RTPS_RX_MAX];
     char host[NB_RTPS_PEER_HOST_MAX];
@@ -1574,77 +1027,6 @@ static void drain_socket(nb_rtps_participant_t *participant, zn_socket *socket)
  * events are collected under the lock and delivered after it is released,
  * because the callback must not re-enter the participant.
  */
-static void check_deadlines(nb_rtps_participant_t *participant, uint64_t now)
-{
-    nb_rtps_status_event_t events[NB_RTPS_MAX_STATUS_EVENTS];
-    size_t count = 0;
-    size_t i;
-    nb_rtps_status_callback_t callback;
-    void *user;
-
-    zb_mutex_lock(participant->lock);
-    callback = participant->status_callback;
-    user = participant->status_user;
-    if (callback) {
-        for (i = 0; i < participant->max_local_endpoints; i++) {
-            nb_rtps_local_endpoint_t *local = &participant->local_endpoints[i];
-
-            if (!local->used || local->kind != NB_RTPS_ENDPOINT_PUBLICATION ||
-                local->info.deadline_ms == 0 || count == NB_RTPS_MAX_STATUS_EVENTS) {
-                continue;
-            }
-            if (now < local->last_write_ms ||
-                now - local->last_write_ms <= local->info.deadline_ms) {
-                continue;
-            }
-            if (now < local->next_deadline_ms) {
-                continue;
-            }
-            local->deadline_miss_count++;
-            events[count].kind = NB_RTPS_STATUS_OFFERED_DEADLINE_MISSED;
-            events[count].endpoint = local->info.endpoint_guid;
-            events[count].count = local->deadline_miss_count;
-            count++;
-            local->next_deadline_ms = now + local->info.deadline_ms;
-        }
-        for (i = 0; participant->data_readers && i < participant->max_data_readers; i++) {
-            nb_rtps_data_reader_state_t *state = &participant->data_readers[i];
-            nb_rtps_local_endpoint_t *local;
-            nb_rtps_guid_t reader_guid;
-
-            if (!state->used || count == NB_RTPS_MAX_STATUS_EVENTS) {
-                continue;
-            }
-            reader_guid.prefix = participant->local_guid.prefix;
-            reader_guid.entity = state->reader;
-            local = find_local_endpoint(participant, &reader_guid);
-            if (!local || local->kind != NB_RTPS_ENDPOINT_SUBSCRIPTION ||
-                local->info.deadline_ms == 0) {
-                continue;
-            }
-            if (now < state->last_sample_ms ||
-                now - state->last_sample_ms <= local->info.deadline_ms) {
-                continue;
-            }
-            if (now < state->next_deadline_ms) {
-                continue;
-            }
-            state->deadline_miss_count++;
-            events[count].kind = NB_RTPS_STATUS_REQUESTED_DEADLINE_MISSED;
-            events[count].endpoint = local->info.endpoint_guid;
-            events[count].count = state->deadline_miss_count;
-            count++;
-            state->next_deadline_ms = now + local->info.deadline_ms;
-        }
-    }
-    zb_mutex_unlock(participant->lock);
-
-    if (callback) {
-        for (i = 0; i < count; i++) {
-            callback(user, &events[i]);
-        }
-    }
-}
 
 /*
  * Shortest lease over the local publications that need automatic assertions:
@@ -1701,135 +1083,15 @@ static void refresh_pmd_interval(nb_rtps_participant_t *participant)
  * the built-in reader, exactly as Cyclone DDS does, so a Cyclone reader renews
  * its lease for the local writers it matched.
  */
-void send_pmd(nb_rtps_participant_t *participant, uint32_t kind)
-{
-    uint8_t payload[64];
-    uint8_t message[NB_RTPS_PACKET_MAX];
-    nb_rtps_pmd_t pmd;
-    nb_rtps_header_t header;
-    nb_rtps_time_t timestamp;
-    nb_rtps_data_t data;
-    size_t payload_len = 0;
-    size_t message_len;
-    uint64_t sn;
-    uint64_t now;
-    size_t i;
-
-    memset(&pmd, 0, sizeof(pmd));
-    pmd.participant = participant->local_guid.prefix;
-    pmd.kind = kind;
-    if (nb_rtps_pmd_encode(&pmd, payload, sizeof(payload), &payload_len) != NB_OK) {
-        return;
-    }
-    init_header(participant, &header);
-    now = zn_wall_ms();
-    timestamp.seconds = (int32_t)(now / 1000u);
-    timestamp.fraction = (uint32_t)(((now % 1000u) << 32) / 1000u);
-    zb_mutex_lock(participant->lock);
-    sn = ++participant->pmd_sn;
-    zb_mutex_unlock(participant->lock);
-
-    memset(&data, 0, sizeof(data));
-    data.reader_id = nb_rtps_eid_participant_message_reader;
-    data.writer_id = nb_rtps_eid_participant_message_writer;
-    nb_rtps_sn_from_u64(&data.writer_sn, sn);
-    data.payload = payload;
-    data.payload_len = payload_len;
-    /* PMD 是内建 writer，按源地址投递，不带 INFO_DST。 */
-    message_len = nb_rtps_wire_data(message, sizeof(message), &header, &timestamp, NULL, &data);
-    if (message_len == 0) {
-        return;
-    }
-
-    zb_mutex_lock(participant->lock);
-    for (i = 0; i < participant->max_remotes; i++) {
-        nb_rtps_remote_participant_t *remote = &participant->remotes[i];
-        char host[NB_RTPS_PEER_HOST_MAX];
-        uint16_t port = 0;
-
-        if (!remote->used ||
-            remote_target(remote, host, sizeof(host), &port) != NB_OK) {
-            continue;
-        }
-        (void)nb_rtps_sendto(participant, participant->unicast_sock, message, message_len, host, port);
-    }
-    zb_mutex_unlock(participant->lock);
-}
 
 /*
  * One ParticipantMessageData assertion from a peer renews the writer pairs it
  * matched. The kind has to match a liveliness assertion: anything else (an
  * unknown or vendor-specific kind) is ignored.
  */
-void handle_pmd_data(nb_rtps_participant_t *participant,
-                            const nb_rtps_data_view_t *data,
-                            const nb_rtps_guid_prefix_t *prefix)
-{
-    nb_rtps_pmd_t pmd;
-    nb_rtps_remote_participant_t *remote;
-    uint64_t now;
-    size_t i;
-
-    if (nb_rtps_pmd_decode(data->payload, data->payload_len, &pmd) != NB_OK) {
-        return;
-    }
-    /* The sample carries the prefix it claims to be for; a forged or stale
-     * prefix must not renew a different participant's lease. */
-    if (!nb_rtps_guid_prefix_equal(&pmd.participant, prefix)) {
-        return;
-    }
-    if (pmd.kind != NB_RTPS_PMD_KIND_AUTOMATIC && pmd.kind != NB_RTPS_PMD_KIND_MANUAL) {
-        return;
-    }
-    now = zn_wall_ms();
-    zb_mutex_lock(participant->lock);
-    remote = find_remote(participant, prefix);
-    if (remote) {
-        remote->last_pmd_ms = now;
-    }
-    for (i = 0; participant->data_readers && i < participant->max_data_readers; i++) {
-        nb_rtps_data_reader_state_t *state = &participant->data_readers[i];
-
-        if (state->used &&
-            nb_rtps_guid_prefix_equal(&state->writer.prefix, prefix) &&
-            /* A manual-by-topic writer is asserted on its own messages, so a
-             * participant-level sample must not keep it alive. */
-            state->liveliness_kind != NB_RTPS_LIVELINESS_MANUAL_BY_TOPIC &&
-            (!state->liveliness_kind ||
-             state->liveliness_kind ==
-                 (pmd.kind == NB_RTPS_PMD_KIND_MANUAL
-                      ? NB_RTPS_LIVELINESS_MANUAL_BY_PARTICIPANT
-                      : NB_RTPS_LIVELINESS_AUTOMATIC))) {
-            state->last_liveliness_ms = now;
-        }
-    }
-    zb_mutex_unlock(participant->lock);
-}
 
 /* LivelinessChangedStatus counts, over the writers matched to one reader.
  * Called with the participant lock held. */
-static void liveliness_totals(nb_rtps_participant_t *participant,
-                              const nb_rtps_entity_id_t *reader_id,
-                              uint32_t *alive_count,
-                              uint32_t *not_alive_count)
-{
-    size_t i;
-
-    *alive_count = 0;
-    *not_alive_count = 0;
-    for (i = 0; participant->data_readers && i < participant->max_data_readers; i++) {
-        const nb_rtps_data_reader_state_t *state = &participant->data_readers[i];
-
-        if (!state->used || !nb_rtps_entity_id_equal(&state->reader, reader_id)) {
-            continue;
-        }
-        if (state->alive) {
-            (*alive_count)++;
-        } else {
-            (*not_alive_count)++;
-        }
-    }
-}
 
 /*
  * Automatic liveliness leases. A writer announces a lease and asserts it with
@@ -1839,200 +1101,14 @@ static void liveliness_totals(nb_rtps_participant_t *participant,
  * application-level "assert" call this stack does not expose yet, so those
  * writers stay in whatever state they started in.
  */
-static void check_liveliness(nb_rtps_participant_t *participant, uint64_t now)
-{
-    nb_rtps_status_event_t events[NB_RTPS_MAX_STATUS_EVENTS];
-    size_t count = 0;
-    size_t i;
-    nb_rtps_status_callback_t callback;
-    void *user;
 
-    memset(events, 0, sizeof(events));
-    zb_mutex_lock(participant->lock);
-    callback = participant->status_callback;
-    user = participant->status_user;
-    if (callback && participant->data_readers) {
-        for (i = 0; i < participant->max_data_readers; i++) {
-            nb_rtps_data_reader_state_t *state = &participant->data_readers[i];
-            nb_rtps_local_endpoint_t *local;
-            nb_rtps_guid_t reader_guid;
-            uint32_t lease;
-            int alive;
-
-            if (!state->used || count == NB_RTPS_MAX_STATUS_EVENTS) {
-                continue;
-            }
-            /* The lease is the one the matched writer announced; every kind is
-             * monitored, the renewal rules differ per kind. */
-            lease = state->liveliness_lease_ms;
-            if (lease == 0) {
-                continue;
-            }
-            reader_guid.prefix = participant->local_guid.prefix;
-            reader_guid.entity = state->reader;
-            local = find_local_endpoint(participant, &reader_guid);
-            if (!local || local->kind != NB_RTPS_ENDPOINT_SUBSCRIPTION) {
-                continue;
-            }
-            alive = now >= state->last_liveliness_ms &&
-                    now - state->last_liveliness_ms <= lease;
-            if (alive == state->alive) {
-                continue;
-            }
-            state->alive = alive;
-            state->liveliness_events++;
-            events[count].kind = NB_RTPS_STATUS_LIVELINESS_CHANGED;
-            events[count].endpoint = local->info.endpoint_guid;
-            events[count].writer = state->writer;
-            events[count].has_peer = 1;
-            events[count].count = state->liveliness_events;
-            events[count].alive = alive;
-            liveliness_totals(participant,
-                              &local->info.endpoint_guid.entity,
-                              &events[count].alive_count,
-                              &events[count].not_alive_count);
-            count++;
-        }
-    }
-    zb_mutex_unlock(participant->lock);
-
-    if (callback) {
-        for (i = 0; i < count; i++) {
-            callback(user, &events[i]);
-        }
-    }
-}
-
-static void sweep(nb_rtps_participant_t *participant, uint64_t now)
-{
-    for (;;) {
-        nb_rtps_participant_info_t info;
-        int found = 0;
-        uint32_t i;
-
-        zb_mutex_lock(participant->lock);
-        for (i = 0; i < participant->max_remotes; i++) {
-            nb_rtps_remote_participant_t *remote = &participant->remotes[i];
-            if (remote->used && now >= remote->last_seen_ms &&
-                now - remote->last_seen_ms > remote->lease_ms) {
-                info = remote->info;
-                remote->used = 0;
-                nb_rtps_used_remove(participant->remotes_used,
-                                    &participant->remotes_used_count,
-                                    i);
-                participant->stats.lease_expired++;
-                found = 1;
-                break;
-            }
-        }
-        zb_mutex_unlock(participant->lock);
-        if (!found) {
-            break;
-        }
-        notify(participant, NB_RTPS_PARTICIPANT_REMOVED, &info);
-        remove_remote_endpoints_for_prefix(participant, &info.guid.prefix);
-    }
-    check_deadlines(participant, now);
-    check_liveliness(participant, now);
-    retry_tcp_links(participant);
-}
-
-static uint64_t next_announce_delay(nb_rtps_participant_t *participant)
-{
-    uint32_t window = participant->announce_interval_ms / 5u;
-    int64_t delay;
-    uint32_t random;
-
-    if (window == 0) {
-        return participant->announce_interval_ms;
-    }
-    participant->rng = participant->rng * 1103515245u + 12345u;
-    random = participant->rng % (window * 2u + 1u);
-    delay = (int64_t)participant->announce_interval_ms + (int64_t)random - (int64_t)window;
-    if (delay < (int64_t)(participant->announce_interval_ms / 2u)) {
-        delay = participant->announce_interval_ms / 2u;
-    }
-    if (delay < (int64_t)NB_RTPS_MIN_ANNOUNCE_MS) {
-        delay = NB_RTPS_MIN_ANNOUNCE_MS;
-    }
-    return (uint64_t)delay;
-}
 
 /*
  * Repair incomplete fragment assemblies. Falling back to the 2 s timeout and a
  * whole-sample retransmit wastes both latency and bandwidth, so after a short
  * quiet period the reader asks for just the missing fragments.
  */
-static void service_frag_assemblies(nb_rtps_participant_t *participant, uint64_t now)
-{
-    size_t i;
 
-    if (!participant || !participant->frag_assemblies) {
-        return;
-    }
-    zb_mutex_lock(participant->lock);
-    for (i = 0; i < participant->max_frag_assemblies; i++) {
-        nb_rtps_frag_assembly_t *assembly = &participant->frag_assemblies[i];
-
-        if (!assembly->used || assembly->complete) {
-            continue;
-        }
-        if (assembly->nack_count >= NB_RTPS_FRAG_MAX_NACKS) {
-            continue;
-        }
-        if (now < assembly->last_update_ms ||
-            now - assembly->last_update_ms < NB_RTPS_FRAG_NACK_DELAY_MS) {
-            continue;
-        }
-        if (assembly->nack_count > 0 && now >= assembly->last_nack_ms &&
-            now - assembly->last_nack_ms < NB_RTPS_FRAG_NACK_RETRY_MS) {
-            continue;
-        }
-        (void)send_frag_nack(participant, assembly, now);
-    }
-    zb_mutex_unlock(participant->lock);
-}
-
-static void thread_main(void *user)
-{
-    nb_rtps_participant_t *participant = (nb_rtps_participant_t *)user;
-
-    while (!participant->stop) {
-        int rc = zn_poller_poll(participant->poller, 100);
-        uint64_t now;
-
-        if (rc > 0) {
-            drain_socket(participant, participant->rx_sock);
-            drain_socket(participant, participant->unicast_sock);
-            if (participant->data_sock) {
-                drain_socket(participant, participant->data_sock);
-            }
-        }
-        nb_rtps_tcp_service(participant->tcp);
-        now = zn_wall_ms();
-        if (now >= participant->next_announce_ms) {
-            (void)send_spdp(participant);
-            participant->next_announce_ms = now + next_announce_delay(participant);
-        }
-        if (now >= participant->next_sweep_ms) {
-            sweep(participant, now);
-            participant->next_sweep_ms = now + NB_RTPS_SWEEP_INTERVAL_MS;
-        }
-        if (now >= participant->next_sedp_heartbeat_ms) {
-            send_sedp_heartbeats(participant);
-            participant->next_sedp_heartbeat_ms = now + participant->sedp_heartbeat_ms;
-        }
-        if (now >= participant->next_data_heartbeat_ms) {
-            send_data_heartbeats(participant);
-            participant->next_data_heartbeat_ms = now + participant->data_heartbeat_ms;
-        }
-        if (participant->pmd_interval_ms != 0 && now >= participant->next_pmd_ms) {
-            send_pmd(participant, NB_RTPS_PMD_KIND_AUTOMATIC);
-            participant->next_pmd_ms = now + participant->pmd_interval_ms;
-        }
-        service_frag_assemblies(participant, now);
-    }
-}
 
 static void free_participant(nb_rtps_participant_t *participant)
 {

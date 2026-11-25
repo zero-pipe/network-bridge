@@ -165,6 +165,9 @@ set(NB_RTPS_CORE_SOURCES
     rtps/rtps_reliable.c
     rtps/rtps_tcp.c
     rtps/rtps_participant.c
+    rtps/rtps_matching.c
+    rtps/rtps_schedule.c
+    rtps/rtps_tcp_link.c
 )
 add_library(rtps_core STATIC ${NB_RTPS_CORE_SOURCES})
 add_library(nb::rtps_core ALIAS rtps_core)
