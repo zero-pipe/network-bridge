@@ -19,6 +19,7 @@ add_subdirectory(01_rpc)
 add_subdirectory(02_rpc_streaming)
 add_subdirectory(03_dds_pubsub)
 add_subdirectory(04_config)
+add_subdirectory(05_dds_interop)
 
 set(NB_EXAMPLE_TARGETS
     example_01_rpc_server
@@ -28,6 +29,8 @@ set(NB_EXAMPLE_TARGETS
     example_04_config_client
     example_04_config_dds
     example_03_dds_pubsub
+    example_05_nb_pub
+    example_05_nb_sub
 )
 install(TARGETS ${NB_EXAMPLE_TARGETS} RUNTIME DESTINATION bin)
 

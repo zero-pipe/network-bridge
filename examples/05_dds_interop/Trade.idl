@@ -1,0 +1,13 @@
+/*
+ * Interop type used by the examples in this directory.
+ *
+ * The same .idl is compiled by Cyclone DDS idlc for the Cyclone side and
+ * hand-encoded by the network-bridge side (see trade_cdr.h). Keep the two in
+ * sync: the network-bridge peer advertises the TypeInformation that idlc
+ * generates from *this* file (see trade_ti.h).
+ */
+struct Trade {
+    string symbol;
+    double price;
+    long   volume;
+};
