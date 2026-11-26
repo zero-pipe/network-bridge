@@ -25,6 +25,10 @@
 #define NB_RTPS_PID_PARTICIPANT_LEASE_DURATION 0x0002u
 #define NB_RTPS_PID_TOPIC_NAME 0x0005u
 #define NB_RTPS_PID_TYPE_NAME 0x0007u
+/* XTypes TypeInformation (DDS-XTypes 1.3). Opaque XCDR2 bytes produced by a
+ * type generator (e.g. Cyclone idlc); carried verbatim in SEDP so a strict
+ * type-consistency peer can match on the equivalence hash. */
+#define NB_RTPS_PID_TYPE_INFORMATION 0x0075u
 #define NB_RTPS_PID_UNICAST_LOCATOR 0x002fu
 #define NB_RTPS_PID_MULTICAST_LOCATOR 0x0030u
 #define NB_RTPS_PID_PROTOCOL_VERSION 0x0015u

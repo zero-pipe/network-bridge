@@ -439,6 +439,24 @@ nb_dds_participant_create(&popt, &part);
 长度精确）；topic 传真实 IDL 类型名时按裸 CDR body 发送，可与 Cyclone DDS /
 Fast DDS 在线缆上互通，编解码由应用（IDL 生成代码）负责。
 具体接口见 `<nb/dds.h>`。
+
+### 与严格类型一致性对端互通（XTypes TypeInformation）
+
+对端若开启严格类型一致性校验，需要我们的 SEDP 通告 `PID_TYPE_INFORMATION`。
+用 idlc 从同一份 IDL 生成 TypeInformation 字节块，传给 `nb_dds_topic_create_with_type_info`：
+
+```c
+/* 由 `idlc -l c Trade.idl` 生成的 TypeInformation（idlc 把它内联成
+ * TYPE_INFO_CDR_<Type> 常量）。把它作为不透明 blob 交给 topic。 */
+extern const unsigned char TYPE_INFO_CDR_Trade[];
+nb_dds_topic_create_with_type_info(part, "ticks", "Trade",
+                                   TYPE_INFO_CDR_Trade, 100 /* sizeof */,
+                                   NULL, &ticks);
+```
+
+字节块被原样放进 SEDP 的 `0x75` 参数；对端比较其中的等价哈希完成匹配。
+若用普通 `nb_dds_topic_create`（不带 blob），严格对端只会按类型名匹配甚至拒绝。
+已验证：Cyclone 0.10.5 在 `DISALLOW_TYPE_COERCION + force_type_validation` 下能匹配并收到数据。
 ## 发现视图
 
 DDS 在内建 topic `DCPSParticipant`、`DCPSPublication`、`DCPSSubscription` 和

@@ -74,6 +74,8 @@ struct rtps_topic {
     struct rtps_participant *participant;
     char name[RTPS_TOPIC_NAME_MAX];
     char type_name[RTPS_TOPIC_TYPE_MAX];
+    const void *type_information;
+    size_t type_information_len;
     rtps_qos_t qos;
     size_t writer_count;
     size_t reader_count;

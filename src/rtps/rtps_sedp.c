@@ -150,6 +150,14 @@ int nb_rtps_sedp_build(const nb_rtps_endpoint_info_t *info,
     if (rc != NB_OK) {
         return rc;
     }
+    if (info->type_information && info->type_information_len > 0) {
+        rc = nb_rtps_param_put_bytes(&writer, NB_RTPS_PID_TYPE_INFORMATION,
+                                     info->type_information,
+                                     info->type_information_len);
+        if (rc != NB_OK) {
+            return rc;
+        }
+    }
     rc = nb_rtps_param_put_reliability(
         &writer, NB_RTPS_PID_RELIABILITY, reliability, &max_blocking_time);
     if (rc != NB_OK) {

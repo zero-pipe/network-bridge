@@ -34,6 +34,12 @@ typedef struct rtps_topic_desc {
     uint32_t struct_size;
     const char *name;
     const char *type_name;
+    /* Optional XTypes TypeInformation: opaque XCDR2 bytes generated from the
+     * type's IDL. Borrowed; must outlive the topic. When set, it is announced
+     * in SEDP (PID_TYPE_INFORMATION) so strict type-consistency peers can match
+     * on the equivalence hash. NULL/0 omits it (name-only matching). */
+    const void *type_information;
+    size_t type_information_len;
     /* Topic-level defaults for the endpoints created from it. */
     rtps_qos_t qos;
 } rtps_topic_desc_t;

@@ -254,6 +254,8 @@ void rtps_api_fill_endpoint(const struct rtps_topic *topic,
     memset(info, 0, sizeof(*info));
     rtps_api_copy(info->topic_name, sizeof(info->topic_name), topic->name);
     rtps_api_copy(info->type_name, sizeof(info->type_name), topic->type_name);
+    info->type_information = (const uint8_t *)topic->type_information;
+    info->type_information_len = topic->type_information_len;
     if (qos->present & RTPS_QOS_PRESENT_RELIABILITY) {
         info->reliability = qos->reliability;
     }

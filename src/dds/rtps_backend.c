@@ -340,6 +340,8 @@ static void nb_dds_rtps_participant_stop(void *participant)
 static int nb_dds_rtps_topic_create(void *participant,
                                     const char *wire_name,
                                     const char *type_name,
+                                    const void *type_information,
+                                    size_t type_information_len,
                                     const nb_dds_qos_t *qos,
                                     void **out)
 {
@@ -360,6 +362,8 @@ static int nb_dds_rtps_topic_create(void *participant,
      * matched as such, with the payload an opaque CDR body on both ends. */
     desc.type_name = (type_name && type_name[0]) ? type_name
                                                  : NB_DDS_RTPS_WIRE_TYPE;
+    desc.type_information = type_information;
+    desc.type_information_len = type_information ? type_information_len : 0;
     nb_dds_rtps_make_qos(qos, &desc.qos);
     rc = rtps_topic_create(wrapper->participant, &desc, &topic);
     if (rc != RTPS_OK) {

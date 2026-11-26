@@ -28,6 +28,8 @@ typedef struct nb_dds_backend_ops {
     int (*topic_create)(void *participant,
                         const char *wire_name,
                         const char *type_name,
+                        const void *type_information,
+                        size_t type_information_len,
                         const nb_dds_qos_t *qos,
                         void **out);
     void (*topic_destroy)(void *participant, void *topic);

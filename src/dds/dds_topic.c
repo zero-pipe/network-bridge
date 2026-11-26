@@ -26,11 +26,13 @@ static int nb_dds_topic_make_wire_name(const nb_dds_participant_t *participant,
     return NB_OK;
 }
 
-int nb_dds_topic_create(nb_dds_participant_t *participant,
-                        const char *name,
-                        const char *type_name,
-                        const nb_dds_qos_t *qos,
-                        nb_dds_topic_t **out)
+static int dds_topic_create_ex(nb_dds_participant_t *participant,
+                               const char *name,
+                               const char *type_name,
+                               const void *type_information,
+                               size_t type_information_len,
+                               const nb_dds_qos_t *qos,
+                               nb_dds_topic_t **out)
 {
     nb_dds_topic_t *topic;
     nb_dds_topic_t *existing;
@@ -79,7 +81,9 @@ int nb_dds_topic_create(nb_dds_participant_t *participant,
         return rc;
     }
     rc = participant->ops->topic_create(participant->backend, topic->wire_name,
-                                        topic->type_name, &topic->qos, &topic->backend);
+                                        topic->type_name, type_information,
+                                        type_information_len, &topic->qos,
+                                        &topic->backend);
     if (rc != NB_OK) {
         free(topic);
         return rc;
@@ -90,6 +94,30 @@ int nb_dds_topic_create(nb_dds_participant_t *participant,
     zb_mutex_unlock(participant->lock);
     *out = topic;
     return NB_OK;
+}
+
+int nb_dds_topic_create(nb_dds_participant_t *participant,
+                        const char *name,
+                        const char *type_name,
+                        const nb_dds_qos_t *qos,
+                        nb_dds_topic_t **out)
+{
+    return dds_topic_create_ex(participant, name, type_name, NULL, 0, qos, out);
+}
+
+int nb_dds_topic_create_with_type_info(nb_dds_participant_t *participant,
+                                       const char *name,
+                                       const char *type_name,
+                                       const void *type_information,
+                                       size_t type_information_len,
+                                       const nb_dds_qos_t *qos,
+                                       nb_dds_topic_t **out)
+{
+    if (type_information && type_information_len == 0) {
+        return NB_ERR_INVALID;
+    }
+    return dds_topic_create_ex(participant, name, type_name, type_information,
+                               type_information_len, qos, out);
 }
 
 void nb_dds_topic_destroy(nb_dds_topic_t *topic)

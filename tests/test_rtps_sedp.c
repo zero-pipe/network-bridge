@@ -290,11 +290,54 @@ static void test_endpoint_missing_required(void)
           NB_ERR_BAD_MESSAGE);
 }
 
+/* TypeInformation is carried verbatim as PID_TYPE_INFORMATION (0x75); a strict
+ * type-consistency peer matches on the blob's equivalence hash. */
+static void test_endpoint_type_information(void)
+{
+    static const uint8_t blob[] = {
+        0x60, 0x00, 0x00, 0x00, 0x01, 0x10, 0x00, 0x40,
+        0x28, 0x00, 0x00, 0x00, 0x24, 0x00, 0x00, 0x00,
+        0x14, 0x00, 0x00, 0x00, 0xf1, 0xcb, 0x3f, 0x88,
+    };
+    uint8_t buf[512];
+    nb_rtps_endpoint_info_t info;
+    nb_rtps_endpoint_info_t parsed;
+    const uint8_t *value = NULL;
+    size_t value_len = 0;
+    size_t len = 0;
+
+    memset(&info, 0, sizeof(info));
+    info.endpoint_guid.prefix.bytes[0] = 1;
+    info.endpoint_guid.entity.bytes[0] = 2;
+    snprintf(info.topic_name, sizeof(info.topic_name), "%s", "nb/typed");
+    snprintf(info.type_name, sizeof(info.type_name), "%s", "nb::Typed");
+    info.reliability = NB_RTPS_RELIABILITY_BEST_EFFORT;
+    info.type_information = blob;
+    info.type_information_len = sizeof(blob);
+
+    CHECK(nb_rtps_sedp_build(&info, buf, sizeof(buf), &len) == NB_OK);
+    CHECK(find_parameter(buf, len, NB_RTPS_PID_TYPE_INFORMATION, &value, &value_len));
+    CHECK(value_len == sizeof(blob));
+    CHECK(value && memcmp(value, blob, sizeof(blob)) == 0);
+
+    /* Unknown-by-us parameters are ignored on parse; the required fields still
+     * come through. */
+    CHECK(nb_rtps_sedp_parse(buf, len, &parsed) == NB_OK);
+    CHECK(strcmp(parsed.type_name, "nb::Typed") == 0);
+
+    /* Without the blob the parameter is omitted. */
+    info.type_information = NULL;
+    info.type_information_len = 0;
+    CHECK(nb_rtps_sedp_build(&info, buf, sizeof(buf), &len) == NB_OK);
+    CHECK(!find_parameter(buf, len, NB_RTPS_PID_TYPE_INFORMATION, NULL, NULL));
+}
+
 int main(void)
 {
     test_endpoint_roundtrip();
     test_endpoint_defaults();
     test_endpoint_missing_required();
+    test_endpoint_type_information();
     if (g_fail) {
         nb_log_error("rtps sedp tests failed");
         return 1;

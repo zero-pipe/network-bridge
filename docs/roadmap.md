@@ -24,23 +24,26 @@
 
 1. **双平台判定**：Linux 为权威（38 项 ctest + perf/stability 门禁）；Windows 保证
    构建与 35 项 ctest。
-3. **znet 上游缺口**（影响性能，不影响正确性）：
+2. **znet 上游缺口**（影响性能，不影响正确性）：
    - 缺 `zn_poller_current()` → RPC 侧用 `zn_poller_is_current_thread()` 反查兜底；
    - 缺批量收发 → UDP 传输回退到单包循环，失去 `sendmmsg` / `recvmmsg` 优化。
    建议在 znet 补齐后删掉本仓库的兜底代码。
-4. **DDS 侧类型**：topic 传真实 IDL 类型名时按裸 CDR body 收发，编解码归应用
+3. **DDS 侧类型**：topic 传真实 IDL 类型名时按裸 CDR body 收发，编解码归应用
    （IDL 生成代码）；默认 `dds::Message` 仍是不透明字节、长度精确。默认的按
    type name 匹配下已可与 Cyclone DDS / Fast DDS 互通。
-5. **XTypes TypeObject（暂缓）**：严格类型一致性
-   （`EXACT_TYPE_TYPE_CONSISTENCY`）要求 SEDP 通告 `PID_TYPE_INFORMATION`：
-   `TypeIdentifier` + `MinimalTypeObject` + 14 字节 `EquivalenceHash`（对序列化
-   TypeObject 做 MD5），且必须与对端逐字节一致，否则严格对端拒绝匹配。当前无
-   任何 TypeObject 实现，仅有 `PID_TYPE_NAME`。
-   - 涉及模块：`rtps_sedp`（参数写入）、`rtps_param`（`PID_TYPE_INFORMATION`
-     编解码）、新增 TypeObject 模型与哈希（MD5 已有，`zbase`）。
-   - **前置条件**：Linux + Cyclone/FastDDS 参考对端。哈希算法连一个字节都不能
-     差，必须在真实对端上验收；本机（Windows、无参考对端）无法验证，故先挂起。
-   - 收尾：实现后用严格模式对端跑互通测试，并把本节移到"已完成"。
+4. **XTypes TypeInformation（已打通，剩余可选增强）**：
+   - **已完成**：topic 可用 `nb_dds_topic_create_with_type_info(...)` 携带一份
+     idlc 生成的 TypeInformation 不透明 blob（Cyclone `idlc -l c` 输出的
+     `TYPE_INFO_CDR_<Type>` 字节），SEDP 以 `PID_TYPE_INFORMATION`(0x75) 原样通告。
+     已在 Linux + Cyclone 0.10.5 上验证：严格类型一致性
+     （`DISALLOW_TYPE_COERCION` + `force_type_validation`）下对端**能匹配并收到数据**；
+     去掉该参数则严格对端拒绝匹配（对照实验通过）。
+   - **剩余（可选）**：
+     - 运行时从类型结构生成 `MinimalTypeObject` + `EquivalenceHash`，免去用户手动
+       用 idlc 生成 blob（跨厂商哈希算法差异也需此项才能互通）；
+     - TypeLookup 服务（按 TypeIdentifier 拉取 TypeObject），用于哈希不一致但
+       结构可赋值的严格场景。
+   - 说明：`rtps_param` 仍按字节透传 0x75，无需实现 XCDR2 结构编解码。
 
 ## 约定
 

@@ -97,6 +97,13 @@ typedef struct nb_rtps_endpoint_info {
      * handle without deserializing the key. Cyclone-specific (PID 0x801c) and
      * ignored by other implementations. Local-only, never decoded. */
     int requests_keyhash;
+    /* Optional XTypes TypeInformation: an opaque XCDR2 blob generated from the
+     * type's IDL (Cyclone idlc, Fast DDS gen, ...). Borrowed; the owner must
+     * keep it alive for the endpoint's lifetime. When set it is announced as
+     * PID_TYPE_INFORMATION so a strict type-consistency peer can match on the
+     * equivalence hash. NULL/0 omits the parameter. */
+    const uint8_t *type_information;
+    size_t type_information_len;
 } nb_rtps_endpoint_info_t;
 
 /* Build the serialized ParameterList for a SEDP DATA payload. */

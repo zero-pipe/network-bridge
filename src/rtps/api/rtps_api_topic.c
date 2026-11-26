@@ -66,6 +66,10 @@ int rtps_topic_create(rtps_participant_t *participant,
     topic->participant = participant;
     rtps_api_copy(topic->name, sizeof(topic->name), desc->name);
     rtps_api_copy(topic->type_name, sizeof(topic->type_name), desc->type_name);
+    topic->type_information = desc->type_information;
+    topic->type_information_len = desc->type_information
+                                      ? desc->type_information_len
+                                      : 0;
     topic->qos = desc->qos;
 
     zb_mutex_lock(participant->lock);
