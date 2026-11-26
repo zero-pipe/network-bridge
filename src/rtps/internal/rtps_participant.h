@@ -214,6 +214,31 @@ int nb_rtps_participant_publish(nb_rtps_participant_t *participant,
                                 const void *payload,
                                 size_t payload_len);
 
+/* One pre-encapsulated sample in a bulk publish. data already carries the
+ * four-byte encapsulation header, exactly like the payload of
+ * nb_rtps_participant_publish(). */
+typedef struct nb_rtps_batch_sample {
+    const void *data;
+    size_t len;
+} nb_rtps_batch_sample_t;
+
+/*
+ * Bulk publish: send `count` samples in as few datagrams as possible. Small
+ * samples that fit are packed as several DATA submessages in one Message (one
+ * datagram); the resulting datagrams are then flushed with a single batched
+ * send (sendmmsg on Linux). Samples that do not fit are sent in their own
+ * datagrams.
+ *
+ * Only best-effort, retained-history-free publications take this path; the
+ * caller falls back to per-sample nb_rtps_participant_publish() otherwise (the
+ * reliable history, heartbeats and GAP bookkeeping stay on the single-sample
+ * path). Returns NB_OK if at least one reader accepted the batch.
+ */
+int nb_rtps_participant_publish_batch(nb_rtps_participant_t *participant,
+                                      const nb_rtps_guid_t *writer_guid,
+                                      const nb_rtps_batch_sample_t *samples,
+                                      size_t count);
+
 /*
  * Same, with an explicit RTPS source timestamp for the INFO_TS of the sample.
  * BY_SOURCE_TIMESTAMP subscriptions order samples by this value, so a caller

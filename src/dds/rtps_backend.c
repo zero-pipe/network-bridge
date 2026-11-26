@@ -445,6 +445,71 @@ static int nb_dds_rtps_writer_write(void *writer, const void *data, size_t len)
     return NB_OK;
 }
 
+static int nb_dds_rtps_writer_write_batch(void *writer,
+                                          const void *const *datas,
+                                          const size_t *lens,
+                                          size_t count)
+{
+    nb_dds_rtps_writer_t *wrapper = (nb_dds_rtps_writer_t *)writer;
+    rtps_payload_t *payloads;
+    uint8_t *arena = NULL;
+    size_t arena_size = 0;
+    size_t off = 0;
+    size_t i;
+    int rc;
+
+    if (!wrapper || (count > 0 && (!datas || !lens))) {
+        return NB_ERR_INVALID;
+    }
+    if (count == 0) {
+        return NB_OK;
+    }
+    payloads = (rtps_payload_t *)calloc(count, sizeof(*payloads));
+    if (!payloads) {
+        return NB_ERR_NOMEM;
+    }
+    for (i = 0; i < count; i++) {
+        if (!datas[i] || lens[i] == 0) {
+            free(payloads);
+            return NB_ERR_INVALID;
+        }
+    }
+    if (wrapper->dds_message) {
+        /* One arena for every u32-length-prefixed body. */
+        for (i = 0; i < count; i++) {
+            arena_size += lens[i] + 4u;
+        }
+        arena = (uint8_t *)malloc(arena_size);
+        if (!arena) {
+            free(payloads);
+            return NB_ERR_NOMEM;
+        }
+        for (i = 0; i < count; i++) {
+            size_t len = lens[i];
+
+            arena[off + 0] = (uint8_t)(len & 0xffu);
+            arena[off + 1] = (uint8_t)((len >> 8) & 0xffu);
+            arena[off + 2] = (uint8_t)((len >> 16) & 0xffu);
+            arena[off + 3] = (uint8_t)((len >> 24) & 0xffu);
+            memcpy(arena + off + 4, datas[i], len);
+            payloads[i].data = arena + off;
+            payloads[i].size = len + 4u;
+            off += len + 4u;
+        }
+    } else {
+        for (i = 0; i < count; i++) {
+            payloads[i].data = datas[i];
+            payloads[i].size = lens[i];
+        }
+    }
+    rc = rtps_writer_write_batch(wrapper->writer, payloads, count);
+    rc = (rc == RTPS_OK) ? NB_OK : NB_ERR_IO;
+
+    free(arena);
+    free(payloads);
+    return rc;
+}
+
 static void nb_dds_rtps_writer_destroy(void *participant, void *writer)
 {
     nb_dds_rtps_writer_t *wrapper = (nb_dds_rtps_writer_t *)writer;
@@ -606,6 +671,7 @@ const nb_dds_backend_ops_t nb_dds_rtps_backend_ops = {
     .topic_destroy = nb_dds_rtps_topic_destroy,
     .writer_create = nb_dds_rtps_writer_create,
     .writer_write = nb_dds_rtps_writer_write,
+    .writer_write_batch = nb_dds_rtps_writer_write_batch,
     .writer_destroy = nb_dds_rtps_writer_destroy,
     .reader_create = nb_dds_rtps_reader_create,
     .reader_destroy = nb_dds_rtps_reader_destroy,

@@ -39,6 +39,10 @@ typedef struct nb_dds_backend_ops {
                          const nb_dds_qos_t *qos,
                          void **out);
     int (*writer_write)(void *writer, const void *data, size_t len);
+    int (*writer_write_batch)(void *writer,
+                              const void *const *datas,
+                              const size_t *lens,
+                              size_t count);
     void (*writer_destroy)(void *participant, void *writer);
 
     int (*reader_create)(void *participant,

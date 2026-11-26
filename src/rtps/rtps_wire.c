@@ -56,6 +56,28 @@ size_t nb_rtps_wire_data(uint8_t *buf,
     return wire_end(&writer);
 }
 
+size_t nb_rtps_wire_data_multi(uint8_t *buf,
+                               size_t cap,
+                               const nb_rtps_header_t *header,
+                               const nb_rtps_time_t *ts,
+                               const nb_rtps_guid_prefix_t *dst,
+                               const nb_rtps_data_t *items,
+                               size_t count)
+{
+    nb_cdr_writer_t writer;
+    size_t i;
+
+    if (!items || count == 0 || wire_begin(&writer, buf, cap, header, ts, dst) != 0) {
+        return 0;
+    }
+    for (i = 0; i < count; i++) {
+        if (nb_rtps_data(&writer, &items[i]) != NB_OK) {
+            return 0;
+        }
+    }
+    return wire_end(&writer);
+}
+
 size_t nb_rtps_wire_data_frag(uint8_t *buf,
                               size_t cap,
                               const nb_rtps_header_t *header,

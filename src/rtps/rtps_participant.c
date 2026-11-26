@@ -1002,20 +1002,50 @@ static void handle_datagram(nb_rtps_participant_t *participant,
 
 void drain_socket(nb_rtps_participant_t *participant, zn_socket *socket)
 {
-    uint8_t buf[NB_RTPS_RX_MAX];
-    char host[NB_RTPS_PEER_HOST_MAX];
-    uint16_t port;
+    zn_socket_rx items[NB_RTPS_RX_BATCH];
+    size_t i;
+
+    if (!participant || !socket) {
+        return;
+    }
+    if (!participant->net.rx_batch) {
+        /* No arena (should not happen): fall back to one datagram at a time. */
+        uint8_t buf[NB_RTPS_RX_MAX];
+        char host[NB_RTPS_PEER_HOST_MAX];
+        uint16_t port;
+
+        for (;;) {
+            zn_ssize_t n = zn_socket_recvfrom(socket, buf, sizeof(buf), host, sizeof(host), &port);
+
+            if (n <= 0) {
+                break;
+            }
+            participant->stats.packets_received++;
+            participant->stats.bytes_received += (uint64_t)n;
+            nb_rtps_dump_frame(participant, "RX", buf, (size_t)n, host, port);
+            handle_datagram(participant, buf, (size_t)n, host, port);
+        }
+        return;
+    }
 
     for (;;) {
-        zn_ssize_t n = zn_socket_recvfrom(
-            socket, buf, sizeof(buf), host, sizeof(host), &port);
+        int n;
+
+        for (i = 0; i < NB_RTPS_RX_BATCH; i++) {
+            items[i].buf = participant->net.rx_batch + i * NB_RTPS_RX_MAX;
+            items[i].cap = NB_RTPS_RX_MAX;
+            items[i].len = 0;
+        }
+        n = zn_socket_recvfrom_batch(socket, items, NB_RTPS_RX_BATCH);
         if (n <= 0) {
             break;
         }
-        participant->stats.packets_received++;
-        participant->stats.bytes_received += (uint64_t)n;
-        nb_rtps_dump_frame(participant, "RX", buf, (size_t)n, host, port);
-        handle_datagram(participant, buf, (size_t)n, host, port);
+        for (i = 0; i < (size_t)n; i++) {
+            participant->stats.packets_received++;
+            participant->stats.bytes_received += (uint64_t)items[i].len;
+            nb_rtps_dump_frame(participant, "RX", items[i].buf, items[i].len, items[i].ip, items[i].port);
+            handle_datagram(participant, items[i].buf, items[i].len, items[i].ip, items[i].port);
+        }
     }
 }
 
@@ -1165,6 +1195,7 @@ static void free_participant(nb_rtps_participant_t *participant)
     free(participant->tables.local_endpoints);
     free(participant->tables.remote_endpoints);
     free(participant->tables.remotes);
+    free(participant->net.rx_batch);
     free(participant);
 }
 
@@ -1361,11 +1392,13 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
         nb_rtps_reliable_writer_create(participant->tables.max_local_endpoints);
     participant->tables.subscriptions_writer =
         nb_rtps_reliable_writer_create(participant->tables.max_local_endpoints);
+    participant->net.rx_batch =
+        (uint8_t *)calloc(NB_RTPS_RX_BATCH, NB_RTPS_RX_MAX);
     if (!participant->net.lock || !participant->tables.remotes || !participant->tables.local_endpoints ||
         !participant->tables.remote_endpoints || !participant->tables.local_used ||
         !participant->tables.remote_ep_used || !participant->tables.remotes_used ||
         !participant->tables.publications_writer ||
-        !participant->tables.subscriptions_writer) {
+        !participant->tables.subscriptions_writer || !participant->net.rx_batch) {
         free_participant(participant);
         return NULL;
     }
@@ -2185,6 +2218,327 @@ int nb_rtps_participant_publish_dds_message(
     }
     return nb_rtps_participant_publish(
         participant, writer_guid, payload, payload_len);
+}
+
+/* ---- bulk publish ------------------------------------------------------- */
+
+#define NB_RTPS_BATCH_ITEMS 64u
+#define NB_RTPS_SEND_BATCH 64u
+
+typedef struct nb_rtps_tx_dgram {
+    char host[NB_RTPS_PEER_HOST_MAX];
+    uint16_t port;
+    size_t len;
+    uint8_t *buf;
+} nb_rtps_tx_dgram_t;
+
+/* Build one Message holding n DATA submessages for the same reader. Returns the
+ * message length or 0 if it does not fit cap. */
+static size_t build_batch_message(uint8_t *message,
+                                  size_t cap,
+                                  const nb_rtps_header_t *header,
+                                  const nb_rtps_time_t *ts,
+                                  const nb_rtps_guid_t *writer_guid,
+                                  const nb_rtps_guid_t *reader_guid,
+                                  const nb_rtps_batch_sample_t *samples,
+                                  size_t n,
+                                  uint64_t first_sn)
+{
+    nb_rtps_data_t items[NB_RTPS_BATCH_ITEMS];
+    size_t i;
+
+    if (n == 0 || n > NB_RTPS_BATCH_ITEMS) {
+        return 0;
+    }
+    for (i = 0; i < n; i++) {
+        memset(&items[i], 0, sizeof(items[i]));
+        items[i].reader_id = reader_guid->entity;
+        items[i].writer_id = writer_guid->entity;
+        nb_rtps_sn_from_u64(&items[i].writer_sn, first_sn + i);
+        items[i].payload = (const uint8_t *)samples[i].data;
+        items[i].payload_len = samples[i].len;
+    }
+    return nb_rtps_wire_data_multi(
+        message, cap, header, ts, &reader_guid->prefix, items, n);
+}
+
+static int tx_append(nb_rtps_tx_dgram_t **list,
+                     size_t *count,
+                     size_t *cap,
+                     const char *host,
+                     uint16_t port,
+                     const uint8_t *buf,
+                     size_t len)
+{
+    nb_rtps_tx_dgram_t *slot;
+
+    if (*count == *cap) {
+        size_t ncap = *cap ? *cap * 2u : 16u;
+        nb_rtps_tx_dgram_t *nl =
+            (nb_rtps_tx_dgram_t *)realloc(*list, ncap * sizeof(**list));
+
+        if (!nl) {
+            return NB_ERR_NOMEM;
+        }
+        *list = nl;
+        *cap = ncap;
+    }
+    slot = &(*list)[*count];
+    copy_str(slot->host, sizeof(slot->host), host);
+    slot->port = port;
+    slot->buf = (uint8_t *)malloc(len);
+    if (!slot->buf) {
+        return NB_ERR_NOMEM;
+    }
+    memcpy(slot->buf, buf, len);
+    slot->len = len;
+    (*count)++;
+    return NB_OK;
+}
+
+/* Encoded size of one DATA submessage for a body of payload_len bytes:
+ * 4-byte submessage header plus the 20 bytes before the payload, padded to a
+ * 4-byte boundary. Offsets between submessages stay 4-aligned. */
+static size_t data_submessage_size(size_t payload_len)
+{
+    size_t body = 20u + payload_len;
+
+    return 4u + ((body + 3u) & ~(size_t)3u);
+}
+
+/* Pack the samples for one reader into as few datagrams as fit, then queue one
+ * copy per target address of that reader. */
+static int build_reader_datagrams(nb_rtps_participant_t *participant,
+                                  const nb_rtps_guid_t *writer_guid,
+                                  const nb_rtps_guid_t *reader_guid,
+                                  const nb_rtps_batch_sample_t *samples,
+                                  size_t count,
+                                  uint64_t first_sn,
+                                  const nb_rtps_targets_t *targets,
+                                  nb_rtps_tx_dgram_t **list,
+                                  size_t *dcount,
+                                  size_t *cap)
+{
+    uint8_t message[NB_RTPS_PACKET_MAX];
+    nb_rtps_header_t header;
+    nb_rtps_time_t timestamp;
+    size_t header_len;
+    size_t start = 0;
+
+    init_header(participant, &header);
+    timestamp = rtps_time_from_ns(zn_wall_ms() * 1000000ull);
+
+    /* Fixed per-message overhead (MessageHeader + INFO_TS + INFO_DST), measured
+     * once so grouping is arithmetic instead of rebuilding the message. */
+    {
+        size_t pl = build_batch_message(message,
+                                        sizeof(message),
+                                        &header,
+                                        &timestamp,
+                                        writer_guid,
+                                        reader_guid,
+                                        samples,
+                                        1,
+                                        first_sn);
+
+        if (pl == 0) {
+            return NB_ERR_BAD_MESSAGE;
+        }
+        header_len = pl - data_submessage_size(samples[0].len);
+    }
+
+    while (start < count) {
+        size_t acc = header_len + data_submessage_size(samples[start].len);
+        size_t end = start + 1u;
+        size_t len;
+        size_t t;
+
+        while (end < count && end - start < NB_RTPS_BATCH_ITEMS) {
+            size_t add = data_submessage_size(samples[end].len);
+
+            if (acc + add > NB_RTPS_PACKET_MAX) {
+                break;
+            }
+            acc += add;
+            end++;
+        }
+        len = build_batch_message(message,
+                                  sizeof(message),
+                                  &header,
+                                  &timestamp,
+                                  writer_guid,
+                                  reader_guid,
+                                  samples + start,
+                                  end - start,
+                                  first_sn + start);
+        if (len == 0) {
+            return NB_ERR_BAD_MESSAGE;
+        }
+        for (t = 0; t < targets->count; t++) {
+            int rc = tx_append(list,
+                               dcount,
+                               cap,
+                               targets->host[t],
+                               targets->port[t],
+                               message,
+                               len);
+
+            if (rc != NB_OK) {
+                return rc;
+            }
+        }
+        start = end;
+    }
+    return NB_OK;
+}
+
+int nb_rtps_participant_publish_batch(nb_rtps_participant_t *participant,
+                                      const nb_rtps_guid_t *writer_guid,
+                                      const nb_rtps_batch_sample_t *samples,
+                                      size_t count)
+{
+    nb_rtps_local_endpoint_t *local;
+    nb_rtps_tx_dgram_t *dgrams = NULL;
+    size_t dcount = 0;
+    size_t dcap = 0;
+    uint64_t first_sn;
+    size_t i;
+    int readable = 0;
+    int rc = NB_OK;
+    int last = NB_ERR_IO;
+
+    if (!participant || !writer_guid || !samples || count == 0 ||
+        count > NB_RTPS_SAMPLE_MAX) {
+        return NB_ERR_INVALID;
+    }
+
+    zb_mutex_lock(participant->net.lock);
+    local = find_local_endpoint(participant, writer_guid);
+    if (!local || local->kind != NB_RTPS_ENDPOINT_PUBLICATION) {
+        zb_mutex_unlock(participant->net.lock);
+        return NB_ERR_NOTFOUND;
+    }
+
+    /* Only the best-effort, history-free publication takes the bulk path; the
+     * reliable history / heartbeat / GAP bookkeeping stays on the single-sample
+     * path. Oversized samples need fragmentation, which the bulk path does not
+     * do, so they also fall back. */
+    {
+        int fallback = local->history != NULL ||
+                       local->info.reliability != NB_RTPS_RELIABILITY_BEST_EFFORT;
+        for (i = 0; i < count && !fallback; i++) {
+            if (samples[i].len == 0 || samples[i].len > NB_RTPS_DATA_PAYLOAD_MAX) {
+                fallback = 1;
+            }
+        }
+        if (fallback) {
+            int inner_last = NB_ERR_NOTFOUND;
+            int any = 0;
+
+            zb_mutex_unlock(participant->net.lock);
+            for (i = 0; i < count; i++) {
+                int r = publish_internal(participant,
+                                         writer_guid,
+                                         0,
+                                         NULL,
+                                         0,
+                                         samples[i].data,
+                                         samples[i].len);
+
+                if (r == NB_OK) {
+                    any = 1;
+                } else if (r != NB_ERR_NOTFOUND) {
+                    inner_last = r;
+                }
+            }
+            if (any) {
+                return NB_OK;
+            }
+            return inner_last == NB_ERR_NOTFOUND ? NB_ERR_NOTFOUND : inner_last;
+        }
+    }
+
+    first_sn = local->data_sn + 1u;
+    if (first_sn == 0) {
+        first_sn = 1;
+    }
+    local->data_sn = first_sn + (uint64_t)count - 1u;
+    local->last_write_ms = zn_wall_ms();
+
+    for (i = 0; i < participant->tables.remote_ep_used_count; i++) {
+        nb_rtps_remote_endpoint_t *remote =
+            &participant->tables.remote_endpoints[participant->tables.remote_ep_used[i]];
+        nb_rtps_targets_t targets;
+
+        if (remote->kind != NB_RTPS_ENDPOINT_SUBSCRIPTION) {
+            continue;
+        }
+        if (!endpoint_qos_compatible(&local->info, &remote->info)) {
+            continue;
+        }
+        if (endpoint_data_targets(participant, remote, &targets) == 0) {
+            continue;
+        }
+        readable++;
+        rc = build_reader_datagrams(participant,
+                                    writer_guid,
+                                    &remote->info.endpoint_guid,
+                                    samples,
+                                    count,
+                                    first_sn,
+                                    &targets,
+                                    &dgrams,
+                                    &dcount,
+                                    &dcap);
+        if (rc != NB_OK) {
+            zb_mutex_unlock(participant->net.lock);
+            goto done;
+        }
+    }
+    zb_mutex_unlock(participant->net.lock);
+
+    /* Flush queued datagrams with as few syscalls as possible. */
+    if (dcount > 0) {
+        zn_socket *sock = participant_data_socket(participant);
+        size_t off = 0;
+
+        while (off < dcount) {
+            zn_socket_datagram msgs[NB_RTPS_SEND_BATCH];
+            size_t n = dcount - off;
+            size_t k;
+            int sent;
+
+            if (n > NB_RTPS_SEND_BATCH) {
+                n = NB_RTPS_SEND_BATCH;
+            }
+            for (k = 0; k < n; k++) {
+                msgs[k].data = dgrams[off + k].buf;
+                msgs[k].len = dgrams[off + k].len;
+                msgs[k].ip = dgrams[off + k].host;
+                msgs[k].port = dgrams[off + k].port;
+            }
+            sent = zn_socket_sendto_batch(sock, msgs, (unsigned)n);
+            if (sent > 0) {
+                for (k = 0; k < (size_t)sent; k++) {
+                    participant->stats.packets_sent++;
+                    participant->stats.bytes_sent += dgrams[off + k].len;
+                }
+                participant->stats.data_sent++;
+                last = NB_OK;
+            }
+            off += n;
+        }
+    }
+
+done:
+    for (i = 0; i < dcount; i++) {
+        free(dgrams[i].buf);
+    }
+    free(dgrams);
+    if (readable == 0) {
+        return NB_ERR_NOTFOUND;
+    }
+    return last == NB_OK ? NB_OK : last;
 }
 
 int nb_rtps_participant_add_peer(nb_rtps_participant_t *participant,

@@ -1613,8 +1613,40 @@ ZB_API zb_ssize_t zb_sock_sendv(int fd, const zb_sock_iov *iov, unsigned count);
 ZB_API zb_ssize_t zb_sock_recv(int fd, void *buf, size_t len);
 ZB_API zb_ssize_t zb_sock_sendto(int fd, const void *buf, size_t len, const char *ip,
                                  uint16_t port);
+
+/* One datagram in a batched UDP send. */
+typedef struct zb_sock_dgram {
+    const void *buf;
+    size_t len;
+    const char *ip;
+    uint16_t port;
+} zb_sock_dgram;
+
+#define ZB_SOCK_DGRAM_BATCH_MAX 64
+
+/* Send several datagrams, each to its own address, with as few syscalls as the
+ * platform allows (Linux: sendmmsg; elsewhere: a sendto loop). Returns the
+ * number of datagrams sent, or a negative error if none could be sent. */
+ZB_API int zb_sock_sendto_batch(int fd, const zb_sock_dgram *msgs, unsigned count);
 ZB_API zb_ssize_t zb_sock_recvfrom(int fd, void *buf, size_t len, char *ip, size_t ip_len,
                                    uint16_t *port);
+
+/* One slot for a batched UDP receive. Caller sets buf/cap; recvfrom_batch fills
+ * len/ip/port. */
+typedef struct zb_sock_rx {
+    void *buf;
+    size_t cap;
+    size_t len;
+    char ip[64];
+    uint16_t port;
+} zb_sock_rx;
+
+#define ZB_SOCK_RX_BATCH_MAX 16
+
+/* Receive up to `count` datagrams with as few syscalls as possible (Linux
+ * recvmmsg). Returns the number received (0 when the socket would block), or a
+ * negative error. */
+ZB_API int zb_sock_recvfrom_batch(int fd, zb_sock_rx *items, unsigned count);
 
 ZB_API zb_err_t zb_sock_get_local(int fd, char *ip, size_t ip_len, uint16_t *port);
 ZB_API zb_err_t zb_sock_get_peer(int fd, char *ip, size_t ip_len, uint16_t *port);

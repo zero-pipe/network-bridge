@@ -30,6 +30,19 @@ size_t nb_rtps_wire_data(uint8_t *buf,
                          const nb_rtps_guid_prefix_t *dst,
                          const nb_rtps_data_t *data);
 
+/*
+ * One Message carrying `count` DATA submessages for the same reader (header and
+ * INFO_TS/INFO_DST written once). Used by the bulk-write path to put several
+ * small samples in a single datagram. Returns the message length or 0.
+ */
+size_t nb_rtps_wire_data_multi(uint8_t *buf,
+                               size_t cap,
+                               const nb_rtps_header_t *header,
+                               const nb_rtps_time_t *ts,
+                               const nb_rtps_guid_prefix_t *dst,
+                               const nb_rtps_data_t *items,
+                               size_t count);
+
 size_t nb_rtps_wire_data_frag(uint8_t *buf,
                               size_t cap,
                               const nb_rtps_header_t *header,

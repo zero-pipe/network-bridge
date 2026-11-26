@@ -46,6 +46,9 @@
  * peer may pack a whole sample into one DATA_FRAG datagram, so receiving uses
  * the largest legal UDP payload. */
 #define NB_RTPS_RX_MAX 65536u
+/* Datagrams drained per recvmmsg batch (bounded to keep the RX arena modest:
+ * NB_RTPS_RX_BATCH * NB_RTPS_RX_MAX bytes of heap). */
+#define NB_RTPS_RX_BATCH 8u
 #define NB_RTPS_SPDP_PAYLOAD_MAX 1200u
 
 /* Incoming DATA_FRAG reassembly. Four concurrent samples, at most 4 MiB of
@@ -320,6 +323,9 @@ struct nb_rtps_participant {
         zn_poller *poller;
         zb_thread *thread;
         zb_mutex *lock;
+        /* Reusable arena for batched receive: NB_RTPS_RX_BATCH slots of
+         * NB_RTPS_RX_MAX bytes, owned by the participant thread. */
+        uint8_t *rx_batch;
     } net;
 
     /* ---- 由 net.lock 保护的动态状态：表、计数、回调快照源 ---- */

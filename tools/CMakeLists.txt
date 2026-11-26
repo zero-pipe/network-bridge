@@ -31,3 +31,11 @@ nb_copy_runtime_deps(dds_rtt_bench)
 if(MSVC)
     target_compile_definitions(dds_rtt_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
+
+# Bulk-publish throughput probe (nb_dds_writer_write_batch, configurable batch).
+add_executable(dds_bench_batch dds_bench_batch.c)
+target_link_libraries(dds_bench_batch PRIVATE nb_dds)
+nb_copy_runtime_deps(dds_bench_batch)
+if(MSVC)
+    target_compile_definitions(dds_bench_batch PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()

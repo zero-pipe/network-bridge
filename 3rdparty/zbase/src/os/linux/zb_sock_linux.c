@@ -1,3 +1,6 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE /* sendmmsg */
+#endif
 #include "zb/os/socket.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -438,6 +441,83 @@ zb_ssize_t zb_sock_sendto(int fd, const void *buf, size_t len, const char *ip, u
     return (zb_ssize_t)n;
 }
 
+/* Parse a numeric IPv4/IPv6 address into a sockaddr. Returns 1 on success. */
+static int parse_numeric_endpoint(const char *ip, uint16_t port, struct sockaddr_storage *ss,
+                                  socklen_t *sslen)
+{
+    struct sockaddr_in *in = (struct sockaddr_in *)ss;
+    struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)ss;
+
+    if (!ip || !ip[0])
+        return 0;
+    memset(ss, 0, sizeof(*ss));
+    if (strchr(ip, ':')) {
+        in6->sin6_family = AF_INET6;
+        in6->sin6_port = htons(port);
+        if (inet_pton(AF_INET6, ip, &in6->sin6_addr) == 1) {
+            *sslen = sizeof(*in6);
+            return 1;
+        }
+        return 0;
+    }
+    in->sin_family = AF_INET;
+    in->sin_port = htons(port);
+    if (inet_pton(AF_INET, ip, &in->sin_addr) == 1) {
+        *sslen = sizeof(*in);
+        return 1;
+    }
+    return 0;
+}
+
+int zb_sock_sendto_batch(int fd, const zb_sock_dgram *msgs, unsigned count)
+{
+    struct mmsghdr mmsg[ZB_SOCK_DGRAM_BATCH_MAX];
+    struct iovec iov[ZB_SOCK_DGRAM_BATCH_MAX];
+    struct sockaddr_storage ss[ZB_SOCK_DGRAM_BATCH_MAX];
+    socklen_t sslen[ZB_SOCK_DGRAM_BATCH_MAX];
+    unsigned i;
+    int done = 0;
+
+    if (!msgs || count == 0)
+        return 0;
+    if (count > ZB_SOCK_DGRAM_BATCH_MAX)
+        count = ZB_SOCK_DGRAM_BATCH_MAX;
+
+    for (i = 0; i < count; i++) {
+        /* Numeric locators are the common case; a single non-numeric address
+         * falls back to per-datagram sendto for the whole batch. */
+        if (!parse_numeric_endpoint(msgs[i].ip, msgs[i].port, &ss[i], &sslen[i])) {
+            int sent = 0;
+            unsigned k;
+            for (k = 0; k < count; k++) {
+                if (zb_sock_sendto(fd, msgs[k].buf, msgs[k].len, msgs[k].ip, msgs[k].port) >= 0)
+                    sent++;
+            }
+            return sent > 0 ? sent : (int)ZB_ERR_IO;
+        }
+        memset(&mmsg[i], 0, sizeof(mmsg[i]));
+        iov[i].iov_base = (void *)msgs[i].buf;
+        iov[i].iov_len = msgs[i].len;
+        mmsg[i].msg_hdr.msg_iov = &iov[i];
+        mmsg[i].msg_hdr.msg_iovlen = 1;
+        mmsg[i].msg_hdr.msg_name = &ss[i];
+        mmsg[i].msg_hdr.msg_namelen = sslen[i];
+    }
+
+    while ((unsigned)done < count) {
+        int n = sendmmsg(fd, mmsg + done, (unsigned)(count - done), MSG_NOSIGNAL);
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            return done > 0 ? done : (int)ZB_ERR_IO;
+        }
+        if (n == 0)
+            break;
+        done += n;
+    }
+    return done;
+}
+
 zb_ssize_t zb_sock_recvfrom(int fd, void *buf, size_t len, char *ip, size_t ip_len, uint16_t *port)
 {
     struct sockaddr_storage addr;
@@ -448,6 +528,43 @@ zb_ssize_t zb_sock_recvfrom(int fd, void *buf, size_t len, char *ip, size_t ip_l
     if (ip && ip_len > 0)
         addr_to_string((struct sockaddr *)&addr, slen, ip, ip_len, port);
     return (zb_ssize_t)n;
+}
+
+int zb_sock_recvfrom_batch(int fd, zb_sock_rx *items, unsigned count)
+{
+    struct mmsghdr mmsg[ZB_SOCK_RX_BATCH_MAX];
+    struct iovec iov[ZB_SOCK_RX_BATCH_MAX];
+    struct sockaddr_storage ss[ZB_SOCK_RX_BATCH_MAX];
+    unsigned i;
+    int n;
+
+    if (!items || count == 0)
+        return 0;
+    if (count > ZB_SOCK_RX_BATCH_MAX)
+        count = ZB_SOCK_RX_BATCH_MAX;
+
+    for (i = 0; i < count; i++) {
+        memset(&mmsg[i], 0, sizeof(mmsg[i]));
+        memset(&ss[i], 0, sizeof(ss[i]));
+        iov[i].iov_base = items[i].buf;
+        iov[i].iov_len = items[i].cap;
+        mmsg[i].msg_hdr.msg_iov = &iov[i];
+        mmsg[i].msg_hdr.msg_iovlen = 1;
+        mmsg[i].msg_hdr.msg_name = &ss[i];
+        mmsg[i].msg_hdr.msg_namelen = sizeof(ss[i]);
+    }
+    n = recvmmsg(fd, mmsg, count, MSG_DONTWAIT, NULL);
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+            return 0;
+        return (int)ZB_ERR_IO;
+    }
+    for (i = 0; i < (unsigned)n; i++) {
+        items[i].len = mmsg[i].msg_len;
+        addr_to_string((struct sockaddr *)&ss[i], mmsg[i].msg_hdr.msg_namelen, items[i].ip,
+                       sizeof(items[i].ip), &items[i].port);
+    }
+    return n;
 }
 
 zb_err_t zb_sock_close(int fd)

@@ -98,6 +98,41 @@ int nb_dds_writer_write(nb_dds_writer_t *writer, const void *data, size_t size)
     return rc;
 }
 
+int nb_dds_writer_write_batch(nb_dds_writer_t *writer,
+                              const void *const *datas,
+                              const size_t *sizes,
+                              size_t count)
+{
+    size_t i;
+
+    if (!writer || (count > 0 && (!datas || !sizes))) {
+        return NB_ERR_INVALID;
+    }
+    if (count == 0) {
+        return NB_OK;
+    }
+    for (i = 0; i < count; i++) {
+        if (!datas[i] || sizes[i] == 0) {
+            return NB_ERR_INVALID;
+        }
+        nb_dds_writer_deliver_local(writer, datas[i], sizes[i]);
+    }
+    if (writer->topic->participant->ops->writer_write_batch) {
+        return writer->topic->participant->ops->writer_write_batch(
+            writer->backend, datas, sizes, count);
+    }
+    /* Backend without a batch path: fall back to individual writes. */
+    for (i = 0; i < count; i++) {
+        int rc = writer->topic->participant->ops->writer_write(
+            writer->backend, datas[i], sizes[i]);
+
+        if (rc != NB_OK) {
+            return rc;
+        }
+    }
+    return NB_OK;
+}
+
 int nb_dds_writer_write_payload(nb_dds_writer_t *writer, const nb_payload_t *payload)
 {
     if (!payload) {

@@ -433,6 +433,24 @@ zb_ssize_t zb_sock_sendto(int fd, const void *buf, size_t len, const char *ip, u
     return (zb_ssize_t)n;
 }
 
+int zb_sock_sendto_batch(int fd, const zb_sock_dgram *msgs, unsigned count)
+{
+    int sent = 0;
+    unsigned i;
+
+    if (!msgs || count == 0)
+        return 0;
+    if (count > ZB_SOCK_DGRAM_BATCH_MAX)
+        count = ZB_SOCK_DGRAM_BATCH_MAX;
+    /* No sendmmsg on Win32: a plain loop. The API still batches callers so a
+     * portable upstream keeps one code path. */
+    for (i = 0; i < count; i++) {
+        if (zb_sock_sendto(fd, msgs[i].buf, msgs[i].len, msgs[i].ip, msgs[i].port) >= 0)
+            sent++;
+    }
+    return sent > 0 ? sent : (int)ZB_ERR_IO;
+}
+
 zb_ssize_t zb_sock_recvfrom(int fd, void *buf, size_t len, char *ip, size_t ip_len,
                                     uint16_t *port)
 {
@@ -445,6 +463,25 @@ zb_ssize_t zb_sock_recvfrom(int fd, void *buf, size_t len, char *ip, size_t ip_l
     if (ip && ip_len > 0)
         addr_to_string((struct sockaddr *)&addr, slen, ip, ip_len, port);
     return (zb_ssize_t)n;
+}
+
+int zb_sock_recvfrom_batch(int fd, zb_sock_rx *items, unsigned count)
+{
+    unsigned i;
+
+    if (!items || count == 0)
+        return 0;
+    if (count > ZB_SOCK_RX_BATCH_MAX)
+        count = ZB_SOCK_RX_BATCH_MAX;
+    /* No recvmmsg on Win32: drain one at a time until the socket would block. */
+    for (i = 0; i < count; i++) {
+        zb_ssize_t n = zb_sock_recvfrom(fd, items[i].buf, items[i].cap, items[i].ip,
+                                        sizeof(items[i].ip), &items[i].port);
+        if (n < 0)
+            return i > 0 ? (int)i : 0;
+        items[i].len = (size_t)n;
+    }
+    return (int)i;
 }
 
 zb_err_t zb_sock_close(int fd)

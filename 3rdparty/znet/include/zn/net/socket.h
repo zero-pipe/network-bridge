@@ -91,8 +91,35 @@ ZN_API zn_ssize_t zn_socket_recv(zn_socket *sock, void *buf, size_t len);
 
 ZN_API zn_ssize_t zn_socket_sendto(zn_socket *sock, const void *data, size_t len,
                                          const char *ip, uint16_t port);
+
+/* One datagram in a batched UDP send (each with its own destination). */
+typedef struct zn_socket_datagram {
+    const void *data;
+    size_t len;
+    const char *ip;
+    uint16_t port;
+} zn_socket_datagram;
+
+/* Send several datagrams with as few syscalls as possible (Linux sendmmsg).
+ * Returns the number of datagrams sent, or a negative znet error. */
+ZN_API int zn_socket_sendto_batch(zn_socket *sock, const zn_socket_datagram *msgs,
+                                  unsigned count);
 ZN_API zn_ssize_t zn_socket_recvfrom(zn_socket *sock, void *buf, size_t len,
                                            char *ip, size_t ip_len, uint16_t *port);
+
+/* One slot for a batched UDP receive. Caller sets buf/cap; the batch call fills
+ * len/ip/port. */
+typedef struct zn_socket_rx {
+    void *buf;
+    size_t cap;
+    size_t len;
+    char ip[64];
+    uint16_t port;
+} zn_socket_rx;
+
+/* Receive up to `count` datagrams with as few syscalls as possible. Returns the
+ * number received (0 when the socket would block) or a negative error. */
+ZN_API int zn_socket_recvfrom_batch(zn_socket *sock, zn_socket_rx *items, unsigned count);
 
 ZN_API zn_err_t zn_socket_get_local(const zn_socket *sock, char *ip, size_t ip_len, uint16_t *port);
 ZN_API zn_err_t zn_socket_get_peer(const zn_socket *sock, char *ip, size_t ip_len, uint16_t *port);

@@ -303,12 +303,28 @@ zn_ssize_t zn_socket_sendto(zn_socket *sock, const void *data, size_t len, const
     return zn_sockplat_sendto(sock->fd, data, len, ip, port);
 }
 
+int zn_socket_sendto_batch(zn_socket *sock, const zn_socket_datagram *msgs, unsigned count)
+{
+    if (!sock || sock->type != ZN_SOCK_UDP)
+        return (int)ZN_ERR_INVALID;
+    /* zn_socket_datagram and zb_sock_dgram are field-for-field identical. */
+    return zn_sockplat_sendto_batch(sock->fd, (const zb_sock_dgram *)msgs, count);
+}
+
 zn_ssize_t zn_socket_recvfrom(zn_socket *sock, void *buf, size_t len,
                                   char *ip, size_t ip_len, uint16_t *port)
 {
     if (!sock || sock->type != ZN_SOCK_UDP)
         return (zn_ssize_t)ZN_ERR_INVALID;
     return zn_sockplat_recvfrom(sock->fd, buf, len, ip, ip_len, port);
+}
+
+int zn_socket_recvfrom_batch(zn_socket *sock, zn_socket_rx *items, unsigned count)
+{
+    if (!sock || sock->type != ZN_SOCK_UDP)
+        return (int)ZN_ERR_INVALID;
+    /* zn_socket_rx and zb_sock_rx are field-for-field identical. */
+    return zn_sockplat_recvfrom_batch(sock->fd, (zb_sock_rx *)items, count);
 }
 
 zn_err_t zn_socket_get_local(const zn_socket *sock, char *ip, size_t ip_len, uint16_t *port)

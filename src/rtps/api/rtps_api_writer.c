@@ -184,19 +184,57 @@ int rtps_writer_write_batch(rtps_writer_t *writer,
                             const rtps_payload_t *payloads,
                             size_t count)
 {
+    nb_rtps_batch_sample_t *items;
+    uint8_t *arena;
+    size_t arena_size = 0;
+    size_t off = 0;
     size_t i;
+    int rc = RTPS_OK;
 
     if (!writer || (count > 0 && !payloads)) {
         return RTPS_ERR_INVALID;
     }
-    for (i = 0; i < count; i++) {
-        int rc = rtps_writer_write(writer, payloads[i].data, payloads[i].size);
-
-        if (rc != RTPS_OK) {
-            return rc;
-        }
+    if (count == 0) {
+        return RTPS_OK;
     }
-    return RTPS_OK;
+    /* One arena holds every encapsulated body, so a bulk write does not malloc
+     * per sample. */
+    for (i = 0; i < count; i++) {
+        size_t size = payloads[i].size;
+
+        if (!payloads[i].data || size == 0 ||
+            size > NB_RTPS_SAMPLE_MAX - NB_RTPS_CDR_HEADER_SIZE) {
+            return RTPS_ERR_INVALID;
+        }
+        arena_size += NB_RTPS_CDR_HEADER_SIZE + size;
+    }
+    items = (nb_rtps_batch_sample_t *)calloc(count, sizeof(*items));
+    arena = (uint8_t *)malloc(arena_size);
+    if (!items || !arena) {
+        free(items);
+        free(arena);
+        return RTPS_ERR_NOMEM;
+    }
+    for (i = 0; i < count; i++) {
+        size_t size = payloads[i].size;
+
+        arena[off + 0] = 0x00;
+        arena[off + 1] = 0x01;
+        arena[off + 2] = 0x00;
+        arena[off + 3] = 0x00;
+        memcpy(arena + off + NB_RTPS_CDR_HEADER_SIZE, payloads[i].data, size);
+        items[i].data = arena + off;
+        items[i].len = NB_RTPS_CDR_HEADER_SIZE + size;
+        off += NB_RTPS_CDR_HEADER_SIZE + size;
+    }
+    rc = nb_rtps_participant_publish_batch(
+        writer->participant->engine, &writer->guid, items, count);
+    /* No matched reader is not an error for a write. */
+    rc = (rc == NB_ERR_NOTFOUND) ? RTPS_OK : rtps_api_error(rc);
+
+    free(arena);
+    free(items);
+    return rc;
 }
 
 int rtps_writer_write_instance(rtps_writer_t *writer,
