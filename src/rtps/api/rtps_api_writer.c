@@ -237,6 +237,41 @@ int rtps_writer_write_batch(rtps_writer_t *writer,
     return rc;
 }
 
+int rtps_writer_write_batch_serialized(rtps_writer_t *writer,
+                                       const rtps_payload_t *payloads,
+                                       size_t count)
+{
+    nb_rtps_batch_sample_t *items;
+    size_t i;
+    int rc;
+
+    if (!writer || (count > 0 && !payloads)) {
+        return RTPS_ERR_INVALID;
+    }
+    if (count == 0) {
+        return RTPS_OK;
+    }
+    items = (nb_rtps_batch_sample_t *)calloc(count, sizeof(*items));
+    if (!items) {
+        return RTPS_ERR_NOMEM;
+    }
+    for (i = 0; i < count; i++) {
+        if (!payloads[i].data || payloads[i].size == 0) {
+            free(items);
+            return RTPS_ERR_INVALID;
+        }
+        /* Bodies already carry the encapsulation header, so point the engine at
+         * them directly instead of copying into a fresh arena. */
+        items[i].data = payloads[i].data;
+        items[i].len = payloads[i].size;
+    }
+    rc = nb_rtps_participant_publish_batch(
+        writer->participant->engine, &writer->guid, items, count);
+    rc = (rc == NB_ERR_NOTFOUND) ? RTPS_OK : rtps_api_error(rc);
+    free(items);
+    return rc;
+}
+
 int rtps_writer_write_instance(rtps_writer_t *writer,
                                const rtps_instance_handle_t *handle,
                                rtps_instance_state_t state,
