@@ -263,6 +263,7 @@ static void send_sedp_heartbeat(nb_rtps_participant_t *participant,
     if (sample_count == 0 || remote_target(remote, host, sizeof(host), &port) != NB_OK) {
         return;
     }
+    memset(&heartbeat, 0, sizeof(heartbeat));
     if (kind == NB_RTPS_ENDPOINT_PUBLICATION) {
         heartbeat.count = ++participant->tables.publications_hb_count;
     } else {

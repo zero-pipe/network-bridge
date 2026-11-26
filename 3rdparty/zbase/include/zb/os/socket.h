@@ -1628,6 +1628,21 @@ typedef struct zb_sock_dgram {
  * platform allows (Linux: sendmmsg; elsewhere: a sendto loop). Returns the
  * number of datagrams sent, or a negative error if none could be sent. */
 ZB_API int zb_sock_sendto_batch(int fd, const zb_sock_dgram *msgs, unsigned count);
+
+/* One scatter-gather datagram: an iovec list plus its destination. */
+typedef struct zb_sock_msg {
+    const zb_sock_iov *iov;
+    unsigned iovcnt;
+    const char *ip;
+    uint16_t port;
+} zb_sock_msg;
+
+#define ZB_SOCK_MSG_BATCH_MAX 64
+
+/* Send several scatter-gather datagrams (Linux sendmmsg with per-message
+ * iovec). Payload buffers need only stay valid for the call. Returns the number
+ * sent, or a negative error if none could be sent. */
+ZB_API int zb_sock_sendmsg_batch(int fd, const zb_sock_msg *msgs, unsigned count);
 ZB_API zb_ssize_t zb_sock_recvfrom(int fd, void *buf, size_t len, char *ip, size_t ip_len,
                                    uint16_t *port);
 

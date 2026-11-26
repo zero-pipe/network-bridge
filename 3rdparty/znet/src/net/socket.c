@@ -311,6 +311,14 @@ int zn_socket_sendto_batch(zn_socket *sock, const zn_socket_datagram *msgs, unsi
     return zn_sockplat_sendto_batch(sock->fd, (const zb_sock_dgram *)msgs, count);
 }
 
+int zn_socket_sendmsg_batch(zn_socket *sock, const zn_socket_msg *msgs, unsigned count)
+{
+    if (!sock || sock->type != ZN_SOCK_UDP)
+        return (int)ZN_ERR_INVALID;
+    /* zn_socket_msg/zn_socket_iov mirror zb_sock_msg/zb_sock_iov. */
+    return zn_sockplat_sendmsg_batch(sock->fd, (const zb_sock_msg *)msgs, count);
+}
+
 zn_ssize_t zn_socket_recvfrom(zn_socket *sock, void *buf, size_t len,
                                   char *ip, size_t ip_len, uint16_t *port)
 {

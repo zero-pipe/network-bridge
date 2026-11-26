@@ -2239,47 +2239,79 @@ int nb_rtps_participant_publish_dds_message(
 typedef struct nb_rtps_tx_dgram {
     char host[NB_RTPS_PEER_HOST_MAX];
     uint16_t port;
-    size_t len;
-    uint8_t *buf;
+    zn_socket_iov *iov; /* owned; payload segments borrow sample buffers */
+    unsigned iovcnt;
+    uint8_t *arena; /* owned: the fixed wire bytes the iovs point into */
+    size_t total_len;
 } nb_rtps_tx_dgram_t;
 
-/* Build one Message holding n DATA submessages for the same reader. Returns the
- * message length or 0 if it does not fit cap. */
-static size_t build_batch_message(uint8_t *message,
-                                  size_t cap,
-                                  const nb_rtps_header_t *header,
-                                  const nb_rtps_time_t *ts,
-                                  const nb_rtps_guid_t *writer_guid,
-                                  const nb_rtps_guid_t *reader_guid,
-                                  const nb_rtps_batch_sample_t *samples,
-                                  size_t n,
-                                  uint64_t first_sn)
+static void put_u16_le(uint8_t *p, uint16_t v)
 {
-    nb_rtps_data_t items[NB_RTPS_BATCH_ITEMS];
-    size_t i;
+    p[0] = (uint8_t)(v & 0xffu);
+    p[1] = (uint8_t)((v >> 8) & 0xffu);
+}
 
-    if (n == 0 || n > NB_RTPS_BATCH_ITEMS) {
+static void put_u32_le(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)(v & 0xffu);
+    p[1] = (uint8_t)((v >> 8) & 0xffu);
+    p[2] = (uint8_t)((v >> 16) & 0xffu);
+    p[3] = (uint8_t)((v >> 24) & 0xffu);
+}
+
+/* Write the MessageHeader + INFO_TS + INFO_DST chain into out; returns its
+ * length (the fixed prefix every datagram starts with). */
+static size_t build_header_segment(uint8_t *out,
+                                   size_t cap,
+                                   const nb_rtps_header_t *header,
+                                   const nb_rtps_time_t *ts,
+                                   const nb_rtps_guid_prefix_t *dst)
+{
+    nb_cdr_writer_t writer;
+
+    nb_cdr_writer_init(&writer, out, cap);
+    if (nb_rtps_message_init(&writer, out, cap, header) != NB_OK ||
+        nb_rtps_info_ts(&writer, ts, false) != NB_OK ||
+        nb_rtps_info_dst(&writer, dst) != NB_OK) {
         return 0;
     }
-    for (i = 0; i < n; i++) {
-        memset(&items[i], 0, sizeof(items[i]));
-        items[i].reader_id = reader_guid->entity;
-        items[i].writer_id = writer_guid->entity;
-        nb_rtps_sn_from_u64(&items[i].writer_sn, first_sn + i);
-        items[i].payload = (const uint8_t *)samples[i].data;
-        items[i].payload_len = samples[i].len;
-    }
-    return nb_rtps_wire_data_multi(
-        message, cap, header, ts, &reader_guid->prefix, items, n);
+    return nb_cdr_writer_ok(&writer) ? nb_cdr_writer_len(&writer) : 0;
 }
 
-static int tx_append(nb_rtps_tx_dgram_t **list,
-                     size_t *count,
-                     size_t *cap,
-                     const char *host,
-                     uint16_t port,
-                     const uint8_t *buf,
-                     size_t len)
+/* Write one live-DATA submessage header + fixed fields (24 bytes). The payload
+ * itself is a separate iovec, so its bytes are never copied here. */
+static void build_data_prefix(uint8_t *p,
+                              nb_rtps_entity_id_t rid,
+                              nb_rtps_entity_id_t wid,
+                              uint64_t sn_value,
+                              size_t payload_len)
+{
+    nb_rtps_sequence_number_t sn;
+    size_t pad = (4u - (payload_len & 3u)) & 3u;
+    uint32_t octets_to_next = (uint32_t)(20u + payload_len + pad);
+
+    nb_rtps_sn_from_u64(&sn, sn_value);
+    p[0] = NB_RTPS_SUBMSG_DATA;
+    p[1] = NB_RTPS_FLAG_ENDIAN_LITTLE | NB_RTPS_FLAG_DATA;
+    put_u16_le(p + 2, (uint16_t)octets_to_next); /* octetsToNextHeader */
+    put_u16_le(p + 4, 0);                        /* extraFlags */
+    put_u16_le(p + 6, 16);                       /* octetsToInlineQos */
+    memcpy(p + 8, rid.bytes, 4);
+    memcpy(p + 12, wid.bytes, 4);
+    put_u32_le(p + 16, (uint32_t)sn.high);
+    put_u32_le(p + 20, sn.low);
+}
+
+/* Append a scatter-gather datagram, taking ownership of iov and arena. */
+static int tx_list_add(nb_rtps_tx_dgram_t **list,
+                       size_t *count,
+                       size_t *cap,
+                       const char *host,
+                       uint16_t port,
+                       zn_socket_iov *iov,
+                       unsigned iovcnt,
+                       uint8_t *arena,
+                       size_t total_len)
 {
     nb_rtps_tx_dgram_t *slot;
 
@@ -2297,44 +2329,10 @@ static int tx_append(nb_rtps_tx_dgram_t **list,
     slot = &(*list)[*count];
     copy_str(slot->host, sizeof(slot->host), host);
     slot->port = port;
-    slot->buf = (uint8_t *)malloc(len);
-    if (!slot->buf) {
-        return NB_ERR_NOMEM;
-    }
-    memcpy(slot->buf, buf, len);
-    slot->len = len;
-    (*count)++;
-    return NB_OK;
-}
-
-/* Append a datagram taking ownership of buf (no copy). On failure the caller
- * still owns buf. */
-static int tx_append_owned(nb_rtps_tx_dgram_t **list,
-                           size_t *count,
-                           size_t *cap,
-                           const char *host,
-                           uint16_t port,
-                           uint8_t *buf,
-                           size_t len)
-{
-    nb_rtps_tx_dgram_t *slot;
-
-    if (*count == *cap) {
-        size_t ncap = *cap ? *cap * 2u : 16u;
-        nb_rtps_tx_dgram_t *nl =
-            (nb_rtps_tx_dgram_t *)realloc(*list, ncap * sizeof(**list));
-
-        if (!nl) {
-            return NB_ERR_NOMEM;
-        }
-        *list = nl;
-        *cap = ncap;
-    }
-    slot = &(*list)[*count];
-    copy_str(slot->host, sizeof(slot->host), host);
-    slot->port = port;
-    slot->buf = buf;
-    slot->len = len;
+    slot->iov = iov;
+    slot->iovcnt = iovcnt;
+    slot->arena = arena;
+    slot->total_len = total_len;
     (*count)++;
     return NB_OK;
 }
@@ -2363,7 +2361,7 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
                                   size_t *cap)
 {
     size_t message_cap = participant->net.max_datagram_size;
-    uint8_t *message;
+    uint8_t hdrbuf[64];
     nb_rtps_header_t header;
     nb_rtps_time_t timestamp;
     size_t header_len;
@@ -2376,40 +2374,23 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
     if (message_cap > NB_RTPS_RX_MAX) {
         message_cap = NB_RTPS_RX_MAX; /* keep it receivable in one datagram */
     }
-    message = (uint8_t *)malloc(message_cap);
-    if (!message) {
-        return NB_ERR_NOMEM;
-    }
 
     init_header(participant, &header);
     timestamp = rtps_time_from_ns(zn_wall_ms() * 1000000ull);
-
-    /* Fixed per-message overhead (MessageHeader + INFO_TS + INFO_DST), measured
-     * once so grouping is arithmetic instead of rebuilding the message. */
-    {
-        size_t pl = build_batch_message(message,
-                                        message_cap,
-                                        &header,
-                                        &timestamp,
-                                        writer_guid,
-                                        reader_guid,
-                                        samples,
-                                        1,
-                                        first_sn);
-
-        if (pl == 0) {
-            free(message);
-            return NB_ERR_BAD_MESSAGE;
-        }
-        header_len = pl - data_submessage_size(samples[0].len);
+    header_len = build_header_segment(hdrbuf, sizeof(hdrbuf), &header, &timestamp,
+                                      &reader_guid->prefix);
+    if (header_len == 0) {
+        return NB_ERR_BAD_MESSAGE;
     }
+
+    static const uint8_t zeros[4] = {0, 0, 0, 0};
 
     while (start < count) {
         size_t acc = header_len + data_submessage_size(samples[start].len);
         size_t end = start + 1u;
-        size_t len;
+        size_t n;
         size_t t;
-        uint8_t *buf;
+        size_t i;
 
         while (end < count && end - start < NB_RTPS_BATCH_ITEMS) {
             size_t add = data_submessage_size(samples[end].len);
@@ -2420,53 +2401,59 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
             acc += add;
             end++;
         }
-        /* Build straight into the datagram buffer that will be sent, so the
-         * single-target case involves no copy of the finished message. */
-        buf = (uint8_t *)malloc(acc);
-        if (!buf) {
-            rc = NB_ERR_NOMEM;
-            break;
-        }
-        len = build_batch_message(buf,
-                                  acc,
-                                  &header,
-                                  &timestamp,
-                                  writer_guid,
-                                  reader_guid,
-                                  samples + start,
-                                  end - start,
-                                  first_sn + start);
-        if (len == 0) {
-            free(buf);
-            rc = NB_ERR_BAD_MESSAGE;
-            break;
-        }
+        n = end - start;
         for (t = 0; t < targets->count; t++) {
-            if (t == 0) {
-                /* First target takes ownership of buf (no copy). */
-                rc = tx_append_owned(list,
-                                     dcount,
-                                     cap,
-                                     targets->host[t],
-                                     targets->port[t],
-                                     buf,
-                                     len);
-                if (rc != NB_OK) {
-                    free(buf);
-                    break;
+            /* Fixed bytes for this datagram live in one arena; the payloads are
+             * separate iovec segments borrowed from the caller's buffers, so no
+             * payload byte is ever copied into a message buffer. */
+            size_t arena_cap = header_len + 24u * n;
+            uint8_t *arena = (uint8_t *)malloc(arena_cap);
+            zn_socket_iov *iov;
+            unsigned iovcnt = 0;
+
+            if (!arena) {
+                rc = NB_ERR_NOMEM;
+                break;
+            }
+            memcpy(arena, hdrbuf, header_len);
+            for (i = 0; i < n; i++) {
+                build_data_prefix(arena + header_len + 24u * i,
+                                  reader_guid->entity,
+                                  writer_guid->entity,
+                                  first_sn + start + i,
+                                  samples[start + i].len);
+            }
+            iov = (zn_socket_iov *)malloc(sizeof(zn_socket_iov) * (1u + 3u * n));
+            if (!iov) {
+                free(arena);
+                rc = NB_ERR_NOMEM;
+                break;
+            }
+            iov[iovcnt].base = arena;
+            iov[iovcnt].len = header_len;
+            iovcnt++;
+            for (i = 0; i < n; i++) {
+                size_t plen = samples[start + i].len;
+                size_t pad = (4u - (plen & 3u)) & 3u;
+
+                iov[iovcnt].base = arena + header_len + 24u * i;
+                iov[iovcnt].len = 24u;
+                iovcnt++;
+                iov[iovcnt].base = samples[start + i].data;
+                iov[iovcnt].len = plen;
+                iovcnt++;
+                if (pad) {
+                    iov[iovcnt].base = zeros;
+                    iov[iovcnt].len = pad;
+                    iovcnt++;
                 }
-            } else {
-                /* Multi-homed reader: additional targets get their own copy. */
-                rc = tx_append(list,
-                               dcount,
-                               cap,
-                               targets->host[t],
-                               targets->port[t],
-                               buf,
-                               len);
-                if (rc != NB_OK) {
-                    break;
-                }
+            }
+            rc = tx_list_add(list, dcount, cap, targets->host[t], targets->port[t],
+                             iov, iovcnt, arena, acc);
+            if (rc != NB_OK) {
+                free(iov);
+                free(arena);
+                break;
             }
         }
         if (rc != NB_OK) {
@@ -2474,7 +2461,6 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
         }
         start = end;
     }
-    free(message);
     return rc;
 }
 
@@ -2646,7 +2632,7 @@ int nb_rtps_participant_publish_batch(nb_rtps_participant_t *participant,
         size_t off = 0;
 
         while (off < dcount) {
-            zn_socket_datagram msgs[NB_RTPS_SEND_BATCH];
+            zn_socket_msg msgs[NB_RTPS_SEND_BATCH];
             size_t n = dcount - off;
             size_t k;
             int sent;
@@ -2655,16 +2641,16 @@ int nb_rtps_participant_publish_batch(nb_rtps_participant_t *participant,
                 n = NB_RTPS_SEND_BATCH;
             }
             for (k = 0; k < n; k++) {
-                msgs[k].data = dgrams[off + k].buf;
-                msgs[k].len = dgrams[off + k].len;
+                msgs[k].iov = dgrams[off + k].iov;
+                msgs[k].iovcnt = dgrams[off + k].iovcnt;
                 msgs[k].ip = dgrams[off + k].host;
                 msgs[k].port = dgrams[off + k].port;
             }
-            sent = zn_socket_sendto_batch(sock, msgs, (unsigned)n);
+            sent = zn_socket_sendmsg_batch(sock, msgs, (unsigned)n);
             if (sent > 0) {
                 for (k = 0; k < (size_t)sent; k++) {
                     participant->stats.packets_sent++;
-                    participant->stats.bytes_sent += dgrams[off + k].len;
+                    participant->stats.bytes_sent += dgrams[off + k].total_len;
                 }
                 participant->stats.data_sent++;
                 last = NB_OK;
@@ -2675,7 +2661,8 @@ int nb_rtps_participant_publish_batch(nb_rtps_participant_t *participant,
 
 done:
     for (i = 0; i < dcount; i++) {
-        free(dgrams[i].buf);
+        free(dgrams[i].iov);
+        free(dgrams[i].arena);
     }
     free(dgrams);
     if (readable == 0) {

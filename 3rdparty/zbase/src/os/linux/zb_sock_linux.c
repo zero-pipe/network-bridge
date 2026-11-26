@@ -518,6 +518,67 @@ int zb_sock_sendto_batch(int fd, const zb_sock_dgram *msgs, unsigned count)
     return done;
 }
 
+int zb_sock_sendmsg_batch(int fd, const zb_sock_msg *msgs, unsigned count)
+{
+    struct mmsghdr mmsg[ZB_SOCK_MSG_BATCH_MAX];
+    struct sockaddr_storage ss[ZB_SOCK_MSG_BATCH_MAX];
+    socklen_t sslen[ZB_SOCK_MSG_BATCH_MAX];
+    unsigned i;
+    int done = 0;
+
+    if (!msgs || count == 0)
+        return 0;
+    if (count > ZB_SOCK_MSG_BATCH_MAX)
+        count = ZB_SOCK_MSG_BATCH_MAX;
+
+    for (i = 0; i < count; i++) {
+        if (msgs[i].iovcnt == 0)
+            return done > 0 ? done : (int)ZB_ERR_INVALID;
+        if (!parse_numeric_endpoint(msgs[i].ip, msgs[i].port, &ss[i], &sslen[i])) {
+            /* Non-numeric destination: fall back to per-message sendmsg. */
+            int sent = 0;
+            unsigned k;
+
+            for (k = 0; k < count; k++) {
+                struct msghdr mh;
+                struct sockaddr_storage s2;
+                socklen_t l2;
+
+                if (msgs[k].iovcnt == 0)
+                    continue;
+                if (!parse_numeric_endpoint(msgs[k].ip, msgs[k].port, &s2, &l2))
+                    continue;
+                memset(&mh, 0, sizeof(mh));
+                mh.msg_name = &s2;
+                mh.msg_namelen = l2;
+                mh.msg_iov = (struct iovec *)msgs[k].iov;
+                mh.msg_iovlen = msgs[k].iovcnt;
+                if (sendmsg(fd, &mh, MSG_NOSIGNAL) >= 0)
+                    sent++;
+            }
+            return sent > 0 ? sent : (int)ZB_ERR_IO;
+        }
+        memset(&mmsg[i], 0, sizeof(mmsg[i]));
+        mmsg[i].msg_hdr.msg_iov = (struct iovec *)msgs[i].iov;
+        mmsg[i].msg_hdr.msg_iovlen = msgs[i].iovcnt;
+        mmsg[i].msg_hdr.msg_name = &ss[i];
+        mmsg[i].msg_hdr.msg_namelen = sslen[i];
+    }
+
+    while ((unsigned)done < count) {
+        int n = sendmmsg(fd, mmsg + done, (unsigned)(count - done), MSG_NOSIGNAL);
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            return done > 0 ? done : (int)ZB_ERR_IO;
+        }
+        if (n == 0)
+            break;
+        done += n;
+    }
+    return done;
+}
+
 zb_ssize_t zb_sock_recvfrom(int fd, void *buf, size_t len, char *ip, size_t ip_len, uint16_t *port)
 {
     struct sockaddr_storage addr;

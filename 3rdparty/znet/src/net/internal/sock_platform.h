@@ -29,6 +29,7 @@ typedef zb_sock_iov zn_sock_iov;
 #define zn_sockplat_recv zb_sock_recv
 #define zn_sockplat_sendto zb_sock_sendto
 #define zn_sockplat_sendto_batch zb_sock_sendto_batch
+#define zn_sockplat_sendmsg_batch zb_sock_sendmsg_batch
 #define zn_sockplat_recvfrom zb_sock_recvfrom
 #define zn_sockplat_recvfrom_batch zb_sock_recvfrom_batch
 #define zn_sockplat_get_local zb_sock_get_local

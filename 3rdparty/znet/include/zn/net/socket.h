@@ -104,6 +104,20 @@ typedef struct zn_socket_datagram {
  * Returns the number of datagrams sent, or a negative znet error. */
 ZN_API int zn_socket_sendto_batch(zn_socket *sock, const zn_socket_datagram *msgs,
                                   unsigned count);
+
+/* One scatter-gather datagram: an iovec list plus its destination. */
+typedef struct zn_socket_msg {
+    const zn_socket_iov *iov;
+    unsigned iovcnt;
+    const char *ip;
+    uint16_t port;
+} zn_socket_msg;
+
+/* Send scatter-gather datagrams (each message's payload built from its iovec
+ * list) with one batched syscall. Payload buffers need only stay valid for the
+ * call. Returns the number sent or a negative znet error. */
+ZN_API int zn_socket_sendmsg_batch(zn_socket *sock, const zn_socket_msg *msgs,
+                                   unsigned count);
 ZN_API zn_ssize_t zn_socket_recvfrom(zn_socket *sock, void *buf, size_t len,
                                            char *ip, size_t ip_len, uint16_t *port);
 

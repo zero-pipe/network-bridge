@@ -451,6 +451,49 @@ int zb_sock_sendto_batch(int fd, const zb_sock_dgram *msgs, unsigned count)
     return sent > 0 ? sent : (int)ZB_ERR_IO;
 }
 
+int zb_sock_sendmsg_batch(int fd, const zb_sock_msg *msgs, unsigned count)
+{
+    int sent = 0;
+    unsigned i;
+
+    if (!msgs || count == 0)
+        return 0;
+    if (count > ZB_SOCK_MSG_BATCH_MAX)
+        count = ZB_SOCK_MSG_BATCH_MAX;
+    for (i = 0; i < count; i++) {
+        struct addrinfo *res = NULL;
+        WSABUF *b;
+        DWORD sent_bytes = 0;
+        int n = SOCKET_ERROR;
+        unsigned k;
+
+        if (msgs[i].iovcnt == 0)
+            continue;
+        if (resolve_endpoint(msgs[i].ip, msgs[i].port, &res) != ZB_OK)
+            continue;
+        b = (WSABUF *)malloc(sizeof(WSABUF) * msgs[i].iovcnt);
+        if (!b) {
+            freeaddrinfo(res);
+            continue;
+        }
+        for (k = 0; k < msgs[i].iovcnt; k++) {
+            b[k].buf = (char *)msgs[i].iov[k].base;
+            b[k].len = (ULONG)msgs[i].iov[k].len;
+        }
+        for (struct addrinfo *p = res; p; p = p->ai_next) {
+            n = WSASendTo(to_sock(fd), b, (DWORD)msgs[i].iovcnt, &sent_bytes, 0, p->ai_addr,
+                          (int)p->ai_addrlen, NULL, NULL);
+            if (n != SOCKET_ERROR)
+                break;
+        }
+        free(b);
+        freeaddrinfo(res);
+        if (n != SOCKET_ERROR)
+            sent++;
+    }
+    return sent > 0 ? sent : (int)ZB_ERR_IO;
+}
+
 zb_ssize_t zb_sock_recvfrom(int fd, void *buf, size_t len, char *ip, size_t ip_len,
                                     uint16_t *port)
 {
