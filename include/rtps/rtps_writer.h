@@ -63,14 +63,16 @@ RTPS_API int rtps_writer_write_batch(rtps_writer_t *writer,
                                      size_t count);
 
 /*
- * Like rtps_writer_write_batch, but each body already carries the XCDR
- * encapsulation header that goes on the wire. This lets a caller that builds
- * its own frames (for example the DDS spine packing u32-length-prefixed bodies)
- * hand the engine ready-made bodies without an extra copy-and-prefix pass.
+ * Like rtps_writer_write_batch, but with explicit control over the on-wire
+ * framing the engine generates: dds_message selects a u32 length prefix (the
+ * dds::Message convention) in addition to the XCDR1 encapsulation. The bodies
+ * are the raw application bytes; the engine frames them without copying the
+ * payload into a message buffer.
  */
-RTPS_API int rtps_writer_write_batch_serialized(rtps_writer_t *writer,
-                                                const rtps_payload_t *payloads,
-                                                size_t count);
+RTPS_API int rtps_writer_write_batch_framed(rtps_writer_t *writer,
+                                            const rtps_payload_t *payloads,
+                                            size_t count,
+                                            int dds_message);
 
 /*
  * Publish a keyed sample or a state change. state is ALIVE (data with the

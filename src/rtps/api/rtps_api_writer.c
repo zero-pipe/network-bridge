@@ -184,62 +184,13 @@ int rtps_writer_write_batch(rtps_writer_t *writer,
                             const rtps_payload_t *payloads,
                             size_t count)
 {
-    nb_rtps_batch_sample_t *items;
-    uint8_t *arena;
-    size_t arena_size = 0;
-    size_t off = 0;
-    size_t i;
-    int rc = RTPS_OK;
-
-    if (!writer || (count > 0 && !payloads)) {
-        return RTPS_ERR_INVALID;
-    }
-    if (count == 0) {
-        return RTPS_OK;
-    }
-    /* One arena holds every encapsulated body, so a bulk write does not malloc
-     * per sample. */
-    for (i = 0; i < count; i++) {
-        size_t size = payloads[i].size;
-
-        if (!payloads[i].data || size == 0 ||
-            size > NB_RTPS_SAMPLE_MAX - NB_RTPS_CDR_HEADER_SIZE) {
-            return RTPS_ERR_INVALID;
-        }
-        arena_size += NB_RTPS_CDR_HEADER_SIZE + size;
-    }
-    items = (nb_rtps_batch_sample_t *)calloc(count, sizeof(*items));
-    arena = (uint8_t *)malloc(arena_size);
-    if (!items || !arena) {
-        free(items);
-        free(arena);
-        return RTPS_ERR_NOMEM;
-    }
-    for (i = 0; i < count; i++) {
-        size_t size = payloads[i].size;
-
-        arena[off + 0] = 0x00;
-        arena[off + 1] = 0x01;
-        arena[off + 2] = 0x00;
-        arena[off + 3] = 0x00;
-        memcpy(arena + off + NB_RTPS_CDR_HEADER_SIZE, payloads[i].data, size);
-        items[i].data = arena + off;
-        items[i].len = NB_RTPS_CDR_HEADER_SIZE + size;
-        off += NB_RTPS_CDR_HEADER_SIZE + size;
-    }
-    rc = nb_rtps_participant_publish_batch(
-        writer->participant->engine, &writer->guid, items, count);
-    /* No matched reader is not an error for a write. */
-    rc = (rc == NB_ERR_NOTFOUND) ? RTPS_OK : rtps_api_error(rc);
-
-    free(arena);
-    free(items);
-    return rc;
+    return rtps_writer_write_batch_framed(writer, payloads, count, 0);
 }
 
-int rtps_writer_write_batch_serialized(rtps_writer_t *writer,
-                                       const rtps_payload_t *payloads,
-                                       size_t count)
+int rtps_writer_write_batch_framed(rtps_writer_t *writer,
+                                   const rtps_payload_t *payloads,
+                                   size_t count,
+                                   int dds_message)
 {
     nb_rtps_batch_sample_t *items;
     size_t i;
@@ -256,17 +207,19 @@ int rtps_writer_write_batch_serialized(rtps_writer_t *writer,
         return RTPS_ERR_NOMEM;
     }
     for (i = 0; i < count; i++) {
-        if (!payloads[i].data || payloads[i].size == 0) {
+        if (!payloads[i].data || payloads[i].size == 0 ||
+            payloads[i].size > NB_RTPS_SAMPLE_MAX - NB_RTPS_CDR_HEADER_SIZE) {
             free(items);
             return RTPS_ERR_INVALID;
         }
-        /* Bodies already carry the encapsulation header, so point the engine at
-         * them directly instead of copying into a fresh arena. */
+        /* Pass the application body straight through; the engine adds the
+         * encapsulation (and optional u32 length) and scatters it without
+         * copying into a message buffer. */
         items[i].data = payloads[i].data;
         items[i].len = payloads[i].size;
     }
     rc = nb_rtps_participant_publish_batch(
-        writer->participant->engine, &writer->guid, items, count);
+        writer->participant->engine, &writer->guid, items, count, dds_message ? 1 : 0);
     rc = (rc == NB_ERR_NOTFOUND) ? RTPS_OK : rtps_api_error(rc);
     free(items);
     return rc;

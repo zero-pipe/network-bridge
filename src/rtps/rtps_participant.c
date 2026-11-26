@@ -2355,6 +2355,7 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
                                   const nb_rtps_batch_sample_t *samples,
                                   size_t count,
                                   uint64_t first_sn,
+                                  int dds_message,
                                   const nb_rtps_targets_t *targets,
                                   nb_rtps_tx_dgram_t **list,
                                   size_t *dcount,
@@ -2365,8 +2366,10 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
     nb_rtps_header_t header;
     nb_rtps_time_t timestamp;
     size_t header_len;
+    size_t framing = dds_message ? 8u : 4u; /* encap(+u32) the engine prepends */
     size_t start = 0;
     int rc = NB_OK;
+    static const uint8_t zeros[4] = {0, 0, 0, 0};
 
     if (message_cap <= NB_RTPS_PACKET_MAX) {
         message_cap = NB_RTPS_PACKET_MAX;
@@ -2383,17 +2386,15 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
         return NB_ERR_BAD_MESSAGE;
     }
 
-    static const uint8_t zeros[4] = {0, 0, 0, 0};
-
     while (start < count) {
-        size_t acc = header_len + data_submessage_size(samples[start].len);
+        size_t acc = header_len + data_submessage_size(framing + samples[start].len);
         size_t end = start + 1u;
         size_t n;
         size_t t;
         size_t i;
 
         while (end < count && end - start < NB_RTPS_BATCH_ITEMS) {
-            size_t add = data_submessage_size(samples[end].len);
+            size_t add = data_submessage_size(framing + samples[end].len);
 
             if (acc + add > message_cap) {
                 break;
@@ -2403,10 +2404,12 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
         }
         n = end - start;
         for (t = 0; t < targets->count; t++) {
-            /* Fixed bytes for this datagram live in one arena; the payloads are
-             * separate iovec segments borrowed from the caller's buffers, so no
-             * payload byte is ever copied into a message buffer. */
-            size_t arena_cap = header_len + 24u * n;
+            /* Per sample the arena holds the 24-byte DATA header plus the
+             * framing bytes (encap + optional u32 length); the payload itself
+             * is a separate iovec borrowed from the caller. No payload byte is
+             * copied into a message buffer for the live send. */
+            size_t per = 24u + framing;
+            size_t arena_cap = header_len + per * n;
             uint8_t *arena = (uint8_t *)malloc(arena_cap);
             zn_socket_iov *iov;
             unsigned iovcnt = 0;
@@ -2417,11 +2420,21 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
             }
             memcpy(arena, hdrbuf, header_len);
             for (i = 0; i < n; i++) {
-                build_data_prefix(arena + header_len + 24u * i,
-                                  reader_guid->entity,
-                                  writer_guid->entity,
-                                  first_sn + start + i,
-                                  samples[start + i].len);
+                size_t app_len = samples[start + i].len;
+                uint8_t *p = arena + header_len + per * i;
+
+                build_data_prefix(p, reader_guid->entity, writer_guid->entity,
+                                  first_sn + start + i, framing + app_len);
+                p[24] = 0x00; /* XCDR1 little-endian encapsulation */
+                p[25] = 0x01;
+                p[26] = 0x00;
+                p[27] = 0x00;
+                if (dds_message) {
+                    p[28] = (uint8_t)(app_len & 0xffu);
+                    p[29] = (uint8_t)((app_len >> 8) & 0xffu);
+                    p[30] = (uint8_t)((app_len >> 16) & 0xffu);
+                    p[31] = (uint8_t)((app_len >> 24) & 0xffu);
+                }
             }
             iov = (zn_socket_iov *)malloc(sizeof(zn_socket_iov) * (1u + 3u * n));
             if (!iov) {
@@ -2433,14 +2446,14 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
             iov[iovcnt].len = header_len;
             iovcnt++;
             for (i = 0; i < n; i++) {
-                size_t plen = samples[start + i].len;
-                size_t pad = (4u - (plen & 3u)) & 3u;
+                size_t app_len = samples[start + i].len;
+                size_t pad = (4u - ((framing + app_len) & 3u)) & 3u;
 
-                iov[iovcnt].base = arena + header_len + 24u * i;
-                iov[iovcnt].len = 24u;
+                iov[iovcnt].base = arena + header_len + per * i;
+                iov[iovcnt].len = per;
                 iovcnt++;
                 iov[iovcnt].base = samples[start + i].data;
-                iov[iovcnt].len = plen;
+                iov[iovcnt].len = app_len;
                 iovcnt++;
                 if (pad) {
                     iov[iovcnt].base = zeros;
@@ -2467,7 +2480,8 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
 int nb_rtps_participant_publish_batch(nb_rtps_participant_t *participant,
                                       const nb_rtps_guid_t *writer_guid,
                                       const nb_rtps_batch_sample_t *samples,
-                                      size_t count)
+                                      size_t count,
+                                      int dds_message)
 {
     nb_rtps_local_endpoint_t *local;
     nb_rtps_tx_dgram_t *dgrams = NULL;
@@ -2511,17 +2525,31 @@ int nb_rtps_participant_publish_batch(nb_rtps_participant_t *participant,
         if (fallback) {
             int inner_last = NB_ERR_NOTFOUND;
             int any = 0;
+            size_t framing = dds_message ? 8u : 4u;
 
             zb_mutex_unlock(participant->net.lock);
             for (i = 0; i < count; i++) {
-                int r = publish_internal(participant,
-                                         writer_guid,
-                                         0,
-                                         NULL,
-                                         0,
-                                         samples[i].data,
-                                         samples[i].len);
+                size_t alen = samples[i].len;
+                size_t flen = framing + alen;
+                uint8_t *fb = (uint8_t *)malloc(flen);
+                int r;
 
+                if (!fb) {
+                    return NB_ERR_NOMEM;
+                }
+                fb[0] = 0x00;
+                fb[1] = 0x01;
+                fb[2] = 0x00;
+                fb[3] = 0x00;
+                if (dds_message) {
+                    fb[4] = (uint8_t)(alen & 0xffu);
+                    fb[5] = (uint8_t)((alen >> 8) & 0xffu);
+                    fb[6] = (uint8_t)((alen >> 16) & 0xffu);
+                    fb[7] = (uint8_t)((alen >> 24) & 0xffu);
+                }
+                memcpy(fb + framing, samples[i].data, alen);
+                r = publish_internal(participant, writer_guid, 0, NULL, 0, fb, flen);
+                free(fb);
                 if (r == NB_OK) {
                     any = 1;
                 } else if (r != NB_ERR_NOTFOUND) {
@@ -2551,8 +2579,8 @@ int nb_rtps_participant_publish_batch(nb_rtps_participant_t *participant,
             for (i = 0; i < count; i++) {
                 uint64_t sn_i = 0;
 
-                rc = nb_rtps_reliable_add(
-                    local->history, samples[i].data, samples[i].len, 0, &sn_i);
+                rc = nb_rtps_reliable_add_framed(
+                    local->history, samples[i].data, samples[i].len, dds_message, &sn_i);
                 if (rc != NB_OK) {
                     last = rc;
                     zb_mutex_unlock(participant->net.lock);
@@ -2615,6 +2643,7 @@ int nb_rtps_participant_publish_batch(nb_rtps_participant_t *participant,
                                     samples,
                                     count,
                                     first_sn,
+                                    dds_message,
                                     &targets,
                                     &dgrams,
                                     &dcount,

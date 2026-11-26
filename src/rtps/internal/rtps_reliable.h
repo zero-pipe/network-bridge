@@ -50,6 +50,17 @@ int nb_rtps_reliable_add(nb_rtps_reliable_writer_t *writer,
                          int dispose,
                          uint64_t *out_sn);
 
+/* Retain an application body, prepending the on-wire framing (the 4-byte XCDR1
+ * encapsulation and, when dds_message is set, a u32 length prefix) directly
+ * into the history slot. This lets the bulk path keep the payload out of a
+ * temporary buffer: the engine scatters the framing + the app buffer for the
+ * live send, and this frames it once more into the slot for retransmission. */
+int nb_rtps_reliable_add_framed(nb_rtps_reliable_writer_t *writer,
+                                const void *app,
+                                size_t app_len,
+                                int dds_message,
+                                uint64_t *out_sn);
+
 /* Same, with the source timestamp to put on the wire. A retransmission must
  * carry the timestamp the sample was written with, otherwise a BY_SOURCE
  * timestamp reader would order the resend as if it were new data. Zero means

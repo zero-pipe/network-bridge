@@ -452,9 +452,6 @@ static int nb_dds_rtps_writer_write_batch(void *writer,
 {
     nb_dds_rtps_writer_t *wrapper = (nb_dds_rtps_writer_t *)writer;
     rtps_payload_t *payloads;
-    uint8_t *arena = NULL;
-    size_t arena_size = 0;
-    size_t off = 0;
     size_t i;
     int rc;
 
@@ -473,47 +470,16 @@ static int nb_dds_rtps_writer_write_batch(void *writer,
             free(payloads);
             return NB_ERR_INVALID;
         }
+        /* Hand the raw application body straight to the engine; it generates
+         * the encapsulation (and optional u32 length) and scatters it, so the
+         * payload is never copied into a message buffer here. */
+        payloads[i].data = datas[i];
+        payloads[i].size = lens[i];
     }
-    /* One arena holds every ready-made wire body: the 4-byte XCDR1
-     * encapsulation, the optional u32 length (dds::Message), then the payload.
-     * Handing these straight to the engine skips its own copy-and-prefix. */
-    {
-        size_t hdr = wrapper->dds_message ? 8u : 4u;
-
-        for (i = 0; i < count; i++) {
-            arena_size += hdr + lens[i];
-        }
-        arena = (uint8_t *)malloc(arena_size);
-        if (!arena) {
-            free(payloads);
-            return NB_ERR_NOMEM;
-        }
-        for (i = 0; i < count; i++) {
-            size_t len = lens[i];
-            size_t body_start = off;
-
-            arena[off + 0] = 0x00; /* XCDR1 little-endian encapsulation */
-            arena[off + 1] = 0x01;
-            arena[off + 2] = 0x00;
-            arena[off + 3] = 0x00;
-            off += 4;
-            if (wrapper->dds_message) {
-                arena[off + 0] = (uint8_t)(len & 0xffu);
-                arena[off + 1] = (uint8_t)((len >> 8) & 0xffu);
-                arena[off + 2] = (uint8_t)((len >> 16) & 0xffu);
-                arena[off + 3] = (uint8_t)((len >> 24) & 0xffu);
-                off += 4;
-            }
-            memcpy(arena + off, datas[i], len);
-            off += len;
-            payloads[i].data = arena + body_start;
-            payloads[i].size = off - body_start;
-        }
-    }
-    rc = rtps_writer_write_batch_serialized(wrapper->writer, payloads, count);
+    rc = rtps_writer_write_batch_framed(wrapper->writer, payloads, count,
+                                        wrapper->dds_message ? 1 : 0);
     rc = (rc == RTPS_OK) ? NB_OK : NB_ERR_IO;
 
-    free(arena);
     free(payloads);
     return rc;
 }

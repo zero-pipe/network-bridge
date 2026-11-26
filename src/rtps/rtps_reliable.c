@@ -196,6 +196,69 @@ int nb_rtps_reliable_add_instance(nb_rtps_reliable_writer_t *writer,
     return NB_OK;
 }
 
+int nb_rtps_reliable_add_framed(nb_rtps_reliable_writer_t *writer,
+                                const void *app,
+                                size_t app_len,
+                                int dds_message,
+                                uint64_t *out_sn)
+{
+    nb_rtps_reliable_sample_t *sample;
+    size_t index;
+    size_t hdr = dds_message ? 8u : 4u;
+    size_t total;
+
+    if (!writer || (app_len > 0 && !app)) {
+        return NB_ERR_INVALID;
+    }
+    total = hdr + app_len;
+
+    zb_mutex_lock(writer->lock);
+    while (writer->count > 0 &&
+           (writer->count >= writer->capacity ||
+            writer->bytes + total > NB_RTPS_RELIABLE_MAX_BYTES)) {
+        drop_oldest(writer);
+    }
+    index = (writer->head + writer->count) % writer->capacity;
+    sample = &writer->samples[index];
+    if (sample->cap < total) {
+        uint8_t *np = (uint8_t *)realloc(sample->payload, total);
+
+        if (!np) {
+            zb_mutex_unlock(writer->lock);
+            return NB_ERR_NOMEM;
+        }
+        sample->payload = np;
+        sample->cap = total;
+    }
+    writer->count++;
+    writer->bytes += total;
+    sample->payload[0] = 0x00; /* XCDR1 little-endian encapsulation */
+    sample->payload[1] = 0x01;
+    sample->payload[2] = 0x00;
+    sample->payload[3] = 0x00;
+    if (dds_message) {
+        sample->payload[4] = (uint8_t)(app_len & 0xffu);
+        sample->payload[5] = (uint8_t)((app_len >> 8) & 0xffu);
+        sample->payload[6] = (uint8_t)((app_len >> 16) & 0xffu);
+        sample->payload[7] = (uint8_t)((app_len >> 24) & 0xffu);
+    }
+    if (app_len > 0) {
+        memcpy(sample->payload + hdr, app, app_len);
+    }
+    sample->sn = ++writer->next_sn;
+    sample->len = total;
+    sample->dispose = 0;
+    sample->status = 0;
+    sample->has_handle = 0;
+    sample->written_ms = zn_wall_ms();
+    sample->source_ns = sample->written_ms * 1000000ull;
+    if (out_sn) {
+        *out_sn = sample->sn;
+    }
+    zb_mutex_unlock(writer->lock);
+    return NB_OK;
+}
+
 int nb_rtps_reliable_get(const nb_rtps_reliable_writer_t *writer,
                          uint64_t sn,
                          const uint8_t **payload,
