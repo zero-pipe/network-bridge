@@ -2307,6 +2307,38 @@ static int tx_append(nb_rtps_tx_dgram_t **list,
     return NB_OK;
 }
 
+/* Append a datagram taking ownership of buf (no copy). On failure the caller
+ * still owns buf. */
+static int tx_append_owned(nb_rtps_tx_dgram_t **list,
+                           size_t *count,
+                           size_t *cap,
+                           const char *host,
+                           uint16_t port,
+                           uint8_t *buf,
+                           size_t len)
+{
+    nb_rtps_tx_dgram_t *slot;
+
+    if (*count == *cap) {
+        size_t ncap = *cap ? *cap * 2u : 16u;
+        nb_rtps_tx_dgram_t *nl =
+            (nb_rtps_tx_dgram_t *)realloc(*list, ncap * sizeof(**list));
+
+        if (!nl) {
+            return NB_ERR_NOMEM;
+        }
+        *list = nl;
+        *cap = ncap;
+    }
+    slot = &(*list)[*count];
+    copy_str(slot->host, sizeof(slot->host), host);
+    slot->port = port;
+    slot->buf = buf;
+    slot->len = len;
+    (*count)++;
+    return NB_OK;
+}
+
 /* Encoded size of one DATA submessage for a body of payload_len bytes:
  * 4-byte submessage header plus the 20 bytes before the payload, padded to a
  * 4-byte boundary. Offsets between submessages stay 4-aligned. */
@@ -2377,6 +2409,7 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
         size_t end = start + 1u;
         size_t len;
         size_t t;
+        uint8_t *buf;
 
         while (end < count && end - start < NB_RTPS_BATCH_ITEMS) {
             size_t add = data_submessage_size(samples[end].len);
@@ -2387,8 +2420,15 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
             acc += add;
             end++;
         }
-        len = build_batch_message(message,
-                                  message_cap,
+        /* Build straight into the datagram buffer that will be sent, so the
+         * single-target case involves no copy of the finished message. */
+        buf = (uint8_t *)malloc(acc);
+        if (!buf) {
+            rc = NB_ERR_NOMEM;
+            break;
+        }
+        len = build_batch_message(buf,
+                                  acc,
                                   &header,
                                   &timestamp,
                                   writer_guid,
@@ -2397,20 +2437,36 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
                                   end - start,
                                   first_sn + start);
         if (len == 0) {
+            free(buf);
             rc = NB_ERR_BAD_MESSAGE;
             break;
         }
         for (t = 0; t < targets->count; t++) {
-            rc = tx_append(list,
-                           dcount,
-                           cap,
-                           targets->host[t],
-                           targets->port[t],
-                           message,
-                           len);
-
-            if (rc != NB_OK) {
-                break;
+            if (t == 0) {
+                /* First target takes ownership of buf (no copy). */
+                rc = tx_append_owned(list,
+                                     dcount,
+                                     cap,
+                                     targets->host[t],
+                                     targets->port[t],
+                                     buf,
+                                     len);
+                if (rc != NB_OK) {
+                    free(buf);
+                    break;
+                }
+            } else {
+                /* Multi-homed reader: additional targets get their own copy. */
+                rc = tx_append(list,
+                               dcount,
+                               cap,
+                               targets->host[t],
+                               targets->port[t],
+                               buf,
+                               len);
+                if (rc != NB_OK) {
+                    break;
+                }
             }
         }
         if (rc != NB_OK) {
