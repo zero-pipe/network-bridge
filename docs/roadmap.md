@@ -26,8 +26,9 @@
    构建与 35 项 ctest。
 2. **znet 上游缺口**（影响性能，不影响正确性）：
    - 缺 `zn_poller_current()` → RPC 侧用 `zn_poller_is_current_thread()` 反查兜底；
-   - 缺批量收发 → UDP 传输回退到单包循环，失去 `sendmmsg` / `recvmmsg` 优化。
-   建议在 znet 补齐后删掉本仓库的兜底代码。
+   - 批量收发：zbase/znet 已补 `zb_sock_sendto_batch` / `zb_sock_recvfrom_batch`
+     （Linux `sendmmsg` / `recvmmsg`），RTPS 批量发布与接收已接入；RPC 传输
+     仍未改用批量接口，可后续跟进。
 3. **DDS 侧类型**：topic 传真实 IDL 类型名时按裸 CDR body 收发，编解码归应用
    （IDL 生成代码）；默认 `dds::Message` 仍是不透明字节、长度精确。默认的按
    type name 匹配下已可与 Cyclone DDS / Fast DDS 互通。

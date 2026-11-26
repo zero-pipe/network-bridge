@@ -326,6 +326,10 @@ struct nb_rtps_participant {
         /* Reusable arena for batched receive: NB_RTPS_RX_BATCH slots of
          * NB_RTPS_RX_MAX bytes, owned by the participant thread. */
         uint8_t *rx_batch;
+        /* Largest datagram the bulk-publish path may build. The single-sample
+         * path stays at NB_RTPS_PACKET_MAX; on loopback (huge MTU) the bulk path
+         * aggregates far more samples per datagram. */
+        size_t max_datagram_size;
     } net;
 
     /* ---- 由 net.lock 保护的动态状态：表、计数、回调快照源 ---- */

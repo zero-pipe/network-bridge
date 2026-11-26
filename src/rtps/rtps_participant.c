@@ -1372,6 +1372,17 @@ nb_rtps_participant_t *nb_rtps_participant_create(const nb_rtps_participant_conf
         return NULL;
     }
 
+    /* Largest datagram the bulk-publish path may build. Loopback has a huge
+     * MTU, so one datagram can aggregate many samples; other interfaces stay at
+     * the conservative single-packet size until per-interface MTU detection is
+     * added. The single-sample path never exceeds NB_RTPS_PACKET_MAX. */
+    participant->net.max_datagram_size = NB_RTPS_PACKET_MAX;
+    if (strncmp(participant->advertise_host, "127.", 4) == 0 ||
+        strcmp(participant->advertise_host, "::1") == 0 ||
+        strcmp(participant->advertise_host, "localhost") == 0) {
+        participant->net.max_datagram_size = 60000u;
+    }
+
     participant->net.lock = zb_mutex_create(ZB_MUTEX_NORMAL);
     participant->tables.remotes =
         (nb_rtps_remote_participant_t *)calloc(participant->max_remotes,
@@ -2319,11 +2330,24 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
                                   size_t *dcount,
                                   size_t *cap)
 {
-    uint8_t message[NB_RTPS_PACKET_MAX];
+    size_t message_cap = participant->net.max_datagram_size;
+    uint8_t *message;
     nb_rtps_header_t header;
     nb_rtps_time_t timestamp;
     size_t header_len;
     size_t start = 0;
+    int rc = NB_OK;
+
+    if (message_cap <= NB_RTPS_PACKET_MAX) {
+        message_cap = NB_RTPS_PACKET_MAX;
+    }
+    if (message_cap > NB_RTPS_RX_MAX) {
+        message_cap = NB_RTPS_RX_MAX; /* keep it receivable in one datagram */
+    }
+    message = (uint8_t *)malloc(message_cap);
+    if (!message) {
+        return NB_ERR_NOMEM;
+    }
 
     init_header(participant, &header);
     timestamp = rtps_time_from_ns(zn_wall_ms() * 1000000ull);
@@ -2332,7 +2356,7 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
      * once so grouping is arithmetic instead of rebuilding the message. */
     {
         size_t pl = build_batch_message(message,
-                                        sizeof(message),
+                                        message_cap,
                                         &header,
                                         &timestamp,
                                         writer_guid,
@@ -2342,6 +2366,7 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
                                         first_sn);
 
         if (pl == 0) {
+            free(message);
             return NB_ERR_BAD_MESSAGE;
         }
         header_len = pl - data_submessage_size(samples[0].len);
@@ -2356,14 +2381,14 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
         while (end < count && end - start < NB_RTPS_BATCH_ITEMS) {
             size_t add = data_submessage_size(samples[end].len);
 
-            if (acc + add > NB_RTPS_PACKET_MAX) {
+            if (acc + add > message_cap) {
                 break;
             }
             acc += add;
             end++;
         }
         len = build_batch_message(message,
-                                  sizeof(message),
+                                  message_cap,
                                   &header,
                                   &timestamp,
                                   writer_guid,
@@ -2372,24 +2397,29 @@ static int build_reader_datagrams(nb_rtps_participant_t *participant,
                                   end - start,
                                   first_sn + start);
         if (len == 0) {
-            return NB_ERR_BAD_MESSAGE;
+            rc = NB_ERR_BAD_MESSAGE;
+            break;
         }
         for (t = 0; t < targets->count; t++) {
-            int rc = tx_append(list,
-                               dcount,
-                               cap,
-                               targets->host[t],
-                               targets->port[t],
-                               message,
-                               len);
+            rc = tx_append(list,
+                           dcount,
+                           cap,
+                           targets->host[t],
+                           targets->port[t],
+                           message,
+                           len);
 
             if (rc != NB_OK) {
-                return rc;
+                break;
             }
+        }
+        if (rc != NB_OK) {
+            break;
         }
         start = end;
     }
-    return NB_OK;
+    free(message);
+    return rc;
 }
 
 int nb_rtps_participant_publish_batch(nb_rtps_participant_t *participant,
