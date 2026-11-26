@@ -168,12 +168,13 @@ int main(int argc, char **argv)
     uint32_t domain = argc > 3 ? (uint32_t)strtoul(argv[3], NULL, 10) : 97u;
     uint16_t port = argc > 4 ? (uint16_t)strtoul(argv[4], NULL, 10) : 48600u;
     size_t batch = argc > 5 ? (size_t)strtoul(argv[5], NULL, 10) : 16u;
-    int reliable = argc > 6 && strcmp(argv[6], "rel") == 0;
+    int reliable = argc > 6 && (strcmp(argv[6], "rel") == 0 || strcmp(argv[6], "relw") == 0);
+    int reader_eff = argc > 6 && strcmp(argv[6], "relw") == 0;
     nb_dds_participant_t *pub = NULL, *sub = NULL;
     nb_dds_topic_t *pub_topic = NULL, *sub_topic = NULL;
     nb_dds_writer_t *writer = NULL;
     nb_dds_reader_t *reader = NULL;
-    nb_dds_qos_t qos;
+    nb_dds_qos_t wqos, wqos_reader;
     stats_t stats;
     uint8_t *bufs[MAX_BATCH];
     const void *ptrs[MAX_BATCH];
@@ -215,18 +216,21 @@ int main(int argc, char **argv)
         NB_OK) {
         goto done;
     }
-    nb_dds_qos_init(&qos);
-    nb_dds_qos_set_reliability(&qos, reliable ? NB_DDS_RELIABILITY_RELIABLE
+    nb_dds_qos_init(&wqos);
+    nb_dds_qos_set_reliability(&wqos, reliable ? NB_DDS_RELIABILITY_RELIABLE
                                                : NB_DDS_RELIABILITY_BEST_EFFORT);
-    /* Desired topics must have no local reader here (the writer and reader live
-     * on different participants); KEEP_LAST depth large enough that a batch is
-     * not evicted within itself. */
-    nb_dds_qos_set_history(&qos, NB_DDS_HISTORY_KEEP_LAST,
-                           (uint32_t)(batch + 8u));
-    if (nb_dds_topic_create(pub, "dds_bench_1k", NULL, &qos, &pub_topic) != NB_OK ||
-        nb_dds_topic_create(sub, "dds_bench_1k", NULL, &qos, &sub_topic) != NB_OK ||
-        nb_dds_reader_create(sub_topic, &qos, on_sample, &stats, &reader) != NB_OK ||
-        nb_dds_writer_create(pub_topic, &qos, &writer) != NB_OK) {
+    nb_dds_qos_set_history(&wqos, NB_DDS_HISTORY_KEEP_LAST,
+                           reliable ? 256u : (uint32_t)(batch + 8u));
+    /* relw: reliable writer but best-effort reader, to isolate the writer-side
+     * cost from ACKNACK feedback. */
+    wqos_reader = wqos;
+    if (reader_eff) {
+        nb_dds_qos_set_reliability(&wqos_reader, NB_DDS_RELIABILITY_BEST_EFFORT);
+    }
+    if (nb_dds_topic_create(pub, "dds_bench_1k", NULL, &wqos, &pub_topic) != NB_OK ||
+        nb_dds_topic_create(sub, "dds_bench_1k", NULL, &wqos_reader, &sub_topic) != NB_OK ||
+        nb_dds_reader_create(sub_topic, &wqos_reader, on_sample, &stats, &reader) != NB_OK ||
+        nb_dds_writer_create(pub_topic, &wqos, &writer) != NB_OK) {
         fprintf(stderr, "setup failed\n");
         goto done;
     }

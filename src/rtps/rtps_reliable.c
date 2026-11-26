@@ -9,6 +9,9 @@ typedef struct nb_rtps_reliable_sample {
     uint64_t sn;
     uint8_t *payload;
     size_t len;
+    /* Allocated capacity of payload. The buffer is kept across evictions and
+     * reuse so the ring does not malloc/free on every sample. */
+    size_t cap;
     int dispose;
     uint64_t written_ms;
     /* Source timestamp published with the sample, so a retransmission keeps
@@ -37,8 +40,8 @@ static void drop_oldest(nb_rtps_reliable_writer_t *writer)
     nb_rtps_reliable_sample_t *sample = &writer->samples[writer->head];
 
     writer->bytes -= sample->len;
-    free(sample->payload);
-    sample->payload = NULL;
+    /* Keep sample->payload allocated (cap unchanged) so the slot can be reused
+     * without a malloc when the ring wraps around. */
     sample->len = 0;
     writer->head = (writer->head + 1u) % writer->capacity;
     writer->count--;
@@ -144,18 +147,10 @@ int nb_rtps_reliable_add_instance(nb_rtps_reliable_writer_t *writer,
                                   uint64_t *out_sn)
 {
     nb_rtps_reliable_sample_t *sample;
-    uint8_t *copy = NULL;
     size_t index;
 
     if (!writer || (len > 0 && !payload)) {
         return NB_ERR_INVALID;
-    }
-    if (len > 0) {
-        copy = (uint8_t *)malloc(len);
-        if (!copy) {
-            return NB_ERR_NOMEM;
-        }
-        memcpy(copy, payload, len);
     }
 
     zb_mutex_lock(writer->lock);
@@ -168,8 +163,23 @@ int nb_rtps_reliable_add_instance(nb_rtps_reliable_writer_t *writer,
     writer->count++;
     writer->bytes += len;
     sample = &writer->samples[index];
+    if (len > 0) {
+        /* Reuse the slot's buffer across ring wraps; only grow when needed. */
+        if (sample->cap < len) {
+            uint8_t *np = (uint8_t *)realloc(sample->payload, len);
+
+            if (!np) {
+                writer->count--;
+                writer->bytes -= len;
+                zb_mutex_unlock(writer->lock);
+                return NB_ERR_NOMEM;
+            }
+            sample->payload = np;
+            sample->cap = len;
+        }
+        memcpy(sample->payload, payload, len);
+    }
     sample->sn = ++writer->next_sn;
-    sample->payload = copy;
     sample->len = len;
     sample->dispose = dispose ? 1 : 0;
     sample->status = status;
