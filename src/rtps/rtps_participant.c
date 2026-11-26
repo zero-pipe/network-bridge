@@ -2432,6 +2432,8 @@ int nb_rtps_participant_publish_batch(nb_rtps_participant_t *participant,
     size_t dcount = 0;
     size_t dcap = 0;
     uint64_t first_sn;
+    uint64_t evicted_first = 0;
+    uint64_t evicted_last = 0;
     size_t i;
     int readable = 0;
     int rc = NB_OK;
@@ -2449,15 +2451,18 @@ int nb_rtps_participant_publish_batch(nb_rtps_participant_t *participant,
         return NB_ERR_NOTFOUND;
     }
 
-    /* Only the best-effort, history-free publication takes the bulk path; the
-     * reliable history / heartbeat / GAP bookkeeping stays on the single-sample
-     * path. Oversized samples need fragmentation, which the bulk path does not
-     * do, so they also fall back. */
+    /* The bulk path handles both best-effort and reliable publications. A sample
+     * whose single DATA submessage plus the message header would not fit one
+     * datagram falls back (it needs fragmentation, which the bulk path does not
+     * do); on a large-MTU interface this lets a multi-KB sample ride the bulk
+     * path as one DATA instead of many small fragments. */
     {
-        int fallback = local->history != NULL ||
-                       local->info.reliability != NB_RTPS_RELIABILITY_BEST_EFFORT;
+        size_t inline_max = participant->net.max_datagram_size > 256u
+                                ? participant->net.max_datagram_size - 256u
+                                : 0u;
+        int fallback = 0;
         for (i = 0; i < count && !fallback; i++) {
-            if (samples[i].len == 0 || samples[i].len > NB_RTPS_DATA_PAYLOAD_MAX) {
+            if (samples[i].len == 0 || samples[i].len > inline_max) {
                 fallback = 1;
             }
         }
@@ -2488,12 +2493,54 @@ int nb_rtps_participant_publish_batch(nb_rtps_participant_t *participant,
         }
     }
 
-    first_sn = local->data_sn + 1u;
-    if (first_sn == 0) {
-        first_sn = 1;
+    {
+        int have_evicted = 0;
+        uint64_t evf = 0;
+        uint64_t evl = 0;
+
+        if (local->history) {
+            /* Reliable / retained: store every sample so ACKNACK retransmit and
+             * late-join backfill still work, and take its sequence number from
+             * the history. */
+            uint64_t old_first = 0;
+            size_t old_count = 0;
+
+            nb_rtps_reliable_state(local->history, &old_first, NULL, &old_count);
+            for (i = 0; i < count; i++) {
+                uint64_t sn_i = 0;
+
+                rc = nb_rtps_reliable_add(
+                    local->history, samples[i].data, samples[i].len, 0, &sn_i);
+                if (rc != NB_OK) {
+                    last = rc;
+                    zb_mutex_unlock(participant->net.lock);
+                    goto done;
+                }
+                if (i == 0) {
+                    first_sn = sn_i;
+                }
+            }
+            {
+                uint64_t new_first = 0;
+
+                nb_rtps_reliable_state(local->history, &new_first, NULL, NULL);
+                if (old_count > 0 && new_first > old_first) {
+                    have_evicted = 1;
+                    evf = old_first;
+                    evl = new_first - 1u;
+                }
+            }
+        } else {
+            first_sn = local->data_sn + 1u;
+            if (first_sn == 0) {
+                first_sn = 1;
+            }
+            local->data_sn = first_sn + (uint64_t)count - 1u;
+        }
+        local->last_write_ms = zn_wall_ms();
+        evicted_first = have_evicted ? evf : 0;
+        evicted_last = have_evicted ? evl : 0;
     }
-    local->data_sn = first_sn + (uint64_t)count - 1u;
-    local->last_write_ms = zn_wall_ms();
 
     for (i = 0; i < participant->tables.remote_ep_used_count; i++) {
         nb_rtps_remote_endpoint_t *remote =
@@ -2510,6 +2557,16 @@ int nb_rtps_participant_publish_batch(nb_rtps_participant_t *participant,
             continue;
         }
         readable++;
+        /* Samples evicted from the history will never be delivered; announce
+         * the gap before the fresh DATA so the reader does not wait for them. */
+        if (evicted_first) {
+            send_user_gap_all(participant,
+                              writer_guid,
+                              &remote->info.endpoint_guid,
+                              evicted_first,
+                              evicted_last,
+                              &targets);
+        }
         rc = build_reader_datagrams(participant,
                                     writer_guid,
                                     &remote->info.endpoint_guid,

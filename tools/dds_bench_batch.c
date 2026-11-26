@@ -168,6 +168,7 @@ int main(int argc, char **argv)
     uint32_t domain = argc > 3 ? (uint32_t)strtoul(argv[3], NULL, 10) : 97u;
     uint16_t port = argc > 4 ? (uint16_t)strtoul(argv[4], NULL, 10) : 48600u;
     size_t batch = argc > 5 ? (size_t)strtoul(argv[5], NULL, 10) : 16u;
+    int reliable = argc > 6 && strcmp(argv[6], "rel") == 0;
     nb_dds_participant_t *pub = NULL, *sub = NULL;
     nb_dds_topic_t *pub_topic = NULL, *sub_topic = NULL;
     nb_dds_writer_t *writer = NULL;
@@ -215,8 +216,13 @@ int main(int argc, char **argv)
         goto done;
     }
     nb_dds_qos_init(&qos);
-    nb_dds_qos_set_reliability(&qos, NB_DDS_RELIABILITY_BEST_EFFORT);
-    nb_dds_qos_set_history(&qos, NB_DDS_HISTORY_KEEP_LAST, 1);
+    nb_dds_qos_set_reliability(&qos, reliable ? NB_DDS_RELIABILITY_RELIABLE
+                                               : NB_DDS_RELIABILITY_BEST_EFFORT);
+    /* Desired topics must have no local reader here (the writer and reader live
+     * on different participants); KEEP_LAST depth large enough that a batch is
+     * not evicted within itself. */
+    nb_dds_qos_set_history(&qos, NB_DDS_HISTORY_KEEP_LAST,
+                           (uint32_t)(batch + 8u));
     if (nb_dds_topic_create(pub, "dds_bench_1k", NULL, &qos, &pub_topic) != NB_OK ||
         nb_dds_topic_create(sub, "dds_bench_1k", NULL, &qos, &sub_topic) != NB_OK ||
         nb_dds_reader_create(sub_topic, &qos, on_sample, &stats, &reader) != NB_OK ||
@@ -277,6 +283,7 @@ int main(int argc, char **argv)
         printf("DDS_BACKEND=RTPS_BATCH\n");
         printf("PAYLOAD_BYTES=%zu\n", payload_size);
         printf("BATCH_SIZE=%zu\n", batch);
+        printf("RELIABILITY=%s\n", reliable ? "reliable" : "best_effort");
         printf("WRITES=%" PRIu64 "\n", writes);
         printf("RECEIVED=%" PRIu64 "\n", stats.received);
         printf("DROPPED=%" PRIu64 "\n", writes > stats.received ? writes - stats.received : 0);
