@@ -232,6 +232,28 @@ static void nb_session_cleanup(nb_udp_transport_t *udp, nb_session_t *s)
 
 static void nb_session_send_bye(nb_udp_transport_t *udp, nb_session_t *s);
 
+/*
+ * 对端是否回环地址。回环上没有真实丢包/带宽争用，且 MTU 极大，分片可整窗
+ * 一次性刷出，因此不套用广域网的保守拥塞窗口。
+ */
+static int nb_addr_is_loopback(const char *ip_s)
+{
+    if (!ip_s) {
+        return 0;
+    }
+    if (strcmp(ip_s, "::1") == 0 || strcmp(ip_s, "localhost") == 0) {
+        return 1;
+    }
+    if (strncmp(ip_s, "127.", 4) == 0) {
+        return 1;
+    }
+    /* IPv4-mapped IPv6 loopback: ::ffff:127.x.x.x */
+    if (strncmp(ip_s, "::ffff:127.", 11) == 0) {
+        return 1;
+    }
+    return 0;
+}
+
 static void nb_session_init(nb_udp_transport_t *udp,
                          nb_session_t *s,
                          int io,
@@ -251,6 +273,14 @@ static void nb_session_init(nb_udp_transport_t *udp,
     nb_reasm_set_poolset(&s->reasm, udp->reasm_pools[io]);
     s->cc_burst_max = 1024;
     s->cc_burst = 16;
+    /*
+     * 回环对端：一次即可把整条消息的全部分片刷出（不受保守窗限制），大报文
+     * 的串行分片 RTT 从“每片一窗”塌缩成“一轮往返”。广域网仍保持 16 的保守窗，
+     * 由慢启动/Loss 回退调节。
+     */
+    if (nb_addr_is_loopback(ip_s)) {
+        s->cc_burst = s->cc_burst_max;
+    }
     s->peer_port = port;
     nb_copy_str(s->peer_ip_s, sizeof(s->peer_ip_s), ip_s, "0.0.0.0");
     {
@@ -352,12 +382,10 @@ static void nb_env_view_copy(const nb_env_view_t *v, size_t off, size_t len, uin
 }
 
 /*
- * TODO(znet): znet 的 socket.h 没有 UDP 批量收发接口（改名前的实现走
- * sendmmsg / recvmmsg，并配套 dgram / recv 两个结构体）。补齐之前，这里用单包
- * zn_socket_sendto / zn_socket_recvfrom 循环兜底，对外语义保持一致：
+ * 批量收发：直接走 znet 的 UDP 批量接口（Linux 上 sendmmsg / recvmmsg，Windows
+ * 上 WSASendTo / recvfrom 循环兜底），对外语义保持一致：
  *   - 发送返回实际发出的条数，调用方按短写补发；
  *   - 接收返回本轮收到的条数，0 表示暂时没有数据。
- * znet 补上批量接口后删除本段，调用点改回 znet 的批量接口。
  */
 #define NB_UDP_DGRAM_IP_MAX 46
 
@@ -378,33 +406,43 @@ typedef struct nb_udp_recv {
 
 static int nb_udp_send_batch(zn_socket *sock, const nb_udp_dgram_t *msgs, unsigned count)
 {
-    unsigned i = 0;
-
-    while (i < count) {
-        zn_ssize_t n = zn_socket_sendto(sock, msgs[i].data, msgs[i].len, msgs[i].ip, msgs[i].port);
-        if (n < 0) {
-            /* 出错或发送缓冲瞬时不足：返回已发条数，由调用方重试 */
-            break;
-        }
-        i++;
+    if (!sock || !msgs || count == 0) {
+        return 0;
     }
-    return (int)i;
+    /* nb_udp_dgram_t and zn_socket_datagram are field-for-field identical, so
+     * the znet batch send (sendmmsg on Linux) can take them directly. */
+    return zn_socket_sendto_batch(sock, (const zn_socket_datagram *)msgs, count);
 }
 
 static int nb_udp_recv_batch(zn_socket *sock, nb_udp_recv_t *msgs, unsigned cap)
 {
-    unsigned i = 0;
+    zn_socket_rx items[NB_UDP_RX_BATCH_MAX];
+    unsigned i;
+    int n;
 
-    while (i < cap) {
-        zn_ssize_t n = zn_socket_recvfrom(sock, msgs[i].data, msgs[i].cap, msgs[i].ip,
-                                          sizeof(msgs[i].ip), &msgs[i].port);
-        if (n < 0) {
-            break;
-        }
-        msgs[i].len = (size_t)n;
-        i++;
+    if (!sock || !msgs || cap == 0) {
+        return 0;
     }
-    return (int)i;
+    if (cap > NB_UDP_RX_BATCH_MAX) {
+        cap = NB_UDP_RX_BATCH_MAX;
+    }
+    for (i = 0; i < cap; i++) {
+        items[i].buf = msgs[i].data;
+        items[i].cap = msgs[i].cap;
+        items[i].len = 0;
+        items[i].ip[0] = '\0';
+        items[i].port = 0;
+    }
+    n = zn_socket_recvfrom_batch(sock, items, cap);
+    if (n <= 0) {
+        return 0; /* would-block or error: caller treats 0 as "nothing now" */
+    }
+    for (i = 0; i < (unsigned)n; i++) {
+        msgs[i].len = items[i].len;
+        nb_copy_str(msgs[i].ip, sizeof(msgs[i].ip), items[i].ip, "");
+        msgs[i].port = items[i].port;
+    }
+    return n;
 }
 
 /*

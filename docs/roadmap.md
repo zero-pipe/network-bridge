@@ -54,10 +54,10 @@ Cyclone 侧对照与互通在实验环境（非仓库）运行。
 1. **双平台判定**：Linux 为权威（38 项 ctest + perf/stability 门禁）；Windows 保证
    构建与 35 项 ctest。
 2. **znet 上游缺口**（影响性能，不影响正确性）：
-   - 缺 `zn_poller_current()` → RPC 侧用 `zn_poller_is_current_thread()` 反查兜底；
-   - 批量收发：zbase/znet 已补 `zb_sock_sendto_batch` / `zb_sock_recvfrom_batch`
-     与 `zb_sock_sendmsg_batch`（Linux `sendmmsg` / `recvmmsg`），RTPS 批量发布与
-     接收已接入；RPC 传输仍未改用批量接口，可后续跟进。
+   - 缺 `zn_poller_current()` → RPC 侧用 `zn_poller_is_current_thread()` 反查兜底。
+   - 批量收发已补齐并双端接入：`zb_sock_sendto_batch` / `zb_sock_recvfrom_batch`
+     / `zb_sock_sendmsg_batch`（Linux `sendmmsg` / `recvmmsg`），RTPS 批量发布/接收
+     与 RPC UDP 分片收发均走批量接口。
 3. **DDS 侧类型**：topic 传真实 IDL 类型名时按裸 CDR body 收发，编解码归应用
    （IDL 生成代码）；默认 `dds::Message` 仍是不透明字节、长度精确。默认的按
    type name 匹配下已可与 Cyclone DDS / Fast DDS 互通。
@@ -74,6 +74,22 @@ Cyclone 侧对照与互通在实验环境（非仓库）运行。
      - TypeLookup 服务（按 TypeIdentifier 拉取 TypeObject），用于哈希不一致但
        结构可赋值的严格场景。
    - 说明：`rtps_param` 仍按字节透传 0x75，无需实现 XCDR2 结构编解码。
+
+## RPC UDP 大报文吞吐
+
+同机 loopback、`tools/benchmark_matrix.py` 单流顺序测（QPS = 1 / 单程往返，故为串行
+RTT bound）。诊断结论：**64KB 的慢来自"分片逐窗串行"，与分片大小无关**——
+`frag_bytes` 从 1440 提到 8192 对 64KB QPS 无改善（92 vs 93）；真正的杠杆是
+`cc_burst`（每轮允许在途的分片数）。回环对端无真实丢包/带宽争用，故在 session 建立
+时按对端地址判定回环并把 `cc_burst` 直接抬到上限，广域网仍保持 16 的保守窗：
+
+| 载荷 | 改前 QPS | 回环放宽 cc_burst 后 |
+| --- | --- | --- |
+| 1 KB | 4176 | 4165（单片，无影响） |
+| 8 KB | — | 3786 |
+| 64 KB | 93 | **293（≈3.2×）** |
+
+（并发多客户端时各 session 独立放宽，再叠加线性并行。）
 
 ## 约定
 
