@@ -108,7 +108,8 @@ static void test_rpc_defaults(void)
     CHECK(n->rpc.discovery.multicast_group == NULL);
     CHECK(n->rpc.discovery.formation_id == 0);
     CHECK(n->rpc.discovery.port != 0);
-    CHECK(n->rpc.frag_bytes == 1440);
+    /* 默认分片 = 1500 - 20(IP) - 8(UDP) - 12(RTP) - 24(分片头) = 1436。 */
+    CHECK(n->rpc.frag_bytes == 1436);
     CHECK(n->binding_count == 0);
     CHECK(n->bindings == NULL);
     CHECK(n->rpc.peer_count == 0);

@@ -48,13 +48,22 @@
     (NB_UDP_IPV4_HDR_BYTES + NB_UDP_HDR_BYTES + RTP_HDR_LEN + FRAG_HDR_LEN)
 #define NB_UDP_FRAG_DEFAULT_BYTES (NB_UDP_IPV4_MTU_BYTES - NB_UDP_WIRE_OVERHEAD_BYTES)
 #define NB_UDP_FRAG_MIN_BYTES 256
+/* 用户可配置的分片上限（广域网保守：单包不超 MTU）。 */
 #define NB_UDP_FRAG_MAX_BYTES 8192
+/*
+ * 回环 / 大 MTU 链路上会话自动采用的大分片。大报文若切成几十个 1.4KB 小数据报，
+ * 接收端会被"滴灌"式逐个唤醒拖慢（实测 64KB 仅 ~180 QPS）；用大分片把一条消息
+ * 收进 1~2 个数据报即可逼近/反超 TCP。仅回环对端触发，广域网仍用保守分片。
+ */
+#define NB_UDP_FRAG_LOOPBACK_BYTES 32768
+/* 线缆分片尺寸上限（用于确定收发缓冲和重传环大小）。 */
+#define NB_UDP_FRAG_WIRE_MAX NB_UDP_FRAG_LOOPBACK_BYTES
 #define NB_UDP_PEERS_PER_IO 64
 #define NB_UDP_TX_BATCH_MAX 32
 #define NB_UDP_RX_BATCH_MAX 16
 /* 拥塞窗口下限：保证 16 KiB（14 个分片）始终能一次批量发出。 */
 #define NB_UDP_CC_BURST_MIN 16
-#define NB_UDP_RTX_SLOT_MAX_BYTES (RTP_HDR_LEN + FRAG_HDR_LEN + NB_UDP_FRAG_MAX_BYTES)
+#define NB_UDP_RTX_SLOT_MAX_BYTES (RTP_HDR_LEN + FRAG_HDR_LEN + NB_UDP_FRAG_WIRE_MAX)
 
 /* ---- UDP / 可靠性 ---- */
 #define NB_UDP_REASM_TIMEOUT_MS 3000

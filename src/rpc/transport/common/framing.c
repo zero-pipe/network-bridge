@@ -31,7 +31,9 @@ size_t nb_frame_build_frag_header(uint8_t *buf, size_t cap, const nb_frag_t *d)
     nb_put_u32(p + 12, d->frag_len);
     p[16] = d->flags;
     p[17] = 0;
-    nb_put_u16(p + 18, 0);
+    nb_put_u16(p + 18, d->frag_count);
+    nb_put_u16(p + 20, d->frag_index);
+    nb_put_u16(p + 22, 0);
     return (size_t)RTP_HDR_LEN + FRAG_HDR_LEN;
 }
 
@@ -86,9 +88,14 @@ int nb_frame_parse_data(const uint8_t *buf, size_t len, nb_frag_t *v)
     v->frag_off = nb_get_u32(p + 8);
     v->frag_len = nb_get_u32(p + 12);
     v->flags = p[16];
+    v->frag_count = nb_get_u16(p + 18);
+    v->frag_index = nb_get_u16(p + 20);
+    if (v->frag_count == 0) {
+        v->frag_count = 1; /* 兼容未携带分片计数的单包数据 */
+    }
     body = len - RTP_HDR_LEN - FRAG_HDR_LEN;
     if (body != v->frag_len || v->frag_off > v->total_len ||
-        v->frag_len > v->total_len - v->frag_off) {
+        v->frag_len > v->total_len - v->frag_off || v->frag_index >= v->frag_count) {
         return -1;
     }
     v->chunk = p + FRAG_HDR_LEN;

@@ -70,6 +70,7 @@ typedef struct nb_session {
     uint32_t cc_burst_max;
     uint64_t cc_last_loss_ms;
     uint64_t cc_last_grow_ms;
+    uint16_t frag; /* 本会话出站分片大小：回环用大分片，远端用保守值 */
 
     nb_reasm_t reasm;
 
@@ -281,6 +282,30 @@ static void nb_session_init(nb_udp_transport_t *udp,
     if (nb_addr_is_loopback(ip_s)) {
         s->cc_burst = s->cc_burst_max;
     }
+    /*
+     * 分片大小按对端能力选择：回环/大 MTU 上没有单包上限顾虑，用最大分片
+     * （数据报更少，避免接收端被"滴灌"式唤醒拖慢大报文）；广域网仍用保守分片，
+     * 单包不超过 1500B MTU 预算。收发两端分片大小可以不同——分片头带
+     * frag_index/frag_count，接收端不依赖本地 frag。
+     */
+    {
+        int loop = nb_addr_is_loopback(ip_s);
+        uint32_t want = loop ? (uint32_t)NB_UDP_FRAG_LOOPBACK_BYTES
+                             : (uint32_t)udp->base.frag_bytes;
+        if (want < NB_UDP_FRAG_MIN_BYTES) {
+            want = NB_UDP_FRAG_MIN_BYTES;
+        }
+        if (want > NB_UDP_FRAG_LOOPBACK_BYTES) {
+            want = NB_UDP_FRAG_LOOPBACK_BYTES;
+        }
+        if (udp->base.max_msg_bytes != 0 && want > udp->base.max_msg_bytes) {
+            want = udp->base.max_msg_bytes;
+        }
+        if (want == 0) {
+            want = NB_UDP_FRAG_MIN_BYTES;
+        }
+        s->frag = (uint16_t)want;
+    }
     s->peer_port = port;
     nb_copy_str(s->peer_ip_s, sizeof(s->peer_ip_s), ip_s, "0.0.0.0");
     {
@@ -473,6 +498,8 @@ static void nb_emit_frag(nb_udp_transport_t *udp,
                       uint32_t total_len,
                       uint32_t off,
                       uint32_t chunk,
+                      uint16_t frag_index,
+                      uint16_t frag_count,
                       const nb_env_view_t *view,
                       int last,
                       uint64_t now,
@@ -483,7 +510,7 @@ static void nb_emit_frag(nb_udp_transport_t *udp,
     uint8_t *dst;
     size_t hdr;
     size_t n;
-    uint32_t stride = RTP_HDR_LEN + FRAG_HDR_LEN + udp->base.frag_bytes;
+    uint32_t stride = RTP_HDR_LEN + FRAG_HDR_LEN + (uint32_t)s->frag;
 
     if (!nb_tx_ring_ensure(&s->tx_ring, stride)) {
         return;
@@ -500,6 +527,8 @@ static void nb_emit_frag(nb_udp_transport_t *udp,
     d.total_len = total_len;
     d.frag_off = off;
     d.frag_len = chunk;
+    d.frag_index = frag_index;
+    d.frag_count = frag_count;
     d.flags = (uint8_t)((off == 0 ? FLAG_FIRST : 0) | (last ? FLAG_LAST : 0));
     d.chunk = NULL;
 
@@ -564,6 +593,11 @@ static void nb_send_fec(nb_udp_transport_t *udp,
     size_t p, hdr;
     nb_frag_t d;
 
+    /* FEC 重建按固定的 frag_bytes 分组；会话分片粒度不同（如回环大分片）时跳过，
+     * 该路径本身无丢包，不依赖 FEC。 */
+    if (s->frag != udp->base.frag_bytes) {
+        return;
+    }
     if (frag == 0 || parity_len == 0) {
         return;
     }
@@ -651,6 +685,8 @@ static void nb_fec_try_reconstruct(nb_udp_transport_t *udp,
         v2.total_len = total;
         v2.frag_off = off;
         v2.frag_len = len;
+        v2.frag_index = (uint16_t)m;
+        v2.frag_count = (uint16_t)frag_count;
         v2.chunk = acc;
         s->fec_rx_valid = 0; /* 已消费 */
         if (s->metrics) {
@@ -735,8 +771,11 @@ static int nb_session_send(nb_udp_transport_t *udp, nb_session_t *s, const nb_me
     view.payload = data;
     view.payload_len = len;
 
-    nfrag = env_len ? (uint32_t)((env_len + udp->base.frag_bytes - 1) / udp->base.frag_bytes) : 1;
-    if (nfrag > NB_TRANSPORT_MAX_FRAGMENTS) {
+    nfrag = env_len ? (uint32_t)((env_len + (uint32_t)s->frag - 1) / (uint32_t)s->frag) : 1;
+    if (nfrag == 0) {
+        nfrag = 1;
+    }
+    if (nfrag > NB_TRANSPORT_MAX_FRAGMENTS || nfrag > 0xffffu) {
         return NB_ERR_TOOBIG;
     }
     /*
@@ -755,8 +794,8 @@ static int nb_session_send(nb_udp_transport_t *udp, nb_session_t *s, const nb_me
         size_t chunk = env_len - off;
         int last;
 
-        if (chunk > udp->base.frag_bytes) {
-            chunk = udp->base.frag_bytes;
+        if (chunk > s->frag) {
+            chunk = s->frag;
         }
         last = (off + chunk) >= env_len;
 
@@ -771,6 +810,8 @@ static int nb_session_send(nb_udp_transport_t *udp, nb_session_t *s, const nb_me
                       (uint32_t)env_len,
                       (uint32_t)off,
                       (uint32_t)chunk,
+                      (uint16_t)i,
+                      (uint16_t)nfrag,
                       &view,
                       last,
                       now,
@@ -839,16 +880,24 @@ static void nb_session_txq_drain_budget(nb_udp_transport_t *udp,
         while (q->sent < q->total && budget > 0) {
             uint32_t off = q->sent;
             uint32_t chunk = q->total - q->sent;
+            uint32_t qfrag = s->frag ? s->frag : 1u;
+            uint32_t qcount;
             int last;
-            if (chunk > udp->base.frag_bytes) {
-                chunk = udp->base.frag_bytes;
+            if (chunk > qfrag) {
+                chunk = qfrag;
             }
             last = (off + chunk) >= q->total;
+            qcount = (q->total + qfrag - 1) / qfrag;
+            if (qcount == 0) {
+                qcount = 1;
+            }
             if (nm == NB_UDP_TX_BATCH_MAX) {
                 nb_udp_send_msgs(s, msgs, nm);
                 nm = 0;
             }
-            nb_emit_frag(udp, s, q->msgid, q->total, off, chunk, &view, last, now, msgs, &nm);
+            nb_emit_frag(udp, s, q->msgid, q->total, off, chunk,
+                         (uint16_t)(off / qfrag), (uint16_t)qcount,
+                         &view, last, now, msgs, &nm);
             q->sent += chunk;
             budget--;
             if (s->txq_pending_bytes >= chunk) {
@@ -962,12 +1011,9 @@ static int nb_session_on_data(nb_udp_transport_t *udp,
     if (v->total_len > udp->base.max_msg_bytes + NB_MESSAGE_MAX_ENVELOPE_EXTRA) {
         return NB_ERR_TOOBIG;
     }
-    if ((v->frag_off % udp->base.frag_bytes) != 0) {
-        return NB_ERR_INVALID;
-    }
-    frag_count =
-        v->total_len ? (v->total_len + udp->base.frag_bytes - 1) / udp->base.frag_bytes : 1;
-    fidx = v->frag_off / udp->base.frag_bytes;
+    /* 分片布局全部取自对端分片头，不再假设与本地 frag_bytes 对齐：两端可用不同分片大小。 */
+    frag_count = v->frag_count ? v->frag_count : 1u;
+    fidx = v->frag_index;
     if (fidx >= frag_count || (uint32_t)v->frag_off + v->frag_len > v->total_len) {
         return NB_ERR_INVALID;
     }

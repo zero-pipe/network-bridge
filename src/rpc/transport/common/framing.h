@@ -12,7 +12,13 @@ extern "C" {
 
 /* UDP/RTP */
 #define RTP_HDR_LEN 12
-#define FRAG_HDR_LEN 20
+/*
+ * 分片头固定 24 字节：msg_id/total_len/frag_off/frag_len 之后是 flags(1) +
+ * 保留(1) + frag_count(u16) + frag_index(u16) + 保留(u16)。收发两端分片大小
+ * 可以不同——接收端按 frag_index 位图重组、按 frag_off 落位、按 frag_count
+ * 判完整，不再依赖共享的 frag_bytes。
+ */
+#define FRAG_HDR_LEN 24
 #define PT_DATA 96
 #define PT_RTX 97
 #define PT_FEC 98
@@ -70,6 +76,8 @@ typedef struct nb_frag {
     uint32_t total_len;
     uint32_t frag_off;
     uint32_t frag_len;
+    uint16_t frag_index; /* 本片在消息内的序号（0..frag_count-1） */
+    uint16_t frag_count; /* 本消息总分片数 */
     uint8_t flags;
     const uint8_t *chunk;
 } nb_frag_t;
