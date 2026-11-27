@@ -4,6 +4,7 @@
 - [架构](architecture.md)：两条并列主干（RPC / DDS）+ 共享底座、库目标和契约。
 - [RTPS 公共接口](rtps-api.md)：内建 RTPS 引擎的对象模型、QoS、read/take 与线程约束。
 - [RTPS 报文与时序](rtps-timing.md)：报文结构、收发/分片/发现时序与节拍参数。
+- [RTPS 从入门到专家](rtps-expert-guide.md)：一份读完就能读 pcap、判失配、推性能的教学稿（小白→专家）。
 - [集群发现](mesh-discovery.md)：nb_mesh 的 26 字节报文、邻居表、三个执行体与 RPC 映射。
 - [配置](api/config.md)：JSON 字段、默认值与校验规则。
 - [错误码](api/error-codes.md)：稳定数值、名称、描述与重试语义。
